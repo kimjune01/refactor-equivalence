@@ -47,9 +47,20 @@ If LLMs cannot improve axis 3 without reviewer feedback, that suggests the revie
 
 ### Sampling
 
-Primary source repo: `google/gemini-cli`, a TypeScript monorepo with an active review culture and sufficient post-cutoff PR activity.
+### Depth and breadth
 
-Additional repositories may be added for generalizability if the pilot shows that the extraction procedure works reliably on `google/gemini-cli`.
+One primary repo goes deep. Four secondary repos go shallow. If results on the primary repo are clear but secondary repos show ambiguity, expand n on the ambiguous secondaries.
+
+- **Primary:** `google/gemini-cli` (TypeScript monorepo, 20+ contributors, active review culture). 15 PRs.
+- **Secondary (3 PRs each, expandable to 10):**
+  - `kubernetes/kubernetes` (Go) — SIG-owned, OWNERS/LGTM workflow, prow CI, ~300 merged PRs/month
+  - `rust-lang/rust` (Rust) — bors merge gate, full CI before merge, strict perf/regression review
+  - `llvm/llvm-project` (C++) — approval-required, huge test matrix, subsystem reviewers
+  - `django/django` (Python) — mature triage/merger workflow, regression tests required, decades of review culture
+
+These repos were selected for language diversity and strictness of review. If refactoring works on codebases of this caliber, it should generalize to less-defended repos. If test reconstruction proves infeasible on a secondary repo during pilot, it may be swapped for a more tractable repo in the same language (e.g., `astral-sh/ruff` for Rust, `cli/cli` for Go).
+
+Total initial sample: 27 PRs. Maximum if all secondaries expand: 55.
 
 ### Training-contamination restriction
 
@@ -82,11 +93,11 @@ These thresholds may be adjusted after the pilot for feasibility, but any adjust
 
 ### Sample size
 
-Target sample size: 30 PRs.
+Initial target: 27 PRs (15 primary + 4×3 secondary).
 
-A pilot of 5 PRs will be used to validate the extraction, prompting, test execution, measurement, and blind review workflow.
+A pilot of 5 PRs from the primary repo will validate the extraction, prompting, test execution, measurement, and blind review workflow. The pilot is for feasibility only.
 
-The pilot is for feasibility and calibration only. It will not be used as an efficacy stopping rule.
+If results on the primary repo are clear (effect direction consistent across ≥12 of 15 trials on the primary outcome) but a secondary repo shows mixed or opposing results, expand that secondary repo to 10 PRs before interpreting. Expansion is triggered by repo-level ambiguity, not by overall effect size.
 
 ## Snapshot Definitions
 
@@ -557,8 +568,8 @@ The following items will be decided and locked after the pilot and before the ma
 5. **`C_random` generator specifics.**
    Lock the transformation family, edit budget, random seed policy, validation procedure, and invalid-control handling.
 
-6. **Repo expansion criteria.**
-   Lock whether additional repositories will be added and the criteria for doing so.
+6. **Secondary repo expansion trigger.**
+   Lock the threshold for expanding a secondary repo from 3 to 10 PRs.
 
 7. **PR size bound adjustments.**
    Lock any changes to minimum or maximum changed-source-line thresholds.
