@@ -94,7 +94,7 @@ Initial target: 27 PRs (15 primary + 4×3 secondary).
 
 A pilot of 5 PRs from the primary repo will validate the extraction, prompting, test execution, measurement, and blind review workflow. The pilot is for feasibility only.
 
-If results on the primary repo are clear (effect direction consistent across ≥12 of 15 trials on the primary outcome) but a secondary repo shows mixed or opposing results, expand that secondary repo to 10 PRs before interpreting. Expansion is triggered by repo-level ambiguity, not by overall effect size.
+If results on the primary repo are clear (effect direction consistent across ≥12 of 15 trials on the primary outcome) but a secondary repo shows mixed or opposing results, expand that secondary repo to 10 PRs before interpreting. Expansion is triggered by repo-level ambiguity, not by overall effect size. Because expansion conditions on primary-repo results, post-expansion secondary analyses are exploratory, not confirmatory.
 
 ## Snapshot Definitions
 
@@ -575,13 +575,42 @@ The study will explicitly guard against the following misleading interpretations
 2. **Correctness hidden by tests.**
    A refactor may pass the project tests while introducing semantic risk that reviewers notice or that tests fail to cover.
 
-6. **No-op rate masking.**
+3. **No-op rate masking.**
    A high no-op rate dilutes the signal. If 40% of trials are no-ops, the active-only analysis tells you about refactoring quality while the all-trials analysis tells you about end-to-end viability.
 
-7. **Review blinding failure.**
+4. **Review blinding failure.**
    Reviewers may infer which version is LLM-generated or final based on style, polish, or diff shape, biasing merge-readiness judgments.
 
 These scenarios will be discussed in interpretation regardless of whether the primary predictions are confirmed.
+
+## Checklist Audit
+
+This prereg was audited against the [prereg checklist](/prereg-audit). Answers below.
+
+**Q3 (Descartes) — Assumptions that would invalidate:**
+- That test suites define a meaningful equivalence class (if tests are too weak, "test-passing" doesn't mean "correct")
+- That complexity metrics correlate with what reviewers care about (if they don't, P1 is meaningless even if true)
+- That blinded reviewers approximate real merge decisions (if context matters more than code quality, the forced-choice task measures the wrong thing)
+- That `C_final` marks the direction of reviewer preference on complexity (if post-`C_test` changes were mostly bug fixes or API changes, the directional proxy is noise)
+
+**Q8 (Chamberlin) — Competing explanations for a positive result:**
+- The prompt was tuned on dev-set PRs from the same repos, and the test-set PRs share enough structure that the prompt's effectiveness is overfitted rather than general
+- The model has trained on similar public PRs and is reproducing patterns, not reasoning (we accept this per the Chinese Room argument — output quality is what matters, but it limits the generalization claim)
+- The complexity reduction is real but reviewer preference is anchored by seeing `C_final` in Phase 2, not by independent judgment
+- Larger PRs were preferentially selected, and refactoring has more room on larger PRs — the effect may not hold at smaller scales
+
+**Q12 (Kuhn) — Paradigm assumptions:**
+- We assume "merge-readiness" is primarily a property of the code. It may also be a property of the relationship between code and reviewer context (trust, roadmap awareness, incident history). Blinded review strips that context. If the paradigm is wrong, we're measuring an abstraction that doesn't exist in practice.
+
+**Q16 (Ioannidis) — Positive predictive value:**
+- 27 trials, moderate flexibility (prompt tuned on dev set, metrics locked after pilot, expansion rule). Prior: friendly (60% — LLMs are probably decent at refactoring). Under these conditions, a positive result on P1 or P3 is likely real. P2 is more fragile because the trajectory classification depends on reviewer judgment calibrated against a lossy oracle.
+- No formal power analysis. The pilot will estimate variance; if effect sizes are small, 27 trials may be underpowered.
+
+**Q20 (Ramdas) — Sequential validity:**
+- The secondary repo expansion rule conditions on primary-repo results. This is a form of peeking. The expansion does not change the primary analysis (gemini-cli results stand alone). Secondary-repo results after expansion should be interpreted as exploratory, not confirmatory. Report both the pre-expansion and post-expansion analyses.
+
+**Skipped:**
+- Q9 (Fisher) — randomized assignment. Not applicable: within-PR design, no assignment to conditions.
 
 ## Threats to Validity
 
