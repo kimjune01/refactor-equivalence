@@ -58,7 +58,7 @@ One primary repo goes deep. Four secondary repos go shallow. If results on the p
   - `llvm/llvm-project` (C++) — approval-required, huge test matrix, subsystem reviewers
   - `django/django` (Python) — mature triage/merger workflow, regression tests required, decades of review culture
 
-These repos were selected for language diversity and strictness of review. If refactoring works on codebases of this caliber, it should generalize to less-defended repos. If test reconstruction proves infeasible on a secondary repo during pilot, it may be swapped for a more tractable repo in the same language (e.g., `astral-sh/ruff` for Rust, `cli/cli` for Go).
+These repos are current best candidates, not locked. The selection criteria are locked: language diversity, strict enforced review, ≥10 contributors, active post-cutoff. Repos may be swapped for others of equal caliber if build/test reconstruction is impractical (e.g., `astral-sh/ruff` for Rust if `rust-lang/rust` CI is too slow, `cli/cli` for Go if `kubernetes/kubernetes` is too large). The bar is the caliber, not the specific repo.
 
 Total initial sample: 27 PRs. Maximum if all secondaries expand: 55.
 
