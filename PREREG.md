@@ -9,7 +9,7 @@ An LLM refactoring pass after tests pass will move the implementation within thi
 1. **Simplification claim:** Does the LLM reduce measured code complexity relative to the tests-first-pass snapshot?
 2. **Merge-readiness claim:** Do independent human reviewers judge the LLM-refactored version as more merge-ready than the tests-first-pass version?
 
-If both confirm, a refactoring pass is worth adding to agent workflows. If the LLM reduces complexity but reviewers don't prefer it, the agent is optimizing a metric that doesn't match taste. If reviewers prefer it but complexity increases, the agent is doing something useful that metrics don't capture. If both refute — the agent makes things worse while passing tests — that's the **slop-slope** (the tendency of automated changes to increase codebase complexity despite passing tests) confirmed as default behavior, and the most important finding.
+If both confirm, a refactoring pass is worth adding to agent workflows. If the LLM reduces complexity but reviewers don't prefer it, the agent is optimizing a metric that doesn't match taste. If reviewers prefer it but complexity increases, the agent is doing something useful that metrics don't capture. If both refute — the agent makes things worse while passing tests — that's the **slop-slope** (Dexter Horthy's term for the tendency of automated changes to increase codebase complexity despite passing tests) confirmed as default behavior, and the most important finding.
 
 ## Estimand
 
