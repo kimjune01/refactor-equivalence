@@ -9,7 +9,7 @@ An LLM refactoring pass after tests pass will move the implementation within thi
 1. **Simplification claim:** Does the LLM reduce measured code complexity relative to the tests-first-pass snapshot?
 2. **Merge-readiness claim:** Do independent human reviewers judge the LLM-refactored version as more merge-ready than the tests-first-pass version?
 
-If both confirm, a refactoring pass is worth adding to agent workflows. If the LLM reduces complexity but reviewers don't prefer it, the agent is optimizing a metric that doesn't match taste. If reviewers prefer it but complexity increases, the agent is doing something useful that metrics don't capture. If both refute — the agent makes things worse while passing tests — that's the slop-slope confirmed as default behavior, and the most important finding.
+If both confirm, a refactoring pass is worth adding to agent workflows. If the LLM reduces complexity but reviewers don't prefer it, the agent is optimizing a metric that doesn't match taste. If reviewers prefer it but complexity increases, the agent is doing something useful that metrics don't capture. If both refute — the agent makes things worse while passing tests — that's the **slop-slope** (the tendency of automated changes to increase codebase complexity despite passing tests) confirmed as default behavior, and the most important finding.
 
 ## Estimand
 
@@ -115,7 +115,7 @@ The test suite that matters is the one that exists at `C_final` — that's the c
 Operationally:
 
 1. Extract the test files from `C_final`.
-2. Define the test command (the same command used at merge-time CI).
+2. Define the test command. For each repo, this is the CI command that gates merge — the relevant test shard, not the full matrix. Locked per repo before extraction begins.
 3. Traverse PR commits in chronological order from `C_base`.
 4. At each commit, overlay the `C_final` test files onto the working tree and run the test command.
 5. Record all commits where this combined state passes.
@@ -138,7 +138,7 @@ The LLM-refactored version produced from `C_test` under the clean-room procedure
 
 The LLM may edit source files changed in the PR diff from `C_base` to `C_test`. It may not edit tests. Mechanically enforced when constructing `C_llm`.
 
-Note: `C_final` may touch additional files beyond `C_test`. The LLM is not given access to those files' identities, because knowing which files reviewers eventually changed is information leakage. If this restriction prevents valid simplifications, that biases against `C_llm` — a conservative choice.
+Note: `C_final` may touch additional files beyond `C_test`. The LLM is not given access to those files' identities, because knowing which files reviewers eventually changed is information leakage. If this restriction prevents valid simplifications, that biases against `C_llm` — a conservative choice. It also means complexity comparisons to `C_final` are weakened when reviewers improved the PR by adding or moving code to files outside the `C_test` scope. This is noted as a limitation, not corrected.
 
 ### `C_random`
 
@@ -317,15 +317,15 @@ The following will be published alongside results:
 
    If tests fail, the trial is a no-op: `C_llm = C_test` for all metrics. The agent failed to stay in the equivalence class.
 
-6. **Generate random control.**
+5. **Generate random control.**
    Apply the predetermined random or mechanical transformation to `C_test`, producing `C_random`.
 
    Verify whether `C_random` passes tests. If it fails, record failure and classify the control as invalid for that PR.
 
-7. **Measure.**
+6. **Measure.**
    Compute complexity and LOC for `C_test`, `C_llm`, `C_final`, and `C_random`.
 
-8. **Blind human review.**
+7. **Blind human review.**
    Two phases per reviewer per PR:
 
    **Phase 1 — Forced choice.** Present unlabeled diffs from `C_base` to `C_test` and `C_llm`. Reviewer picks which to approve assuming tests pass. Record semantic concerns and rationale.
@@ -334,10 +334,10 @@ The following will be published alongside results:
 
    Each PR evaluated by at least 3 independent reviewers.
 
-9. **Post-ranking blinding check.**
+8. **Post-ranking blinding check.**
     After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
 
-10. **Record all metadata.**
+9. **Record all metadata.**
     Record:
 
     - Repository
