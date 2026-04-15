@@ -50,10 +50,10 @@ One primary repo goes deep. Four secondary repos go shallow. If results on the p
 
 - **Primary:** `google/gemini-cli` (TypeScript monorepo, 20+ contributors, active review culture). 15 PRs.
 - **Secondary (3 PRs each, expandable to 10):**
-  - `kubernetes/kubernetes` (Go) — SIG-owned, OWNERS/LGTM workflow, prow CI, ~300 merged PRs/month
-  - `rust-lang/rust` (Rust) — bors merge gate, full CI before merge, strict perf/regression review
-  - `llvm/llvm-project` (C++) — approval-required, huge test matrix, subsystem reviewers
+  - `cli/cli` (Go) — GitHub's own CLI, strict review, fast `go test`, ~50 merged PRs/month
+  - `astral-sh/ruff` (Rust) — Python linter, strict review, builds in seconds, comprehensive test suite
   - `django/django` (Python) — mature triage/merger workflow, regression tests required, decades of review culture
+  - `fastapi/fastapi` (Python) — modern Python, strict typing, fast test suite, active post-cutoff
 
 These repos are current best candidates, not locked. The selection criteria are locked: language diversity, strict enforced review, ≥10 contributors, active post-cutoff. Repos may be swapped for others of equal caliber if build/test reconstruction is impractical (e.g., `astral-sh/ruff` for Rust if `rust-lang/rust` CI is too slow, `cli/cli` for Go if `kubernetes/kubernetes` is too large). The bar is the caliber, not the specific repo.
 
