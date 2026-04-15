@@ -111,19 +111,22 @@ All diffs shown to reviewers are computed relative to `C_base`.
 
 ### `C_test`
 
-The earliest commit in the PR branch where the relevant test suite passes after the core implementation is present.
+The earliest commit in the PR branch where the merge-time test suite passes.
+
+The test suite that matters is the one that exists at `C_final` — that's the contract the reviewer accepted. `C_test` is found by backporting those tests onto earlier commits to find when the implementation first satisfied them.
 
 Operationally:
 
-1. Define the relevant test command before traversing the PR branch.
-2. Traverse commits in chronological order from `C_base` through the PR branch.
-3. Identify candidate commits where the implementation under test is present.
-4. "Implementation present" means the PR's main behavioral change has been implemented, even if later commits clean it up, rename it, improve edge cases, or revise tests.
-5. Run the predetermined test command on each candidate commit.
-6. Record all candidate commits where the implementation is present and the predetermined test command passes.
-7. Select the first such passing candidate as `C_test`.
+1. Extract the test files from `C_final`.
+2. Define the test command (the same command used at merge-time CI).
+3. Traverse PR commits in chronological order from `C_base`.
+4. At each commit, overlay the `C_final` test files onto the working tree and run the test command.
+5. Record all commits where this combined state passes.
+6. Select the earliest passing commit as `C_test`.
 
-If the exact historical CI environment cannot be reconstructed, the local test command and environment will be recorded. PRs whose test status cannot be determined reproducibly will be excluded before assignment.
+This ensures `C_test` and `C_final` are compared against the same behavioral contract. The LLM refactors implementation code, not tests — and the tests it must preserve are the ones the reviewer signed off on.
+
+If the `C_final` tests cannot be overlaid cleanly onto earlier commits (e.g., tests reference APIs that don't exist yet), the PR is excluded. Record exclusion reason.
 
 ### `C_final`
 
