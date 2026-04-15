@@ -296,27 +296,23 @@ The following will be published alongside results:
 
    Since tests pass at `C_test`, the refactoring task should not require external references or network access.
 
-3. **Generate LLM refactoring.**
-   Prompt the LLM to refactor for clarity, simplicity, maintainability, and local idiom while preserving behavior.
+3. **Generate LLM refactoring via forge pipeline.**
 
-   The LLM may inspect the full clean-room repository context. It may not access:
+   The refactoring uses the strongest available development methodology: [/forge](/forge). The full pipeline runs inside the clean-room workspace with no access to reviewer comments, later commits, the final accepted PR state, git history, or the internet.
 
-   - Reviewer comments
-   - Later commits
-   - The final accepted PR state
-   - Git history
-   - The internet
+   **3a. Volley (sharpen).** Take the repo-specific refactoring prompt and the diff from `C_base` to `C_test`. Volley sharpens the refactoring intent into specific, testable changes. Converge in two rounds — if the refactoring intent doesn't stabilize, the trial is a no-op.
+
+   **3b. Blind-blind-merge (implement).** Two models (opus + codex or equivalent), same sharpened spec, separate `/tmp` directories. Each produces a refactored version independently. Compare implementations, pick the structurally simpler one per component, synthesize.
+
+   **3c. Bug-hunt (verify).** Run adversarial review against the merged refactoring with the original spec as input. Iterate to convergence (zero new findings). If a bug traces to a spec defect, fix the spec and re-merge rather than patching.
+
+   **3d. Volley (clean).** Review the implementation against the spec. Clean up naming, remove dead code, verify tests pass. Converge in two rounds. Output is `C_llm`.
 
    The LLM may not edit tests. It may only edit source files changed from `C_base` to `C_test`. Mechanically enforced after generation.
 
-   The exact prompt, model name, model version, decoding parameters, tool permissions, and allowed file set will be recorded.
+   The exact prompts, model names and versions, decoding parameters, tool permissions, allowed file set, and number of volley/hunt rounds will be recorded.
 
-4. **Construct `C_llm`.**
-   Apply the LLM's changes to the clean-room copy and save the resulting working tree.
-
-   If the LLM produces no applicable patch, edits forbidden files, or edits tests, the trial is a no-op.
-
-5. **Verify correctness.**
+4. **Verify correctness.**
    Run the predetermined test command on `C_llm`.
 
    If tests fail, the trial is a no-op: `C_llm = C_test` for all metrics. The agent failed to stay in the equivalence class.
