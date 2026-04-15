@@ -82,14 +82,14 @@ A PR is eligible if all of the following hold:
 
 ### PR size bounds
 
-The default PR size bounds are:
+PR size bounds:
 
-- Minimum: 20 changed source lines from pre-PR base to final accepted PR head.
-- Maximum: 800 changed source lines from pre-PR base to final accepted PR head.
+- Minimum: 100 changed source lines from pre-PR base to final accepted PR head.
+- Maximum: none. Larger PRs are preferred.
 
 Changed source lines exclude generated files, lockfiles, snapshots, vendored files, and documentation-only files.
 
-These thresholds may be adjusted after the pilot for feasibility, but any adjustment will be recorded before the main sample is drawn.
+When multiple eligible PRs are available, prefer larger ones. A positive result on large PRs is maximally surprising — more code means more room for complexity to accumulate, more reviewer feedback to anticipate, and a larger equivalence class to navigate. If refactoring works there, smaller PRs are implied.
 
 ### Sample size
 
