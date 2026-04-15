@@ -304,6 +304,7 @@ The following will be published alongside results:
    - Exclude subsequent commits
    - Disable network access during LLM execution and test execution
    - Use already-resolved dependencies where possible
+   - Build artifacts (node_modules, compiled dependencies, caches) may be shared across trials from the same repo. Only source files differ between trials — the build environment is held constant.
 
    Since tests pass at `C_test`, the refactoring task should not require external references or network access.
 
