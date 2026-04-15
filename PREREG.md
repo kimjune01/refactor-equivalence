@@ -136,7 +136,9 @@ The final accepted PR head before merge. Serves two roles:
 
 The LLM-refactored version produced from `C_test` under the clean-room procedure.
 
-The LLM may edit source files changed in the PR diff from `C_base` to `C_final` (the full PR scope, not just `C_test`). It may not edit tests. This ensures the LLM has access to the same file set that reviewers ultimately accepted changes to, avoiding a bias where `C_final` touches files the LLM is barred from. Mechanically enforced when constructing `C_llm`.
+The LLM may edit source files changed in the PR diff from `C_base` to `C_test`. It may not edit tests. Mechanically enforced when constructing `C_llm`.
+
+Note: `C_final` may touch additional files beyond `C_test`. The LLM is not given access to those files' identities, because knowing which files reviewers eventually changed is information leakage. If this restriction prevents valid simplifications, that biases against `C_llm` — a conservative choice.
 
 ### `C_random`
 
@@ -186,9 +188,9 @@ If the agent produces a no-op (fails tests or produces no applicable output), `C
 
 `C_final` is where reviewers pushed the code — a satisficing threshold, not the optimum. Each trial is classified into one of three trajectory classes:
 
-- **Past `C_final`:** simpler than the accepted version without apparent loss.
-- **Short of `C_final`:** improved over `C_test` but leaves meaningful complexity that reviewers removed.
-- **Wrong direction:** no meaningful improvement, or worse. The slop-slope.
+- **Past `C_final`:** simpler than the accepted version and the reviewer would still approve it. (Simpler + no new correctness or clarity concerns.)
+- **Short of `C_final`:** improved over `C_test` but leaves complexity that the accepted version removed. (Better but not as good.)
+- **Wrong direction:** no meaningful improvement, or worse. The slop-slope. (Same or harder to review than `C_test`.)
 
 **Primary classification: reviewer-judged.** After the pairwise forced choice (step 3 below), reviewers see `C_final` and classify `C_llm`'s trajectory relative to both `C_test` and `C_final`. This is the headline label.
 
@@ -305,7 +307,7 @@ The following will be published alongside results:
    - Git history
    - The internet
 
-   The LLM may not edit tests. It may only edit source files changed in the full PR scope (`C_base` to `C_final`). Mechanically enforced after generation.
+   The LLM may not edit tests. It may only edit source files changed from `C_base` to `C_test`. Mechanically enforced after generation.
 
    The exact prompt, model name, model version, decoding parameters, tool permissions, and allowed file set will be recorded.
 
@@ -441,7 +443,10 @@ Candidate model:
 prefer_llm_over_test ~ PR_size + (1 | PR) + (1 | reviewer)
 ```
 
-The primary estimand is the intercept-adjusted preference for `C_llm` over `C_test` in the forced-choice task. Only observed reviewer judgments (test-passing `C_llm` shown to reviewers) enter the mixed-effects model. No-op trials are reported separately as the no-op rate and do not contribute synthetic judgments to this model.
+Two analyses are reported:
+
+1. **Intent-to-treat (primary for P3):** All trials. No-ops scored as "reviewer prefers `C_test`." This is the denominator for P3.
+2. **Observed-only (primary for the mixed-effects model):** Only trials where `C_llm` passed tests and reviewers saw actual diffs. No synthetic judgments. This isolates refactoring quality from agent competence.
 
 For calibration tasks involving `C_random`, ordinal or logistic models may be used depending on the final coding.
 
@@ -644,7 +649,7 @@ The model version and cutoff date are recorded before sampling. This is a mitiga
 
 The experiment tests this prompt + this model on these PRs. The causal claim is narrow: this specific intervention on these specific PRs, under these specific conditions. Whether the LLM "understands" simplicity or has memorized patterns that produce simpler code is irrelevant — the practical question is whether the output is better.
 
-Positive results on high-caliber repos (kubernetes, rust-lang/rust, LLVM, Django) support down-induction to simpler codebases. If the refactoring pass works where review standards are strictest, it should work where they are more relaxed.
+Positive results on high-caliber repos (kubernetes, rust-lang/rust, LLVM, Django) suggest the refactoring pass may transfer to simpler codebases, but different code quality norms and PR shapes could change the effect. Down-induction is plausible, not guaranteed.
 
 ### Environment reconstruction
 
