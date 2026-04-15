@@ -24,7 +24,7 @@ The study does not estimate effects for:
 - PRs where review changes are primarily documentation, formatting, or dependency churn
 - PRs whose relevant test predicate cannot be reconstructed
 
-All claims are scoped to the sampled class of merged brownfield PRs where the contributor reached a passing-test implementation before the final accepted PR state and where subsequent human-authored revisions made substantive code changes.
+All claims are scoped to the sampled class of merged brownfield PRs where the contributor reached a passing-test implementation before the final accepted PR state and where subsequent human-authored revisions made substantive code changes. This is intentionally enriched for refactorable cases — PRs where reviewers found something worth changing after tests passed.
 
 ## Background
 
@@ -136,7 +136,7 @@ The final accepted PR head before merge. Serves two roles:
 
 The LLM-refactored version produced from `C_test` under the clean-room procedure.
 
-The LLM may edit only source files that were changed in the PR diff from `C_base` to `C_test`. It may not edit tests. This is a conservative restriction — it may prevent valid simplifications that require touching adjacent files, but it ensures `C_llm` stays comparable to the original PR scope. Mechanically enforced when constructing `C_llm`.
+The LLM may edit source files changed in the PR diff from `C_base` to `C_final` (the full PR scope, not just `C_test`). It may not edit tests. This ensures the LLM has access to the same file set that reviewers ultimately accepted changes to, avoiding a bias where `C_final` touches files the LLM is barred from. Mechanically enforced when constructing `C_llm`.
 
 ### `C_random`
 
@@ -186,7 +186,7 @@ If the agent produces a no-op (fails tests or produces no applicable output), `C
 
 `C_final` is where reviewers pushed the code. Measure complexity of `C_final` on the same scope and tools as `C_test` and `C_llm`.
 
-Three outcomes per trial:
+The primary scalar for this comparison is mean cognitive complexity across touched functions (locked after pilot). Three outcomes per trial:
 
 - **Short of `C_final`:** `complexity(C_test) > complexity(C_llm) > complexity(C_final)`. Agent improved but reviewers would have pushed further.
 - **Past `C_final`:** `complexity(C_llm) < complexity(C_final)`. Agent found a simpler member of the equivalence class than the reviewer-accepted version.
@@ -281,7 +281,7 @@ For each sampled PR:
    - Git history
    - The internet
 
-   The LLM may not edit tests. It may only edit files changed in the PR diff from `C_base` to `C_test`. These restrictions will be mechanically enforced after generation by rejecting or trimming edits outside the allowed file set according to the locked pilot procedure.
+   The LLM may not edit tests. It may only edit source files changed in the full PR scope (`C_base` to `C_final`). Mechanically enforced after generation.
 
    The exact prompt, model name, model version, decoding parameters, tool permissions, and allowed file set will be recorded.
 
@@ -402,8 +402,6 @@ Assuming tests pass, which version would you approve for merge?
 Analyze reviewer preferences using a mixed-effects logistic model with random effects for PR and reviewer.
 
 A simpler paired sign-test analysis may also be reported for interpretability.
-
-No-op trials are scored as "reviewer prefers `C_test`." The denominator is all reviewer-PR judgments.
 
 Semantic-concern flags are analyzed separately from merge-readiness preference.
 
