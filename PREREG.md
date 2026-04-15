@@ -172,7 +172,7 @@ Secondary diagnostics:
 - LOC delta
 - Number of touched files and touched functions
 
-Complexity may also be reported on the parseable-only subset as a secondary analysis, but primary analyses count invalid or failed outputs as worst-score outcomes.
+If the agent produces a no-op (fails tests or produces no applicable output), `C_llm = C_test` and complexity delta is zero.
 
 ### 2. Diff similarity to `C_final`
 
@@ -205,7 +205,7 @@ PRs whose dominant post-`C_test` delta is correctness repair, API adjustment, te
 
 Independent reviewers will evaluate unlabeled diffs from `C_base`.
 
-Only test-passing `C_llm` outputs are shown to reviewers. Failed, invalid, unparsable, forbidden-edit, or non-applicable LLM outputs are not reviewed and are automatically scored as "reviewer prefers `C_test`" for the primary prediction. This avoids the contradiction of telling reviewers to "assume tests pass" for code that actually fails tests. The passing-only subset is reported as a secondary analysis.
+Only test-passing `C_llm` outputs are shown to reviewers. No-op trials (agent failed to produce a test-passing output) are automatically scored as "reviewer prefers `C_test`."
 
 The primary review instrument is pairwise forced choice between:
 
@@ -254,25 +254,13 @@ Net LOC change from `C_test` to:
 
 LOC is not treated as a quality measure by itself. It is included to distinguish simplification from mere expansion or compression.
 
-### 5. Correctness and failure mode
+### 5. Correctness gate
 
-Each LLM output will be classified by test outcome and qualitative failure mode.
+`C_llm` must pass the predetermined test command. Passing tests is a precondition for membership in the equivalence class, not a variable.
 
-Test outcome categories:
+If the LLM agent cannot produce a test-passing output, the trial is scored as a no-op: `C_llm = C_test` for all metrics. The agent produced nothing. Report the no-op rate as a measure of agent competence, but do not analyze non-passing outputs further.
 
-- **Passes tests:** `C_llm` remains in the tested equivalence class.
-- **Fails tests:** `C_llm` breaks at least one relevant test.
-- **Cannot run:** test execution fails for environmental reasons not attributable to the refactor.
-
-Failure-mode categories for non-passing LLM outputs:
-
-- **Directionally useful but broken:** refactor appears to simplify or clarify the code, but introduces a localized correctness issue.
-- **Behaviorally unsafe:** refactor changes semantics in a way that tests catch and the change is not plausibly a small repair.
-- **Non-simplifying churn:** refactor changes code without clear simplification or convergence.
-- **Invalid output:** code does not compile, files are missing, forbidden files are edited, the patch cannot be applied, or the output violates the mechanical edit restrictions.
-- **Environment failure:** failure appears caused by test infrastructure rather than the refactor.
-
-Failed refactors are not excluded from the primary dataset. They are analyzed as failures and classified separately.
+The interesting failure is not the agent that breaks tests — that agent is simply incompetent. The interesting failure is the agent that passes tests while making the codebase harder to maintain. That is the slop-slope this experiment is designed to detect.
 
 ## Procedure
 
@@ -332,12 +320,12 @@ For each sampled PR:
 5. **Construct `C_llm`.**
    Apply the LLM's changes to the clean-room copy and save the resulting working tree.
 
-   If the LLM produces no applicable patch, edits forbidden files, edits tests, or cannot be applied, classify the trial as invalid output.
+   If the LLM produces no applicable patch, edits forbidden files, or edits tests, the trial is a no-op.
 
 6. **Verify correctness.**
    Run the predetermined test command on `C_llm`.
 
-   Test failures are retained in the dataset and classified by failure mode. Passing tests are not required for inclusion in the primary analysis, but correctness status is included in all interpretation.
+   If tests fail, the trial is a no-op: `C_llm = C_test` for all metrics. The agent failed to stay in the equivalence class.
 
 7. **Generate random control.**
    Apply the predetermined random or mechanical transformation to `C_test`, producing `C_random`.
@@ -423,9 +411,7 @@ Analyze with paired tests across PRs:
 - Wilcoxon signed-rank test for continuous deltas
 - Sign test for direction of improvement
 
-The primary denominator is all trials. Failed, invalid, unparsable, forbidden-edit, or non-applicable LLM outputs are counted as worst-score outcomes for the primary simplification prediction.
-
-Complexity may still be computed if the code parses. Parseable-only analysis will be reported as secondary.
+No-op trials contribute zero complexity delta. The denominator is all trials.
 
 ### 2. Convergence toward `C_final`
 
@@ -446,7 +432,7 @@ Compare `C_llm` against both:
 
 This distinguishes meaningful convergence from arbitrary edit movement.
 
-The primary denominator is all trials. Failed, invalid, unparsable, forbidden-edit, or non-applicable LLM outputs are counted as worst-score outcomes for the primary convergence prediction.
+No-op trials contribute zero convergence. The denominator is all trials.
 
 Convergence will be reported:
 
@@ -474,7 +460,7 @@ Analyze reviewer preferences using a mixed-effects logistic model with random ef
 
 A simpler paired sign-test analysis may also be reported for interpretability.
 
-The primary denominator is all reviewer-PR judgments. Failed, invalid, unparsable, forbidden-edit, or non-applicable LLM outputs are counted as worst-score outcomes for the primary merge-readiness prediction.
+No-op trials are scored as "reviewer prefers `C_test`." The denominator is all reviewer-PR judgments.
 
 Semantic-concern flags are analyzed separately from merge-readiness preference.
 
@@ -504,21 +490,9 @@ Candidate measures:
 
 Low agreement will be reported as a substantive result, not treated only as noise.
 
-### Failure analysis
+### No-op rate
 
-Report the LLM failure rate across all sampled PRs.
-
-Failure reporting includes:
-
-- Fraction of `C_llm` outputs that pass tests
-- Fraction that fail tests
-- Fraction that cannot be applied
-- Fraction that violate edit-scope restrictions
-- Failure-mode category distribution
-- Whether failed refactors nevertheless reduce measured complexity
-- Whether failed refactors are judged directionally useful by reviewers, where review is possible
-
-This separates "the model had the right refactoring idea but broke behavior" from "the model produced non-useful churn."
+Report the fraction of trials where the agent failed to produce a test-passing output (no-op rate). This measures agent competence, not the hypothesis. A high no-op rate means the agent isn't ready for the task; it doesn't tell us whether refactoring helps.
 
 ### Secondary analyses
 
@@ -540,17 +514,9 @@ Analyze whether LLM performance differs depending on the dominant human-authored
 
 For example, LLMs may perform better on simplification and naming changes than on subtle bug fixes or API adjustments.
 
-### Correctness-sensitive analysis
+### Active-only analysis
 
-Repeat primary analyses on the subset where `C_llm` passes tests.
-
-This subset analysis is secondary. The full dataset, including failures, remains the primary basis for evaluating the refactoring pass as an autonomous workflow.
-
-### Parseable-only analysis
-
-Repeat static metric analyses on the subset where `C_llm` parses and metrics can be computed.
-
-This subset analysis is secondary. The primary denominator remains all trials, with invalid or unparsable outputs counted as worst-score outcomes.
+Repeat primary analyses on the subset where the agent produced a test-passing output (non-no-op trials). This isolates the quality of refactoring from agent competence.
 
 ## Pilot
 
@@ -566,6 +532,7 @@ The pilot is used to answer feasibility questions:
 6. Are the PR size bounds appropriate?
 7. Can the mechanical edit restrictions be enforced cleanly?
 8. Can `C_random` be generated without accidental simplification or behavioral breakage?
+9. What is the no-op rate? Is the agent competent enough for the experiment to proceed?
 
 The pilot will not be used to stop early for efficacy.
 
@@ -609,8 +576,8 @@ The study may be deemed infeasible, or redesigned before main-sample execution, 
 2. **Tests are not reproducible often enough.**
    More than 30% of otherwise eligible PRs cannot run the predetermined relevant tests reproducibly.
 
-3. **LLM outputs are too often invalid or trivial.**
-   More than 40% of LLM outputs are invalid, non-applicable, forbidden-scope edits, empty/no-op edits, or trivial churn.
+3. **No-op rate is too high.**
+   More than 40% of trials are no-ops (agent fails to produce a test-passing output).
 
 4. **Reviewers cannot evaluate the diffs.**
    Reviewers report that the blind diffs are too large, too context-dependent, or too ambiguous to support meaningful merge-readiness judgments.
@@ -632,19 +599,19 @@ These are feasibility and design-validity conditions, not efficacy stopping rule
 
 `C_llm` will have lower measured complexity than `C_test` in at least 70% of all trials.
 
-The denominator is all trials. Invalid, failed, unparsable, forbidden-edit, or non-applicable LLM outputs count as not reducing complexity. A parseable-only result may be reported as secondary.
+The denominator is all trials. No-op trials count as zero complexity reduction.
 
 ### P2: Convergence toward accepted PR state
 
 `C_llm` will be closer to `C_final` than `C_test` is, by the primary locked distance metric, in at least 60% of all trials.
 
-The denominator is all trials. Invalid, failed, unparsable, forbidden-edit, or non-applicable LLM outputs count as not converging.
+The denominator is all trials. No-op trials count as zero convergence.
 
 ### P3: Human merge-readiness
 
 Blind reviewers will prefer `C_llm` over `C_test` in at least 65% of all reviewer-PR forced-choice judgments.
 
-The denominator is all reviewer-PR judgments. Invalid, failed, unparsable, forbidden-edit, or non-applicable LLM outputs count as not preferred.
+The denominator is all reviewer-PR judgments. No-op trials count as "reviewer prefers `C_test`."
 
 ### P4: Non-identity with final state
 
@@ -652,9 +619,9 @@ The denominator is all reviewer-PR judgments. Invalid, failed, unparsable, forbi
 
 The equivalence class is expected to be large. A successful LLM refactor may find a different simple implementation than the one produced through human review.
 
-### P5: Failure modes are informative
+### P5: Some refactors will make things worse
 
-Some LLM refactors will fail tests while still being directionally useful. These cases will cluster separately from non-simplifying churn or invalid output.
+Among test-passing `C_llm` outputs, some will increase measured complexity or be ranked below `C_test` by reviewers. These cases — the slop-slope — are the most practically important finding.
 
 ## Misleading-Result Scenarios
 
@@ -675,8 +642,8 @@ The study will explicitly guard against the following misleading interpretations
 5. **Correctness hidden by tests.**
    A refactor may pass the project tests while introducing semantic risk that reviewers notice or that tests fail to cover.
 
-6. **Invalid-output denominator masking.**
-   Parseable-only or passing-only analyses may overstate model usefulness by excluding failed autonomous refactoring attempts.
+6. **No-op rate masking.**
+   A high no-op rate dilutes the signal. If 40% of trials are no-ops, the active-only analysis tells you about refactoring quality while the all-trials analysis tells you about end-to-end viability.
 
 7. **Review blinding failure.**
    Reviewers may infer which version is LLM-generated or final based on style, polish, or diff shape, biasing merge-readiness judgments.
@@ -743,7 +710,7 @@ Different outcome patterns imply different conclusions:
 - If complexity improves but reviewers do not prefer `C_llm`, the model may be optimizing shallow simplicity rather than merge-readiness.
 - If `C_llm` moves toward `C_final` but complexity does not improve, reviewer changes may reflect style, API fit, or correctness rather than simplification.
 - If reviewers prefer `C_llm` but it does not converge toward `C_final`, the model may find alternative acceptable members of the equivalence class.
-- If failed refactors are directionally useful but often break tests, the bottleneck is execution reliability rather than refactoring judgment.
+- If the no-op rate is high but active trials show improvement, the bottleneck is agent competence, not refactoring judgment.
 - If performance is concentrated only on the simplification/refactoring subset, the autonomous refactoring pass may be useful but narrower than the full post-review revision process.
 
 ### If refuted
