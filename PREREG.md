@@ -341,7 +341,7 @@ The following will be published alongside results:
 
    **Phase 2 — Trajectory classification.** Reveal `C_final` (labeled as "the version reviewers accepted"). Reviewer classifies `C_llm` as past `C_final`, short of `C_final`, or wrong direction.
 
-   Each PR evaluated by at least 3 independent reviewers.
+   Each PR evaluated by at least 3 independent reviewers. Primary reviewer model: Gemini 3.1 (no conflict — it does not participate in the blind-blind-merge that produces `C_llm`). Codex (GPT-5.4) may serve as a secondary reviewer on trials where it did not generate one of the merge candidates. A model that participated in generating `C_llm` may not review that trial.
 
 8. **Post-ranking blinding check.**
     After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
