@@ -184,15 +184,25 @@ If the agent produces a no-op (fails tests or produces no applicable output), `C
 
 ### 2. Direction relative to `C_final`
 
-`C_final` is where reviewers pushed the code. Measure complexity of `C_final` on the same scope and tools as `C_test` and `C_llm`.
+`C_final` is where reviewers pushed the code — a satisficing threshold, not the optimum. Each trial is classified into one of three trajectory classes:
 
-The primary scalar for this comparison is mean cognitive complexity across touched functions (locked after pilot). Three outcomes per trial:
+- **Past `C_final`:** simpler than the accepted version without apparent loss.
+- **Short of `C_final`:** improved over `C_test` but leaves meaningful complexity that reviewers removed.
+- **Wrong direction:** no meaningful improvement, or worse. The slop-slope.
 
-- **Short of `C_final`:** `complexity(C_test) > complexity(C_llm) > complexity(C_final)`. Agent improved but reviewers would have pushed further.
-- **Past `C_final`:** `complexity(C_llm) < complexity(C_final)`. Agent found a simpler member of the equivalence class than the reviewer-accepted version.
-- **Wrong direction:** `complexity(C_llm) ≥ complexity(C_test)`. Agent made things worse or did nothing. This is the slop-slope.
+**Primary classification: reviewer-judged.** After the pairwise forced choice (step 3 below), reviewers see `C_final` and classify `C_llm`'s trajectory relative to both `C_test` and `C_final`. This is the headline label.
 
-Report the distribution across these three categories. "Past `C_final`" is the strongest evidence; "wrong direction" is the most important finding.
+**Scalar calibration:** Mean cognitive complexity across touched functions (locked after pilot) is computed for `C_test`, `C_llm`, and `C_final`. The scalar does not determine the class — it calibrates the reviewer judgment. Report:
+
+- Agreement rate between reviewer label and scalar label
+- Distance from boundary (how far from a tie)
+- Cases where reviewer and scalar disagree
+
+Differences smaller than δ (set after pilot based on observed metric variance) are flagged as boundary cases rather than forced into a class.
+
+**Sensitivity analysis:** Recompute scalar labels using cyclomatic complexity, nesting depth, function count, and LOC. Report the fraction of trials whose class is stable across metrics. Instability is a finding about metric validity.
+
+Report the distribution across the three reviewer-classified categories. "Past `C_final`" is the strongest evidence; "wrong direction" is the most important finding.
 
 ### 3. Human merge-readiness preference
 
@@ -213,9 +223,9 @@ Assuming tests pass, which version would you approve for merge?
 
 Reviewers must choose one version. They may also provide a short categorical rationale.
 
-Reviewers will separately record whether either version raises a semantic concern. This semantic-concern flag is distinct from merge-readiness preference.
+Reviewers will separately record whether either version raises a semantic concern.
 
-`C_final` will not be included in the same primary forced-choice ranking. It will be evaluated in a separate calibration task to estimate whether reviewers recognize the accepted PR state as merge-ready under the blind review procedure.
+After the forced choice, reviewers are shown `C_final` (labeled as "the version reviewers accepted") and asked to classify `C_llm`'s trajectory: past `C_final`, short of `C_final`, or wrong direction. This is the primary trajectory classification.
 
 `C_random`, where available, may be used in secondary or calibration comparisons.
 
@@ -301,16 +311,16 @@ For each sampled PR:
    Verify whether `C_random` passes tests. If it fails, record failure and classify the control as invalid for that PR.
 
 7. **Measure.**
-   Compute complexity and LOC for `C_test`, `C_llm`, `C_final`, and `C_random`. Classify each trial as short of `C_final`, past `C_final`, or wrong direction.
+   Compute complexity and LOC for `C_test`, `C_llm`, `C_final`, and `C_random`.
 
 8. **Blind human review.**
-   Present reviewers with unlabeled diffs from `C_base`.
+   Two phases per reviewer per PR:
 
-   The primary task is pairwise forced choice between `C_test` and `C_llm`.
+   **Phase 1 — Forced choice.** Present unlabeled diffs from `C_base` to `C_test` and `C_llm`. Reviewer picks which to approve assuming tests pass. Record semantic concerns and rationale.
 
-   Each PR should be evaluated by at least 3 independent reviewers.
+   **Phase 2 — Trajectory classification.** Reveal `C_final` (labeled as "the version reviewers accepted"). Reviewer classifies `C_llm` as past `C_final`, short of `C_final`, or wrong direction.
 
-   Reviewers answer which version they would approve for merge assuming tests pass, record semantic concerns separately, and optionally provide categorical rationales.
+   Each PR evaluated by at least 3 independent reviewers.
 
 9. **Post-ranking blinding check.**
     After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
@@ -377,11 +387,13 @@ Analyze with paired tests across PRs:
 
 No-op trials contribute zero complexity delta. The denominator is all trials.
 
-### 2. Direction relative to `C_final`
+### 2. Trajectory classification
 
-Question: Where does `C_llm` land on the complexity axis relative to `C_test` and `C_final`?
+Question: Where does `C_llm` land relative to `C_test` and `C_final`?
 
-Report the three-way distribution: short of `C_final`, past `C_final`, wrong direction. No-op trials count as wrong direction.
+Report the reviewer-classified three-way distribution: past `C_final`, short of `C_final`, wrong direction. No-op trials count as wrong direction.
+
+Report scalar agreement, boundary cases, and sensitivity across metrics as robustness checks.
 
 ### 3. Human merge-readiness
 
@@ -472,14 +484,17 @@ The following items will be decided and locked after the pilot and before the ma
 1. **Complexity tool and configuration.**
    Lock the static-analysis tool, version, parser settings, ignored files, thresholds, and aggregation rules.
 
-3. **Review presentation format.**
+2. **Review presentation format.**
    Lock syntax highlighting, side-by-side versus sequential presentation, file-path display, diff context, and any reviewer UI constraints.
 
-4. **Reviewer population criteria.**
+3. **Reviewer population criteria.**
    Lock reviewer experience criteria, familiarity requirements, exclusion criteria, compensation, and assignment procedure.
 
-5. **`C_random` generator specifics.**
+4. **`C_random` generator specifics.**
    Lock the transformation family, edit budget, random seed policy, validation procedure, and invalid-control handling.
+
+5. **Boundary threshold δ.**
+   Lock the scalar difference below which trials are flagged as boundary cases rather than classified.
 
 6. **Secondary repo expansion trigger.**
    Lock the threshold for expanding a secondary repo from 3 to 10 PRs.
@@ -520,9 +535,9 @@ These are feasibility and design-validity conditions, not efficacy stopping rule
 
 The denominator is all trials. No-op trials count as zero complexity reduction.
 
-### P2: Direction relative to `C_final`
+### P2: Trajectory past `C_final`
 
-In at least 30% of active trials (non-no-ops), `C_llm` will land past `C_final` on the complexity axis — simpler than what reviewers accepted. Reviewers are pragmatic, not perfectionists; `C_final` is a satisficing threshold, not the simplest possible member of the class.
+In at least 30% of active trials (non-no-ops), reviewers will classify `C_llm` as past `C_final` — simpler than what reviewers accepted. Reviewers are pragmatic, not perfectionists; `C_final` is a satisficing threshold, not the simplest possible member of the class.
 
 ### P3: Human merge-readiness
 
