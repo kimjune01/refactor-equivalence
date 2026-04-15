@@ -611,13 +611,11 @@ Only PRs merged after the model's training cutoff are eligible.
 
 The model version and cutoff date are recorded before sampling. This is a mitigation, not elimination — public code, PR discussions, and similar patterns may exist in retrieval or evaluation memory despite cutoff restrictions.
 
-### Memorization vs. reasoning
+### Causal scope
 
-The LLM may produce good refactors because it has seen similar code during training, not because it reasons about complexity. This is a competing explanation (Chamberlin) that the experiment cannot fully exclude. If the refactoring prompt works only on repos the model has likely trained on, that weakens the generalization claim. The post-cutoff restriction helps but does not eliminate this: the model has seen the repo's older code and idioms.
+The experiment tests this prompt + this model on these PRs. The causal claim is narrow: this specific intervention on these specific PRs, under these specific conditions. Whether the LLM "understands" simplicity or has memorized patterns that produce simpler code is irrelevant — the practical question is whether the output is better.
 
-### Narrow causal claim
-
-The experiment tests this prompt + this model on these PRs. It does not test "refactoring passes in general." The prompt is a learned artifact tuned on dev-set PRs. A different prompt or model might produce different results. The causal claim is: this specific intervention improved these specific PRs, under these specific conditions.
+Positive results on high-caliber repos (kubernetes, rust-lang/rust, LLVM, Django) support down-induction to simpler codebases. If the refactoring pass works where review standards are strictest, it should work where they are more relaxed.
 
 ### Environment reconstruction
 
