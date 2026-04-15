@@ -94,7 +94,16 @@ Initial target: 27 PRs (15 primary + 4×3 secondary).
 
 A pilot of 5 PRs from the primary repo will validate the extraction, prompting, test execution, measurement, and blind review workflow. The pilot is for feasibility only.
 
-If results on the primary repo are clear (effect direction consistent across ≥12 of 15 trials on the primary outcome) but a secondary repo shows mixed or opposing results, expand that secondary repo to 10 PRs before interpreting. Expansion is triggered by repo-level ambiguity, not by overall effect size. Because expansion conditions on primary-repo results, post-expansion secondary analyses are exploratory, not confirmatory.
+### Batch expansion for confidence
+
+Results are evaluated in batches. After each batch, decide: stop (signal is clear) or run another batch from the same repo.
+
+- **Primary repo:** First batch is 15 PRs. If the three-class distribution and reviewer preference are unambiguous (e.g., ≥12 of 15 in the same direction), stop. If ambiguous, run another batch of 10.
+- **Secondary repos:** First batch is 3 PRs each. If a secondary repo's results conflict with the primary, expand to 10 before interpreting.
+
+This is group sequential in spirit: look after each batch, expand if uncertain. Evidence compounds across batches — the second batch doesn't invalidate the first. Post-expansion analyses from any repo are reported alongside pre-expansion results so the reader can see what changed.
+
+No maximum sample size is fixed. The stopping rule is confidence, not a number. But each expansion decision and its rationale are recorded in the work log before the next batch begins.
 
 ## Snapshot Definitions
 
