@@ -313,7 +313,7 @@ The following will be published alongside results:
 
    **3b. Blind-blind-merge (implement).** Two models, same sharpened spec, separate `/tmp` directories. Each produces a refactored version independently. Compare implementations, pick the structurally simpler one per component, synthesize.
 
-   Models: Claude Opus 4.6 (via Claude Code, auto-edit) and Codex GPT-5.4 (via `codex exec`, full write access). Gemini 3.1 Pro Preview (via `gemini --approval-mode auto_edit`) serves as reviewer only — it does not participate in generation.
+   Models: Claude Opus 4.6 (via Claude Code, auto-edit) and Codex GPT-5.4 (via `codex exec -s danger-full-access`). Gemini 3.1 Pro Preview (via `gemini --approval-mode yolo --include-directories <workspace>`) serves as reviewer only — it does not participate in generation. All three verified to write files in `/tmp` workspaces.
 
    **3c. Bug-hunt (verify).** Run adversarial review against the merged refactoring with the original spec as input. Iterate to convergence (zero new findings). If a bug traces to a spec defect, fix the spec and re-merge rather than patching.
 
