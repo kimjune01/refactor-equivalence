@@ -261,7 +261,21 @@ The interesting failure is not the agent that breaks tests — that agent is sim
 
 ## Procedure
 
-For each sampled PR:
+### Dev/test separation
+
+For each repo, PRs are split into a dev set (used for prompt iteration) and a test set (used for evaluation). No PR may appear in both. The prompt is frozen before any test-set PR is evaluated. Dev-set results are published alongside test-set results but do not contribute to the primary analysis.
+
+### Trail commitment
+
+The following will be published alongside results:
+
+- All candidate PRs considered and why each was included or excluded
+- All prompts tried during dev-set iteration, with notes on what changed and why
+- Full pilot data including failures
+- All `C_test` candidate commits, not just the selected one
+- Exclusion log with reasons
+
+### For each sampled PR:
 
 1. **Extract snapshots.**
    Identify `C_base`, `C_test`, and `C_final` according to the definitions above.
@@ -537,7 +551,9 @@ The denominator is all trials. No-op trials count as zero complexity reduction.
 
 ### P2: Trajectory past `C_final`
 
-In at least 30% of active trials (non-no-ops), reviewers will classify `C_llm` as past `C_final` — simpler than what reviewers accepted. Reviewers are pragmatic, not perfectionists; `C_final` is a satisficing threshold, not the simplest possible member of the class.
+In at least 50% of active trials (non-no-ops), reviewers will classify `C_llm` as past `C_final` — simpler than what reviewers accepted. Reviewers are pragmatic, not perfectionists; `C_final` is a satisficing threshold, not the simplest possible member of the class.
+
+The wrong-direction rate (slop-slope) will be below 20% of active trials.
 
 ### P3: Human merge-readiness
 
@@ -594,6 +610,14 @@ The clean-room procedure strips `.git`, copies only the `C_test` tree, disables 
 Only PRs merged after the model's training cutoff are eligible.
 
 The model version and cutoff date are recorded before sampling. This is a mitigation, not elimination — public code, PR discussions, and similar patterns may exist in retrieval or evaluation memory despite cutoff restrictions.
+
+### Memorization vs. reasoning
+
+The LLM may produce good refactors because it has seen similar code during training, not because it reasons about complexity. This is a competing explanation (Chamberlin) that the experiment cannot fully exclude. If the refactoring prompt works only on repos the model has likely trained on, that weakens the generalization claim. The post-cutoff restriction helps but does not eliminate this: the model has seen the repo's older code and idioms.
+
+### Narrow causal claim
+
+The experiment tests this prompt + this model on these PRs. It does not test "refactoring passes in general." The prompt is a learned artifact tuned on dev-set PRs. A different prompt or model might produce different results. The causal claim is: this specific intervention improved these specific PRs, under these specific conditions.
 
 ### Environment reconstruction
 
