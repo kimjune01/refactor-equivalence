@@ -311,7 +311,9 @@ The following will be published alongside results:
 
    **3a. Volley (sharpen).** Take the repo-specific refactoring prompt and the diff from `C_base` to `C_test`. Volley sharpens the refactoring intent into specific, testable changes. Converge in two rounds — if the refactoring intent doesn't stabilize, the trial is a no-op.
 
-   **3b. Blind-blind-merge (implement).** Two models (opus + codex or equivalent), same sharpened spec, separate `/tmp` directories. Each produces a refactored version independently. Compare implementations, pick the structurally simpler one per component, synthesize.
+   **3b. Blind-blind-merge (implement).** Two models, same sharpened spec, separate `/tmp` directories. Each produces a refactored version independently. Compare implementations, pick the structurally simpler one per component, synthesize.
+
+   Models: Claude Opus 4.6 (via Claude Code, auto-edit) and Codex GPT-5.4 (via `codex exec`, full write access). Gemini 3.1 Pro Preview (via `gemini --approval-mode auto_edit`) serves as reviewer only — it does not participate in generation.
 
    **3c. Bug-hunt (verify).** Run adversarial review against the merged refactoring with the original spec as input. Iterate to convergence (zero new findings). If a bug traces to a spec defect, fix the spec and re-merge rather than patching.
 

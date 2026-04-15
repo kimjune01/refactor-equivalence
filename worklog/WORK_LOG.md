@@ -46,20 +46,40 @@ Created `prompts/meta/generate-repo-prompt.md` (metaprompt for repo-specific pro
 
 Walked the prereg through all 20 thinkers from the /reading/scientific-method/ collection. Two real catches: Popper (P2 bar too low, raised from 30% to 50%) and Feynman (dev/test circularity, added non-overlap requirement). Added trail commitment, acknowledged narrow causal claim, dropped memorization threat per Chinese Room.
 
-### 21:05 — Blog: prereg audit page
+### 21:05 — Blog: prereg checklist
 
-Created `/reading/scientific-method/prereg-audit/` with 20 questions from the collection. Each maps to a thinker + failure mode. Then moved it to `/methodology` as blog post `2026-04-14-prereg-audit.md`. Renamed to "Prereg Checklist." Copyedited: agent audience explicit, questions 3/5/12/18 sharpened, closing rewrites.
+Created `/reading/scientific-method/prereg-audit/` with 20 questions from the collection. Moved to `/methodology` as blog post `2026-04-14-prereg-audit.md`. Renamed to "Prereg Checklist." Copyedited. Agent audience made explicit.
 
 ### 21:15 — Ran own checklist against own prereg
 
 Five gaps fixed: Q3 assumptions listed, Q8 competing explanations, Q12 paradigm assumption, Q16 PPV estimate, Q20 expansion is exploratory not confirmatory.
 
-### 21:25 — Final codex sniff: edit-set leak fixed
+### 21:25 — Edit-set leak fixed
 
-Reverted LLM edit scope from C_base→C_final to C_base→C_test. Giving the LLM the C_final file list was information leakage (which files reviewers changed). Two-analysis rule for no-ops: intent-to-treat for P3, observed-only for mixed model. Operational definitions for trajectory classes. Down-induction softened to "plausible, not guaranteed."
+Reverted LLM edit scope from C_base→C_final to C_base→C_test. C_final file list is information leakage. Two-analysis rule for no-ops: intent-to-treat for P3, observed-only for mixed model.
 
-### 21:30 — Migrated from WORKLOG.md to worklog/WORK_LOG.md
+### 21:35 — Forge pipeline as procedure
 
-Previous work log in WORKLOG.md consolidated into structured worklog format. Session-persistent logging activated.
+Replaced single-shot refactoring prompt with full forge pipeline: volley (sharpen) → blind-blind-merge (opus + codex) → bug-hunt (adversarial review) → volley (clean). Prompts and metaprompts updated to describe forge input spec.
 
-**Status:** Prereg converged after 7 codex rounds + checklist audit. Ready to start pulling dev-set PRs from gemini-cli.
+### 21:40 — GPT-5.4 training cutoff confirmed: August 31, 2025
+
+Binding cutoff is the later of the two forge models. PRs merged after September 2025 are eligible.
+
+### 21:45 — Slop-slope attribution
+
+Gmail confirmed: Dexter Horthy coined "slop-slope" in his email reply to the prework post. Credited in both the prereg and the prework blog post.
+
+### 21:50 — Prework post updated
+
+Added "The third axis" section crediting Dexter, explaining the slop-slope, linking to the experiment repo.
+
+### 21:55 — Batch expansion rule
+
+Group sequential: run batches, look at results, expand if uncertain. No fixed maximum sample size. Stopping rule is confidence, not a number. Every expansion decision logged before next batch. Q20 answer updated.
+
+### 22:00 — Reviewer model: Gemini 3.1
+
+No self-review conflict — Gemini doesn't participate in forge (opus + codex). Vertex AI credentials at ~/Downloads/atom.json. Do not commit credentials.
+
+**Status:** Prereg converged. Forge pipeline as procedure. Reviewer model locked. Ready to start pulling dev-set PRs.
