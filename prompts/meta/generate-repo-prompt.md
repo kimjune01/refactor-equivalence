@@ -1,27 +1,28 @@
 # Metaprompt: Generate a repo-specific refactoring prompt
 
-Given a repository, produce a refactoring prompt that an LLM agent will receive after tests pass on a brownfield PR. The agent sees the full repo at the tests-first-pass commit but no git history, no reviewer comments, no internet.
+Given a repository, produce a refactoring prompt that an LLM agent will receive after tests pass on a brownfield PR. The agent sees the full repo at the tests-first-pass commit, the diff from base to that commit, but no git history, no reviewer comments, no internet.
 
 ## Input
 
 - Repo name and URL
 - Language and build system
 - Test command
-- 3-5 example diffs from dev-set PRs showing what reviewers pushed for (C_test → C_final deltas)
-- Any repo-specific conventions visible in the codebase (linting rules, naming patterns, module structure)
+- 3-5 dev-set diffs showing what reviewers pushed for (C_test → C_final deltas). These are for prompt generation only — the agent never sees them at runtime.
+- Repo conventions extracted mechanically: linter config, formatter config, CI checks. Not hand-curated.
 
 ## Output
 
 A refactoring prompt that:
 
 1. Tells the agent to refactor for simplicity, clarity, and local idiom while preserving behavior
-2. Names the specific patterns this repo values (from the dev-set examples)
-3. Names the specific anti-patterns this repo rejects (from the dev-set examples)
-4. Restricts edits to source files only (no tests, no config, no docs)
-5. Tells the agent that less code is better, familiar patterns are better, and if unsure, don't change it
+2. Names recurring patterns this repo values (generalized from dev-set examples, not one-off fixes)
+3. Names recurring anti-patterns this repo rejects
+4. Restricts edits to the allowed file set (provided at runtime)
+5. Tells the agent: fewer concepts and branches is better than fewer lines. Don't golf.
+6. If unsure whether a change simplifies, don't make it
 
 ## Constraints
 
-- The prompt must converge to a fixed point under repeated application (skill monoidal contract)
 - The prompt must not reference specific PRs, reviewer names, or git history
 - The prompt must work for any PR in the repo, not just the dev-set examples
+- The prompt must not ban renaming or error-handling changes categorically — reviewers request these. Ban adding new abstractions or patterns not already in the codebase.

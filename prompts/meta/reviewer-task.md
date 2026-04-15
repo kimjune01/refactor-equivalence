@@ -1,4 +1,4 @@
-# Metaprompt: Reviewer task instructions
+# Reviewer task instructions
 
 Instructions given to blind reviewers for each PR evaluation.
 
@@ -8,7 +8,7 @@ You are reviewing a pull request. You will see:
 - The PR title and description
 - Two unlabeled diffs (Version A and Version B) from the same base commit
 
-Both versions pass the project's test suite. Assume tests are correct and passing.
+Both versions pass the project's test suite. Tests passing does not mean behavior is correct — use your judgment on the diff.
 
 **Question:** Which version would you approve for merge? You must pick one.
 
@@ -18,13 +18,13 @@ For each version, also note:
 
 ## Phase 2 — Trajectory classification
 
-Now you will see a third version: the one that was actually accepted by reviewers after code review.
+Now you will see a third version: the one that was accepted after code review.
 
-Looking at the version you evaluated in Phase 1 that was NOT the accepted version, classify it:
+Compare each Phase 1 version against this accepted version. For each, classify:
 
-- **Past accepted:** Simpler than the accepted version without apparent loss of correctness or clarity
-- **Short of accepted:** Improved over the other version but leaves complexity the accepted version removed
-- **Wrong direction:** No meaningful improvement over the other version, or worse
+- **Simpler:** Less complex than the accepted version without apparent loss of correctness or clarity
+- **Between:** More complex than the accepted version but less complex than the other Phase 1 version
+- **No improvement:** No meaningful simplification relative to the other Phase 1 version, or more complex
 
 If you're unsure between two categories, pick the one you lean toward and note the uncertainty.
 
