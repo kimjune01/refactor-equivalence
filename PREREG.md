@@ -85,7 +85,7 @@ A PR is eligible if all of the following hold:
 PR size bounds:
 
 - Minimum: 100 changed source lines from pre-PR base to final accepted PR head.
-- Maximum: none. Larger PRs are preferred.
+- Maximum: 2000 changed source lines. Larger within this range is preferred.
 
 Changed source lines exclude generated files, lockfiles, snapshots, vendored files, and documentation-only files.
 
@@ -138,7 +138,7 @@ This is not necessarily the repository merge commit. It is the final state of th
 
 The LLM-refactored version produced from `C_test` under the clean-room procedure.
 
-The LLM may edit only source files that were changed in the PR diff from `C_base` to `C_test`. It may not edit tests. This restriction will be mechanically enforced when constructing `C_llm`.
+The LLM may edit only source files that were changed in the PR diff from `C_base` to `C_test`. It may not edit tests. This is a conservative restriction — it may prevent valid simplifications that require touching adjacent files, but it ensures `C_llm` stays comparable to the original PR scope. Mechanically enforced when constructing `C_llm`.
 
 ### `C_random`
 
@@ -485,10 +485,10 @@ For reviewer preferences, use a mixed-effects logistic model.
 Candidate model:
 
 ```text
-prefer_llm_over_test ~ test_status + PR_size + post_C_test_change_type + (1 | PR) + (1 | reviewer)
+prefer_llm_over_test ~ PR_size + post_C_test_change_type + (1 | PR) + (1 | reviewer)
 ```
 
-The primary estimand is the intercept-adjusted preference for `C_llm` over `C_test` in the forced-choice task.
+The primary estimand is the intercept-adjusted preference for `C_llm` over `C_test` in the forced-choice task. Only observed reviewer judgments (test-passing `C_llm` shown to reviewers) enter the mixed-effects model. No-op trials are reported separately as the no-op rate and do not contribute synthetic judgments to this model.
 
 For calibration tasks involving `C_final` or `C_random`, ordinal or logistic models may be used depending on the final coding.
 
@@ -550,7 +550,7 @@ The pilot is used to answer feasibility questions:
 
 The pilot will not be used to stop early for efficacy.
 
-Any procedural changes after the pilot will be documented before the main 30-PR sample is evaluated.
+Any procedural changes after the pilot will be documented before main-sample extraction begins.
 
 ## Pilot Decisions
 
@@ -695,7 +695,7 @@ The clean-room procedure strips `.git`, copies only the `C_test` tree, disables 
 
 Only PRs merged after the model's training cutoff are eligible.
 
-The model version and cutoff date are recorded before sampling.
+The model version and cutoff date are recorded before sampling. This is a mitigation, not elimination — public code, PR discussions, and similar patterns may exist in retrieval or evaluation memory despite cutoff restrictions.
 
 ### Environment reconstruction
 
