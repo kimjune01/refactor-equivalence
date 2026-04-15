@@ -1,18 +1,15 @@
-# Can LLMs reduce complexity through refactoring to make PRs easier to merge?
+# Does an LLM refactoring pass help or hurt brownfield PRs?
 
 ## Hypothesis
 
-For brownfield PRs, there exists an equivalence class of correct implementations: multiple implementations pass the same tests, but differ in complexity, maintainability, and fit with the surrounding codebase. The first implementation that passes tests is often not the version that reviewers are willing to merge. Human reviewers frequently push contributors toward simpler or more idiomatic members of this equivalence class before approval.
+For brownfield PRs, there exists an equivalence class of correct implementations: multiple implementations pass the same tests, but differ in complexity, maintainability, and fit with the surrounding codebase. The first implementation that passes tests is often not the simplest member of the class.
 
-We hypothesize that LLMs, given only the "tests first pass" snapshot and a refactoring prompt, can move an implementation toward a more merge-ready state without access to reviewer feedback or subsequent commits.
-
-This study deliberately separates three related claims:
+An LLM refactoring pass after tests pass will move the implementation within this equivalence class. The question is which direction. Two claims, tested independently:
 
 1. **Simplification claim:** Does the LLM reduce measured code complexity relative to the tests-first-pass snapshot?
-2. **Convergence claim:** Does the LLM move the code closer to the final accepted PR state?
-3. **Merge-readiness claim:** Do independent human reviewers judge the LLM-refactored version as more merge-ready than the tests-first-pass version?
+2. **Merge-readiness claim:** Do independent human reviewers judge the LLM-refactored version as more merge-ready than the tests-first-pass version?
 
-The final accepted PR state is treated as an important empirical reference point, not as a perfect proxy for optimal code quality.
+If both confirm, a refactoring pass is worth adding to agent workflows. If the LLM reduces complexity but reviewers don't prefer it, the agent is optimizing a metric that doesn't match taste. If reviewers prefer it but complexity increases, the agent is doing something useful that metrics don't capture. If both refute — the agent makes things worse while passing tests — that's the slop-slope confirmed as default behavior, and the most important finding.
 
 ## Estimand
 
@@ -130,9 +127,10 @@ If the `C_final` tests cannot be overlaid cleanly onto earlier commits (e.g., te
 
 ### `C_final`
 
-The final accepted PR head before merge.
+The final accepted PR head before merge. Serves two roles:
 
-This is not necessarily the repository merge commit. It is the final state of the PR branch that reviewers accepted.
+1. **Test source:** the merge-time test suite is backported onto earlier commits to define `C_test`.
+2. **Directional proxy:** `C_final` marks the direction reviewers pushed the code. It is not ground truth for optimal code, but if `C_llm` reaches or passes `C_final` on the complexity axis, that's strong evidence the refactoring pass is working. "Past it" is better than "toward it."
 
 ### `C_llm`
 
@@ -160,14 +158,10 @@ Measured between:
 
 - `C_test`
 - `C_llm`
-- `C_final`
+- `C_final` (directional proxy)
 - `C_random`, where available
 
-The primary complexity scope is the union of source files touched by any of:
-
-- `C_test`
-- `C_llm`
-- `C_final`
+The primary complexity scope is the union of source files touched by `C_test` or `C_llm`.
 
 This avoids measuring only the subset of files edited by one condition and prevents the LLM from appearing simpler merely by moving or avoiding changes outside the measured scope.
 
@@ -188,32 +182,17 @@ Secondary diagnostics:
 
 If the agent produces a no-op (fails tests or produces no applicable output), `C_llm = C_test` and complexity delta is zero.
 
-### 2. Diff similarity to `C_final`
+### 2. Direction relative to `C_final`
 
-Measures whether `C_llm` moves toward the final accepted PR state.
+`C_final` is where reviewers pushed the code. Measure complexity of `C_final` on the same scope and tools as `C_test` and `C_llm`.
 
-Candidate metrics:
+Three outcomes per trial:
 
-- Tree-edit distance where practical
-- Token-level edit distance
-- Line-level normalized diff distance
+- **Short of `C_final`:** `complexity(C_test) > complexity(C_llm) > complexity(C_final)`. Agent improved but reviewers would have pushed further.
+- **Past `C_final`:** `complexity(C_llm) < complexity(C_final)`. Agent found a simpler member of the equivalence class than the reviewer-accepted version.
+- **Wrong direction:** `complexity(C_llm) ≥ complexity(C_test)`. Agent made things worse or did nothing. This is the slop-slope.
 
-Primary convergence score:
-
-```text
-1 - distance(C_llm, C_final) / distance(C_test, C_final)
-```
-
-A positive score indicates that `C_llm` is closer to `C_final` than `C_test` is. A score near 0 indicates no movement toward `C_final`. A negative score indicates movement away from `C_final`.
-
-This metric tests convergence toward the reviewer-mediated final state, not absolute quality.
-
-Convergence will be reported both:
-
-- Overall across all sampled PRs
-- On the subset where the dominant post-`C_test` delta is simplification, refactoring, naming, style, or maintainability cleanup
-
-PRs whose dominant post-`C_test` delta is correctness repair, API adjustment, test change, or another non-refactoring category will be analyzed separately.
+Report the distribution across these three categories. "Past `C_final`" is the strongest evidence; "wrong direction" is the most important finding.
 
 ### 3. Human merge-readiness preference
 
@@ -260,13 +239,7 @@ After completing the forced-choice task, reviewers will answer a blinding check 
 
 ### 4. Lines of code delta
 
-Net LOC change from `C_test` to:
-
-- `C_llm`
-- `C_final`
-- `C_random`
-
-LOC is not treated as a quality measure by itself. It is included to distinguish simplification from mere expansion or compression.
+Net LOC change from `C_test` to `C_llm` and `C_random`. LOC is descriptive, not a quality measure.
 
 ### 5. Correctness gate
 
@@ -283,26 +256,7 @@ For each sampled PR:
 1. **Extract snapshots.**
    Identify `C_base`, `C_test`, and `C_final` according to the definitions above.
 
-2. **Classify post-`C_test` changes.**
-   Categorize the human-authored delta from `C_test` to `C_final`.
-
-   Categories may include:
-
-   - Simplification or refactoring
-   - Bug fix
-   - API adjustment
-   - Test adjustment
-   - Naming or style change
-   - Reviewer-requested maintainability change
-   - Documentation or comments
-   - Mechanical formatting
-   - Other
-
-   The dominant category will be recorded. Secondary categories may also be recorded if the final coder rules permit multi-label classification.
-
-   This classification is used to interpret whether convergence toward `C_final` reflects simplification, correctness repair, style alignment, or some other review-driven change.
-
-3. **Prepare clean-room workspace.**
+2. **Prepare clean-room workspace.**
    Copy the repository at `C_test` to a temporary workspace such as `/tmp`.
 
    The clean-room workspace must:
@@ -316,7 +270,7 @@ For each sampled PR:
 
    Since tests pass at `C_test`, the refactoring task should not require external references or network access.
 
-4. **Generate LLM refactoring.**
+3. **Generate LLM refactoring.**
    Prompt the LLM to refactor for clarity, simplicity, maintainability, and local idiom while preserving behavior.
 
    The LLM may inspect the full clean-room repository context. It may not access:
@@ -331,25 +285,25 @@ For each sampled PR:
 
    The exact prompt, model name, model version, decoding parameters, tool permissions, and allowed file set will be recorded.
 
-5. **Construct `C_llm`.**
+4. **Construct `C_llm`.**
    Apply the LLM's changes to the clean-room copy and save the resulting working tree.
 
    If the LLM produces no applicable patch, edits forbidden files, or edits tests, the trial is a no-op.
 
-6. **Verify correctness.**
+5. **Verify correctness.**
    Run the predetermined test command on `C_llm`.
 
    If tests fail, the trial is a no-op: `C_llm = C_test` for all metrics. The agent failed to stay in the equivalence class.
 
-7. **Generate random control.**
+6. **Generate random control.**
    Apply the predetermined random or mechanical transformation to `C_test`, producing `C_random`.
 
    Verify whether `C_random` passes tests. If it fails, record failure and classify the control as invalid for that PR.
 
-8. **Measure static outcomes.**
-   Compute complexity, diff similarity, LOC, and secondary diagnostics for `C_test`, `C_llm`, `C_final`, and `C_random`.
+7. **Measure.**
+   Compute complexity and LOC for `C_test`, `C_llm`, `C_final`, and `C_random`. Classify each trial as short of `C_final`, past `C_final`, or wrong direction.
 
-9. **Blind human review.**
+8. **Blind human review.**
    Present reviewers with unlabeled diffs from `C_base`.
 
    The primary task is pairwise forced choice between `C_test` and `C_llm`.
@@ -358,12 +312,10 @@ For each sampled PR:
 
    Reviewers answer which version they would approve for merge assuming tests pass, record semantic concerns separately, and optionally provide categorical rationales.
 
-   `C_final` is evaluated separately in a calibration task, not in the same primary ranking.
-
-10. **Post-ranking blinding check.**
+9. **Post-ranking blinding check.**
     After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
 
-11. **Record all metadata.**
+10. **Record all metadata.**
     Record:
 
     - Repository
@@ -396,13 +348,11 @@ This establishes the baseline state after tests first pass.
 
 `C_random`, a semantics-preserving but non-simplifying transformation.
 
-This tests whether metrics reward any change or specifically reward changes that plausibly simplify code or move toward the accepted PR state.
+This tests whether metrics reward any change or specifically reward simplification.
 
-### Final accepted PR state
+### Directional proxy
 
-`C_final`.
-
-This is the reviewer-mediated endpoint and is used as a convergence reference and separate calibration target. It is not assumed to be globally optimal and is not included in the primary `C_test` versus `C_llm` forced-choice task.
+`C_final` — where reviewers pushed the code. Used to classify each trial as short, past, or wrong direction on the complexity axis. Not a ground truth; a satisficing threshold.
 
 ## Analysis
 
@@ -427,32 +377,11 @@ Analyze with paired tests across PRs:
 
 No-op trials contribute zero complexity delta. The denominator is all trials.
 
-### 2. Convergence toward `C_final`
+### 2. Direction relative to `C_final`
 
-Question: Does `C_llm` move closer to the final accepted PR state than `C_test`?
+Question: Where does `C_llm` land on the complexity axis relative to `C_test` and `C_final`?
 
-Primary comparison:
-
-```text
-distance(C_llm, C_final) < distance(C_test, C_final)
-```
-
-Analyze normalized convergence scores across PRs.
-
-Compare `C_llm` against both:
-
-- `C_test`
-- `C_random`
-
-This distinguishes meaningful convergence from arbitrary edit movement.
-
-No-op trials contribute zero convergence. The denominator is all trials.
-
-Convergence will be reported:
-
-- Overall
-- On the subset where the dominant post-`C_test` delta is simplification, refactoring, naming, style, or maintainability cleanup
-- Separately for PRs where the dominant post-`C_test` delta is correctness repair, API adjustment, test change, or another non-refactoring category
+Report the three-way distribution: short of `C_final`, past `C_final`, wrong direction. No-op trials count as wrong direction.
 
 ### 3. Human merge-readiness
 
@@ -485,12 +414,12 @@ For reviewer preferences, use a mixed-effects logistic model.
 Candidate model:
 
 ```text
-prefer_llm_over_test ~ PR_size + post_C_test_change_type + (1 | PR) + (1 | reviewer)
+prefer_llm_over_test ~ PR_size + (1 | PR) + (1 | reviewer)
 ```
 
 The primary estimand is the intercept-adjusted preference for `C_llm` over `C_test` in the forced-choice task. Only observed reviewer judgments (test-passing `C_llm` shown to reviewers) enter the mixed-effects model. No-op trials are reported separately as the no-op rate and do not contribute synthetic judgments to this model.
 
-For calibration tasks involving `C_final` or `C_random`, ordinal or logistic models may be used depending on the final coding.
+For calibration tasks involving `C_random`, ordinal or logistic models may be used depending on the final coding.
 
 ### Inter-rater reliability
 
@@ -513,20 +442,6 @@ Report the fraction of trials where the agent failed to produce a test-passing o
 ### Review-round correlation
 
 Test whether LLM improvement correlates with the number of review rounds in the original PR.
-
-Outcomes:
-
-- Complexity reduction magnitude
-- Convergence score
-- Human preference for `C_llm` over `C_test`
-
-If LLMs recover more of the delta on PRs with more review rounds, that suggests they capture part of what reviewers enforce.
-
-### Post-`C_test` change-type interaction
-
-Analyze whether LLM performance differs depending on the dominant human-authored post-`C_test` change type.
-
-For example, LLMs may perform better on simplification and naming changes than on subtle bug fixes or API adjustments.
 
 ### Active-only analysis
 
@@ -556,10 +471,7 @@ Any procedural changes after the pilot will be documented before main-sample ext
 
 The following items will be decided and locked after the pilot and before the main sample is drawn:
 
-1. **Exact distance metric.**
-   Lock whether the primary convergence metric uses tree-edit distance, token-level edit distance, line-level normalized diff distance, or a specified fallback sequence.
-
-2. **Complexity tool and configuration.**
+1. **Complexity tool and configuration.**
    Lock the static-analysis tool, version, parser settings, ignored files, thresholds, and aggregation rules.
 
 3. **Review presentation format.**
@@ -577,8 +489,6 @@ The following items will be decided and locked after the pilot and before the ma
 7. **PR size bound adjustments.**
    Lock any changes to minimum or maximum changed-source-line thresholds.
 
-8. **Classification coder rules.**
-   Lock whether post-`C_test` change classification is single-label or multi-label, the number of coders, adjudication procedure, and reliability reporting.
 
 ## Futility Conditions
 
@@ -599,10 +509,7 @@ The study may be deemed infeasible, or redesigned before main-sample execution, 
 5. **Metrics are inapplicable.**
    Complexity or distance metrics cannot be computed for a large enough share of cases to support the planned primary analyses.
 
-6. **Post-`C_test` deltas are usually not refactoring-related.**
-   Most eligible PRs have dominant post-`C_test` changes that are correctness fixes, API changes, test changes, or other non-refactoring work, making the convergence outcome poorly aligned with the study question.
-
-7. **`C_random` cannot be generated reliably.**
+6. **`C_random` cannot be generated reliably.**
    The random/mechanical control cannot be generated without frequent behavioral breakage, accidental simplification, or invalid edits.
 
 These are feasibility and design-validity conditions, not efficacy stopping rules.
@@ -615,11 +522,9 @@ These are feasibility and design-validity conditions, not efficacy stopping rule
 
 The denominator is all trials. No-op trials count as zero complexity reduction.
 
-### P2: Convergence toward accepted PR state
+### P2: Direction relative to `C_final`
 
-`C_llm` will be closer to `C_final` than `C_test` is, by the primary locked distance metric, in at least 60% of all trials.
-
-The denominator is all trials. No-op trials count as zero convergence.
+In at least 30% of active trials (non-no-ops), `C_llm` will land past `C_final` on the complexity axis — simpler than what reviewers accepted. Reviewers are pragmatic, not perfectionists; `C_final` is a satisficing threshold, not the simplest possible member of the class.
 
 ### P3: Human merge-readiness
 
@@ -627,13 +532,7 @@ Blind reviewers will prefer `C_llm` over `C_test` in at least 65% of all reviewe
 
 The denominator is all reviewer-PR judgments. No-op trials count as "reviewer prefers `C_test`."
 
-### P4: Non-identity with final state
-
-`C_llm` will not exactly match `C_final` in any trial.
-
-The equivalence class is expected to be large. A successful LLM refactor may find a different simple implementation than the one produced through human review.
-
-### P5: Some refactors will make things worse
+### P4: Some refactors will make things worse
 
 Among test-passing `C_llm` outputs, some will increase measured complexity or be ranked below `C_test` by reviewers. These cases — the slop-slope — are the most practically important finding.
 
@@ -644,16 +543,7 @@ The study will explicitly guard against the following misleading interpretations
 1. **Metric-only simplification.**
    `C_llm` may reduce cyclomatic or cognitive complexity while making the code less idiomatic, less maintainable, or less merge-ready.
 
-2. **Convergence without improvement.**
-   `C_llm` may move closer to `C_final` because it copies superficial structure or style, not because it improves the underlying implementation.
-
-3. **Divergence despite quality.**
-   `C_llm` may be a good alternative implementation that reviewers prefer, while still not resembling `C_final`.
-
-4. **Final-state overinterpretation.**
-   `C_final` may reflect reviewer preference, time pressure, API constraints, or local compromise rather than optimal code quality.
-
-5. **Correctness hidden by tests.**
+2. **Correctness hidden by tests.**
    A refactor may pass the project tests while introducing semantic risk that reviewers notice or that tests fail to cover.
 
 6. **No-op rate masking.**
@@ -662,18 +552,13 @@ The study will explicitly guard against the following misleading interpretations
 7. **Review blinding failure.**
    Reviewers may infer which version is LLM-generated or final based on style, polish, or diff shape, biasing merge-readiness judgments.
 
-8. **Change-type mismatch.**
-   Apparent non-convergence may occur because the human post-`C_test` delta was primarily correctness repair, API negotiation, or test adjustment rather than simplification.
-
 These scenarios will be discussed in interpretation regardless of whether the primary predictions are confirmed.
 
 ## Threats to Validity
 
-### Final PR state is an imperfect proxy
+### `C_final` is a satisficing threshold
 
-`C_final` is not necessarily the simplest or best possible implementation. It is the version accepted by reviewers under real project constraints.
-
-This study therefore treats convergence toward `C_final` as one outcome, separate from measured simplification and blind human merge-readiness.
+Reviewers accept "good enough," not the simplest possible. `C_final` marks the direction they pushed, not the optimum. `C_llm` landing past it is evidence the agent outperformed a pragmatic bar, not that it found the global minimum.
 
 ### Test suites are incomplete
 
@@ -703,7 +588,7 @@ Historical test environments may be hard to reproduce. PRs whose `C_test` status
 
 ### Metric validity
 
-Cyclomatic complexity, LOC, and edit distance are incomplete proxies for maintainability. This is why the study keeps static metrics, convergence metrics, and human review as separate outcomes.
+Cyclomatic complexity and LOC are incomplete proxies for maintainability. This is why the study keeps static metrics and human review as separate outcomes.
 
 ### Scope restriction
 
@@ -721,11 +606,9 @@ The practical implication is that coding agents should include a refactoring pas
 
 Different outcome patterns imply different conclusions:
 
-- If complexity improves but reviewers do not prefer `C_llm`, the model may be optimizing shallow simplicity rather than merge-readiness.
-- If `C_llm` moves toward `C_final` but complexity does not improve, reviewer changes may reflect style, API fit, or correctness rather than simplification.
-- If reviewers prefer `C_llm` but it does not converge toward `C_final`, the model may find alternative acceptable members of the equivalence class.
+- If complexity improves but reviewers do not prefer `C_llm`, the model is optimizing a metric that doesn't match taste.
+- If reviewers prefer `C_llm` but complexity increases, the model is doing something useful that metrics don't capture.
 - If the no-op rate is high but active trials show improvement, the bottleneck is agent competence, not refactoring judgment.
-- If performance is concentrated only on the simplification/refactoring subset, the autonomous refactoring pass may be useful but narrower than the full post-review revision process.
 
 ### If refuted
 
