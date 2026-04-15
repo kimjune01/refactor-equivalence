@@ -617,7 +617,7 @@ This prereg was audited against the [prereg checklist](/prereg-audit). Answers b
 - No formal power analysis. The pilot will estimate variance; if effect sizes are small, 27 trials may be underpowered.
 
 **Q20 (Ramdas) — Sequential validity:**
-- The secondary repo expansion rule conditions on primary-repo results. This is a form of peeking. The expansion does not change the primary analysis (gemini-cli results stand alone). Secondary-repo results after expansion should be interpreted as exploratory, not confirmatory. Report both the pre-expansion and post-expansion analyses.
+- Batch expansion looks at results before deciding whether to continue. This is peeking by design. Evidence compounds across batches — the second batch doesn't invalidate the first. All expansion decisions and their rationale are logged before the next batch begins. Pre-expansion and post-expansion results are reported side by side.
 
 **Skipped:**
 - Q9 (Fisher) — randomized assignment. Not applicable: within-PR design, no assignment to conditions.
