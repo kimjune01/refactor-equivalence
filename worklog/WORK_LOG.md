@@ -82,4 +82,34 @@ Group sequential: run batches, look at results, expand if uncertain. No fixed ma
 
 No self-review conflict — Gemini doesn't participate in forge (opus + codex). Vertex AI credentials at ~/Downloads/atom.json. Do not commit credentials.
 
-**Status:** Prereg converged. Forge pipeline as procedure. Reviewer model locked. Ready to start pulling dev-set PRs.
+### 22:05 — Slop-slope attribution confirmed
+
+Gmail thread with Dexter Horthy confirmed: he coined "slop-slope" in his reply to the prework post. Credited in both the prereg (formal definition) and the prework blog post (new "third axis" section linking to HumanLayer and the experiment repo).
+
+### 22:10 — Batch expansion rule
+
+Group sequential stopping: run batches, look at results, expand if uncertain. No fixed max sample size. Evidence compounds across batches. Every expansion decision logged before next batch. Aligns with Ramdas Q20 — peeking is fine when the trail is published.
+
+### 22:15 — Gemini CLI configured for Vertex AI
+
+Installed gemini CLI v0.38.0. Service account: `junekim@qvs-atom-gcp-research.iam.gserviceaccount.com`. Model: `gemini-3.1-pro-preview`. Credentials at `~/Downloads/atom.json` (do not commit). Required env: `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_LOCATION=global`. zshrc alias set with default model and `--approval-mode auto_edit`.
+
+### 22:25 — All three agents verified writing to /tmp
+
+| Agent | Command | Write flag |
+|-------|---------|------------|
+| Claude Opus 4.6 | `claude` | auto-edit (default) |
+| Codex GPT-5.4 | `codex exec` | `-s danger-full-access` |
+| Gemini 3.1 Pro | `gemini` | `--approval-mode yolo --include-directories <workspace>` |
+
+Three models, three roles, no overlap: opus + codex forge, gemini reviews. All confirmed writing files in `/tmp/agent-verify/`.
+
+### 22:30 — Prereg checklist audit (eating our own cooking)
+
+Ran the 20-question prereg checklist against our own prereg. Five gaps fixed: Q3 assumptions, Q8 competing explanations, Q12 paradigm, Q16 PPV, Q20 sequential validity. The checklist caught real problems on its first use.
+
+### 22:35 — Blog: prereg checklist copyedited
+
+Agent audience made explicit. Questions 3/5/12/18 sharpened for agents. Closing rewrites: "registering a story" / "filtered final narrative." Codex reviewed, sharpen pass converged in one round.
+
+**Status:** Prereg converged. All three agents verified. Gemini CLI configured. Ready to pull dev-set PRs from gemini-cli and start the pilot.
