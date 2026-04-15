@@ -55,7 +55,9 @@ One primary repo goes deep. Four secondary repos go shallow. If results on the p
   - `django/django` (Python) — mature triage/merger workflow, regression tests required, decades of review culture
   - `fastapi/fastapi` (Python) — modern Python, strict typing, fast test suite, active post-cutoff
 
-These repos are current best candidates, not locked. The selection criteria are locked: language diversity, strict enforced review, ≥10 contributors, active post-cutoff. Repos may be swapped for others of equal caliber if build/test reconstruction is impractical (e.g., `astral-sh/ruff` for Rust if `rust-lang/rust` CI is too slow, `cli/cli` for Go if `kubernetes/kubernetes` is too large). The bar is the caliber, not the specific repo.
+These repos are current best candidates, not locked. The selection criteria are locked: language diversity, strict enforced review, ≥10 contributors, active post-cutoff. Repos may be swapped for others of equal caliber if build/test reconstruction is impractical. The bar is the caliber, not the specific repo.
+
+**Build-time bias:** All selected repos have fast build/test cycles (seconds to minutes, not hours). This excludes heavyweight C++ projects (LLVM, Chromium) and large compiler codebases (rust-lang/rust) where build times make per-trial iteration impractical. The experiment's results may not generalize to codebases where the build itself is the bottleneck — different feedback loops may produce different PR shapes and review dynamics.
 
 Total initial sample: 27 PRs. Maximum if all secondaries expand: 55.
 
