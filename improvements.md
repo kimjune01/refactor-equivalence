@@ -162,7 +162,10 @@ volley → hunt-spec → reconcile → blind-blind-merge →
 
 What we lose: Phase 7's "independent judgment" of C_llm becomes pre-biased. Acknowledged trade.
 
-**Iteration cap N: TBD** — see open Q2 below.
+**Iteration cap:**
+- **Approve**: reviewer returns zero comments → ship C_llm.
+- **Impasse**: comment count stops shrinking between rounds (implementer can't address what's left) → ship C_llm with the remaining comments noted, OR fall back to C_test if the unaddressed comments are blockers (test/build/complexity).
+- **Safety bound**: N=10 hard cap. Almost never hit in practice; exists to catch pathological reviewer/implementer pairs.
 
 ## Selection criteria changes
 
@@ -306,7 +309,7 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 **Q1 [LOCKED]: complexity gate threshold = δ = 0.05** (same as trajectory boundary). One number, two uses.
 
-**Q2 [LOCKED]: Reviewer-in-the-loop after merge** (S6). Same model (Gemini 3.1) used in-pipeline and Phase 7. Pre-approval bias acknowledged; outcome quality > measurement purity. Iteration cap N still open.
+**Q2 [LOCKED]: Reviewer-in-the-loop after merge** (S6). Same model (Gemini 3.1) used in-pipeline and Phase 7. Pre-approval bias acknowledged; outcome quality > measurement purity. Iteration: convergence on zero comments OR impasse on shrinking comments, N=10 as rare-case safety bound.
 
 **Q3: Single-agent default for small PRs?** S4 makes blind-blind precondition explicit. What's the right default for sub-threshold PRs — single opus, single codex, or rotate?
 
