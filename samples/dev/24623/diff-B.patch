@@ -1,0 +1,2400 @@
+--- a/evals/update_topic.eval.ts
++++ b/evals/update_topic.eval.ts
+@@ -5,8 +5,6 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import fs from 'node:fs';
+-import path from 'node:path';
+ import { evalTest } from './test-helper.js';
+ 
+ describe('update_topic_behavior', () => {
+@@ -115,104 +113,4 @@
+       }
+     },
+   });
+-
+-  evalTest('USUALLY_PASSES', {
+-    name: 'update_topic should NOT be used for informational coding tasks (Obvious)',
+-    approvalMode: 'default',
+-    prompt:
+-      'Explain the difference between Map and Object in JavaScript and provide a performance-focused code snippet for each.',
+-    files: {
+-      '.gemini/settings.json': JSON.stringify({
+-        experimental: {
+-          topicUpdateNarration: true,
+-        },
+-      }),
+-    },
+-    assert: async (rig) => {
+-      const toolLogs = rig.readToolLogs();
+-      const topicCalls = toolLogs.filter(
+-        (l) => l.toolRequest.name === UPDATE_TOPIC_TOOL_NAME,
+-      );
+-
+-      expect(
+-        topicCalls.length,
+-        `Expected 0 update_topic calls for an informational task, but found ${topicCalls.length}`,
+-      ).toBe(0);
+-    },
+-  });
+-
+-  evalTest('USUALLY_PASSES', {
+-    name: 'update_topic should NOT be used for surgical symbol searches (Grey Area)',
+-    approvalMode: 'default',
+-    prompt:
+-      "Find the file where the 'UPDATE_TOPIC_TOOL_NAME' constant is defined.",
+-    files: {
+-      'packages/core/src/tools/tool-names.ts':
+-        "export const UPDATE_TOPIC_TOOL_NAME = 'update_topic';",
+-      '.gemini/settings.json': JSON.stringify({
+-        experimental: {
+-          topicUpdateNarration: true,
+-        },
+-      }),
+-    },
+-    assert: async (rig) => {
+-      const toolLogs = rig.readToolLogs();
+-      const topicCalls = toolLogs.filter(
+-        (l) => l.toolRequest.name === UPDATE_TOPIC_TOOL_NAME,
+-      );
+-
+-      expect(
+-        topicCalls.length,
+-        `Expected 0 update_topic calls for a surgical symbol search, but found ${topicCalls.length}`,
+-      ).toBe(0);
+-    },
+-  });
+-
+-  evalTest('USUALLY_PASSES', {
+-    name: 'update_topic should be used for medium complexity multi-step tasks',
+-    prompt:
+-      'Refactor the `users-api` project. Move the routing logic from src/app.ts into a new file src/routes.ts, and update app.ts to use the new routes file.',
+-    files: {
+-      'package.json': JSON.stringify(
+-        {
+-          name: 'users-api',
+-          version: '1.0.0',
+-        },
+-        null,
+-        2,
+-      ),
+-      'src/app.ts': `
+-import express from 'express';
+-const app = express();
+-
+-app.get('/users', (req, res) => {
+-  res.json([{id: 1, name: 'Alice'}]);
+ });
+-
+-app.post('/users', (req, res) => {
+-  res.status(201).send();
+-});
+-
+-export default app;
+-      `,
+-      '.gemini/settings.json': JSON.stringify({
+-        experimental: {
+-          topicUpdateNarration: true,
+-        },
+-      }),
+-    },
+-    assert: async (rig) => {
+-      const toolLogs = rig.readToolLogs();
+-      const topicCalls = toolLogs.filter(
+-        (l) => l.toolRequest.name === UPDATE_TOPIC_TOOL_NAME,
+-      );
+-
+-      // This is a multi-step task (read, create new file, edit old file).
+-      // It should clear the bar and use update_topic at least at the start and end.
+-      expect(topicCalls.length).toBeGreaterThanOrEqual(2);
+-
+-      // Verify it actually did the refactoring to ensure it didn't just fail immediately
+-      expect(fs.existsSync(path.join(rig.testDir, 'src/routes.ts'))).toBe(true);
+-    },
+-  });
+-});
+--- a/packages/core/src/tools/shell.ts
++++ b/packages/core/src/tools/shell.ts
+@@ -136,7 +136,7 @@
+   }
+ 
+   getDescription(): string {
+-    return this.params.description || '';
++    return `${this.params.command} ${this.getContextualDetails()}`;
+   }
+ 
+   private simplifyPaths(paths: Set<string>): string[] {
+--- a/packages/core/src/config/config.ts
++++ b/packages/core/src/config/config.ts
+@@ -508,7 +508,6 @@
+ export interface SandboxConfig {
+   enabled: boolean;
+   allowedPaths?: string[];
+-  includeDirectories?: string[];
+   networkAccess?: boolean;
+   command?:
+     | 'docker'
+@@ -525,7 +524,6 @@
+     .object({
+       enabled: z.boolean().default(false),
+       allowedPaths: z.array(z.string()).default([]),
+-      includeDirectories: z.array(z.string()).default([]),
+       networkAccess: z.boolean().default(false),
+       command: z
+         .enum([
+@@ -967,11 +965,6 @@
+       ? {
+           enabled: params.sandbox.enabled || params.toolSandboxing || false,
+           allowedPaths: params.sandbox.allowedPaths ?? [],
+-          includeDirectories: [
+-            ...(params.sandbox.includeDirectories ?? []),
+-            ...(params.sandbox.allowedPaths ?? []),
+-            Storage.getGlobalTempDir(),
+-          ],
+           networkAccess: params.sandbox.networkAccess ?? false,
+           command: params.sandbox.command,
+           image: params.sandbox.image,
+@@ -979,7 +972,6 @@
+       : {
+           enabled: params.toolSandboxing || false,
+           allowedPaths: [],
+-          includeDirectories: [Storage.getGlobalTempDir()],
+           networkAccess: false,
+         };
+ 
+@@ -1002,10 +994,7 @@
+       {
+         workspace: this.targetDir,
+         forbiddenPaths: this.getSandboxForbiddenPaths.bind(this),
+-        includeDirectories: [
+-          ...this.pendingIncludeDirectories,
+-          Storage.getGlobalTempDir(),
+-        ],
++        includeDirectories: this.pendingIncludeDirectories,
+         policyManager: this._sandboxPolicyManager,
+       },
+       initialApprovalMode,
+@@ -1013,7 +1002,7 @@
+ 
+     if (
+       !(this._sandboxManager instanceof NoopSandboxManager) &&
+-      this.sandbox?.enabled
++      this.sandbox.enabled
+     ) {
+       this.fileSystemService = new SandboxedFileSystemService(
+         this._sandboxManager,
+@@ -1713,10 +1702,7 @@
+       {
+         workspace: this.targetDir,
+         forbiddenPaths: this.getSandboxForbiddenPaths.bind(this),
+-        includeDirectories: [
+-          ...this.pendingIncludeDirectories,
+-          Storage.getGlobalTempDir(),
+-        ],
++        includeDirectories: this.pendingIncludeDirectories,
+         policyManager: this._sandboxPolicyManager,
+       },
+       this.getApprovalMode(),
+@@ -1995,12 +1981,7 @@
+   }
+ 
+   getSandboxAllowedPaths(): string[] {
+-    const paths = [...(this.sandbox?.allowedPaths ?? [])];
+-    const globalTempDir = Storage.getGlobalTempDir();
+-    if (!paths.includes(globalTempDir)) {
+-      paths.push(globalTempDir);
+-    }
+-    return paths;
++    return this.sandbox?.allowedPaths ?? [];
+   }
+ 
+   getSandboxNetworkAccess(): boolean {
+--- a/packages/core/src/utils/terminalSerializer.ts
++++ b/packages/core/src/utils/terminalSerializer.ts
+@@ -12,7 +12,6 @@
+   underline: boolean;
+   dim: boolean;
+   inverse: boolean;
+-  isUninitialized: boolean;
+   fg: string;
+   bg: string;
+ }
+@@ -127,12 +126,6 @@
+     return this.cell?.getChars() || ' ';
+   }
+ 
+-  isUninitialized(): boolean {
+-    return this.cell
+-      ? this.cell.getCode() === 0 && this.cell.isAttributeDefault()
+-      : true;
+-  }
+-
+   isAttribute(attribute: Attribute): boolean {
+     return (this.attributes & attribute) !== 0;
+   }
+@@ -144,8 +137,7 @@
+       this.bg === other.bg &&
+       this.fgColorMode === other.fgColorMode &&
+       this.bgColorMode === other.bgColorMode &&
+-      this.isCursor() === other.isCursor() &&
+-      this.isUninitialized() === other.isUninitialized()
++      this.isCursor() === other.isCursor()
+     );
+   }
+ }
+@@ -157,15 +149,15 @@
+ ): AnsiOutput {
+   const buffer = terminal.buffer.active;
+   const cursorX = buffer.cursorX;
+-  const absoluteCursorY = buffer.baseY + buffer.cursorY;
++  const cursorY = buffer.cursorY;
+   const defaultFg = '';
+   const defaultBg = '';
+ 
+   const result: AnsiOutput = [];
+ 
+   // Reuse cell instances
+-  const lastCell = new Cell(null, -1, -1, cursorX, absoluteCursorY);
+-  const currentCell = new Cell(null, -1, -1, cursorX, absoluteCursorY);
++  const lastCell = new Cell(null, -1, -1, cursorX, cursorY);
++  const currentCell = new Cell(null, -1, -1, cursorX, cursorY);
+ 
+   const effectiveStart = startLine ?? buffer.viewportY;
+   const effectiveEnd = endLine ?? buffer.viewportY + terminal.rows;
+@@ -181,12 +173,12 @@
+     }
+ 
+     // Reset lastCell for new line
+-    lastCell.update(null, -1, -1, cursorX, absoluteCursorY);
++    lastCell.update(null, -1, -1, cursorX, cursorY);
+     let currentText = '';
+ 
+     for (let x = 0; x < terminal.cols; x++) {
+       const cellData = line.getCell(x, cellBuffer);
+-      currentCell.update(cellData || null, x, y, cursorX, absoluteCursorY);
++      currentCell.update(cellData || null, x, y, cursorX, cursorY);
+ 
+       if (x > 0 && !currentCell.equals(lastCell)) {
+         if (currentText) {
+@@ -198,7 +190,6 @@
+             dim: lastCell.isAttribute(Attribute.dim),
+             inverse:
+               lastCell.isAttribute(Attribute.inverse) || lastCell.isCursor(),
+-            isUninitialized: lastCell.isUninitialized(),
+             fg: convertColorToHex(lastCell.fg, lastCell.fgColorMode, defaultFg),
+             bg: convertColorToHex(lastCell.bg, lastCell.bgColorMode, defaultBg),
+           };
+@@ -209,7 +200,7 @@
+       currentText += currentCell.getChars();
+       // Copy state from currentCell to lastCell. Since we can't easily deep copy
+       // without allocating, we just update lastCell with the same data.
+-      lastCell.update(cellData || null, x, y, cursorX, absoluteCursorY);
++      lastCell.update(cellData || null, x, y, cursorX, cursorY);
+     }
+ 
+     if (currentText) {
+@@ -220,7 +211,6 @@
+         underline: lastCell.isAttribute(Attribute.underline),
+         dim: lastCell.isAttribute(Attribute.dim),
+         inverse: lastCell.isAttribute(Attribute.inverse) || lastCell.isCursor(),
+-        isUninitialized: lastCell.isUninitialized(),
+         fg: convertColorToHex(lastCell.fg, lastCell.fgColorMode, defaultFg),
+         bg: convertColorToHex(lastCell.bg, lastCell.bgColorMode, defaultBg),
+       };
+@@ -228,23 +218,6 @@
+     }
+ 
+     result.push(currentLine);
+-  }
+-
+-  // Remove trailing empty lines
+-  while (result.length > 0) {
+-    const lastLine = result[result.length - 1];
+-    const lineY = effectiveStart + result.length - 1;
+-
+-    // A line is empty if all its tokens are marked as uninitialized and it has no cursor
+-    const isEmpty =
+-      lastLine.every((token) => token.isUninitialized && !token.inverse) &&
+-      lineY !== absoluteCursorY;
+-
+-    if (isEmpty) {
+-      result.pop();
+-    } else {
+-      break;
+-    }
+   }
+ 
+   return result;
+--- a/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
++++ b/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+@@ -59,10 +59,6 @@
+     return this.options.workspace;
+   }
+ 
+-  getOptions(): GlobalSandboxOptions {
+-    return this.options;
+-  }
+-
+   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
+     await initializeShellParsers();
+     const sanitizationConfig = getSecureSanitizationConfig(
+--- a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
++++ b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+@@ -146,10 +146,6 @@
+ 
+   getWorkspace(): string {
+     return this.options.workspace;
+-  }
+-
+-  getOptions(): GlobalSandboxOptions {
+-    return this.options;
+   }
+ 
+   private getMaskFilePath(): string {
+--- a/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -78,10 +78,6 @@
+ 
+   getWorkspace(): string {
+     return this.options.workspace;
+-  }
+-
+-  getOptions(): GlobalSandboxOptions {
+-    return this.options;
+   }
+ 
+   /**
+--- a/packages/core/src/prompts/snippets.legacy.ts
++++ b/packages/core/src/prompts/snippets.legacy.ts
+@@ -518,10 +518,10 @@
+ ## Topic Updates
+ As you work, the user follows along by reading topic updates that you publish with ${UPDATE_TOPIC_TOOL_NAME}. Keep them informed by doing the following:
+ 
+-- Usage Exception: NEVER use ${UPDATE_TOPIC_TOOL_NAME} for answering questions, providing explanations, or performing isolated lookup tasks (e.g. reading a single file, running a quick search, or checking a version). It is STRICTLY for orchestrating multi-step codebase modifications or complex investigations involving 3 or more tool calls.\n- Always call ${UPDATE_TOPIC_TOOL_NAME} in your first and last turn for tasks that require 3 or more tool calls. The final turn should always recap what was done.
++- Always call ${UPDATE_TOPIC_TOOL_NAME} in your first and last turn. The final turn should always recap what was done.
+ - Each topic update should give a concise description of what you are doing for the next few turns in the \`${TOPIC_PARAM_SUMMARY}\` parameter.
+ - Provide topic updates whenever you change "topics". A topic is typically a discrete subgoal and will be every 3 to 10 turns. Do not use ${UPDATE_TOPIC_TOOL_NAME} on every turn.
+-- The typical complex user message should call ${UPDATE_TOPIC_TOOL_NAME} 3 or more times. Each corresponds to a distinct phase of the task, such as "Researching X", "Researching Y", "Implementing Z with X", and "Testing Z".
++- The typical user message should call ${UPDATE_TOPIC_TOOL_NAME} 3 or more times. Each corresponds to a distinct phase of the task, such as "Researching X", "Researching Y", "Implementing Z with X", and "Testing Z".
+ - Remember to call ${UPDATE_TOPIC_TOOL_NAME} when you experience an unexpected event (e.g., a test failure, compilation error, environment issue, or unexpected learning) that requires a strategic detour.
+ - **Examples:**
+   - ${UPDATE_TOPIC_TOOL_NAME}(${TOPIC_PARAM_TITLE}="Researching Parser", ${TOPIC_PARAM_SUMMARY}="I am starting an investigation into the parser timeout bug. My goal is to first understand the current test coverage and then attempt to reproduce the failure. This phase will focus on identifying the bottleneck in the main loop before we move to implementation.")
+--- a/packages/core/src/prompts/snippets.ts
++++ b/packages/core/src/prompts/snippets.ts
+@@ -629,10 +629,10 @@
+ ## Topic Updates
+ As you work, the user follows along by reading topic updates that you publish with ${UPDATE_TOPIC_TOOL_NAME}. Keep them informed by doing the following:
+ 
+-- Usage Exception: NEVER use ${UPDATE_TOPIC_TOOL_NAME} for answering questions, providing explanations, or performing isolated lookup tasks (e.g. reading a single file, running a quick search, or checking a version). It is STRICTLY for orchestrating multi-step codebase modifications or complex investigations involving 3 or more tool calls.\n- Always call ${UPDATE_TOPIC_TOOL_NAME} in your first and last turn for tasks that require 3 or more tool calls. The final turn should always recap what was done.
++- Always call ${UPDATE_TOPIC_TOOL_NAME} in your first and last turn. The final turn should always recap what was done.
+ - Each topic update should give a concise description of what you are doing for the next few turns in the \`${TOPIC_PARAM_SUMMARY}\` parameter.
+ - Provide topic updates whenever you change "topics". A topic is typically a discrete subgoal and will be every 3 to 10 turns. Do not use ${UPDATE_TOPIC_TOOL_NAME} on every turn.
+-- The typical complex user message should call ${UPDATE_TOPIC_TOOL_NAME} 3 or more times. Each corresponds to a distinct phase of the task, such as "Researching X", "Researching Y", "Implementing Z with X", and "Testing Z".
++- The typical user message should call ${UPDATE_TOPIC_TOOL_NAME} 3 or more times. Each corresponds to a distinct phase of the task, such as "Researching X", "Researching Y", "Implementing Z with X", and "Testing Z".
+ - Remember to call ${UPDATE_TOPIC_TOOL_NAME} when you experience an unexpected event (e.g., a test failure, compilation error, environment issue, or unexpected learning) that requires a strategic detour.
+ - **Examples:**
+   - \`update_topic(${TOPIC_PARAM_TITLE}="Researching Parser", ${TOPIC_PARAM_SUMMARY}="I am starting an investigation into the parser timeout bug. My goal is to first understand the current test coverage and then attempt to reproduce the failure. This phase will focus on identifying the bottleneck in the main loop before we move to implementation.")\`
+--- a/packages/core/src/services/sandboxManager.ts
++++ b/packages/core/src/services/sandboxManager.ts
+@@ -146,11 +146,6 @@
+    * Returns the primary workspace directory for this sandbox.
+    */
+   getWorkspace(): string;
+-
+-  /**
+-   * Returns the global sandbox options for this sandbox.
+-   */
+-  getOptions(): GlobalSandboxOptions | undefined;
+ }
+ 
+ /**
+@@ -288,10 +283,6 @@
+   getWorkspace(): string {
+     return this.options?.workspace ?? process.cwd();
+   }
+-
+-  getOptions(): GlobalSandboxOptions | undefined {
+-    return this.options;
+-  }
+ }
+ 
+ /**
+@@ -319,10 +310,6 @@
+   getWorkspace(): string {
+     return this.options?.workspace ?? process.cwd();
+   }
+-
+-  getOptions(): GlobalSandboxOptions | undefined {
+-    return this.options;
+-  }
+ }
+ 
+ /**
+--- a/packages/core/src/services/sandboxedFileSystemService.ts
++++ b/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -22,29 +22,12 @@
+ 
+   private sanitizeAndValidatePath(filePath: string): string {
+     const resolvedPath = resolveToRealPath(filePath);
+-    const workspace = resolveToRealPath(this.sandboxManager.getWorkspace());
+-
+-    if (isSubpath(workspace, resolvedPath) || workspace === resolvedPath) {
+-      return resolvedPath;
++    if (!isSubpath(this.cwd, resolvedPath) && this.cwd !== resolvedPath) {
++      throw new Error(
++        `Access denied: Path '${filePath}' is outside the workspace.`,
++      );
+     }
+-
+-    // Check if the path is explicitly allowed by the sandbox manager
+-    const options = this.sandboxManager.getOptions();
+-    const allowedPaths = options?.includeDirectories ?? [];
+-
+-    for (const allowed of allowedPaths) {
+-      const resolvedAllowed = resolveToRealPath(allowed);
+-      if (
+-        isSubpath(resolvedAllowed, resolvedPath) ||
+-        resolvedAllowed === resolvedPath
+-      ) {
+-        return resolvedPath;
+-      }
+-    }
+-
+-    throw new Error(
+-      `Access denied: Path '${filePath}' is outside the workspace and not in allowed paths.`,
+-    );
++    return resolvedPath;
+   }
+ 
+   async readTextFile(filePath: string): Promise<string> {
+--- a/packages/cli/src/ui/contexts/InputContext.tsx
++++ b/packages/cli/src/ui/contexts/InputContext.tsx
+@@ -0,0 +1,28 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import { createContext, useContext } from 'react';
++import type { TextBuffer } from '../components/shared/text-buffer.js';
++
++export interface InputState {
++  buffer: TextBuffer;
++  userMessages: string[];
++  shellModeActive: boolean;
++  showEscapePrompt: boolean;
++  copyModeEnabled: boolean | undefined;
++  inputWidth: number;
++  suggestionsWidth: number;
++}
++
++export const InputContext = createContext<InputState | null>(null);
++
++export const useInputState = () => {
++  const context = useContext(InputContext);
++  if (!context) {
++    throw new Error('useInputState must be used within an InputProvider');
++  }
++  return context;
++};
+--- a/packages/cli/src/ui/contexts/UIStateContext.tsx
++++ b/packages/cli/src/ui/contexts/UIStateContext.tsx
+@@ -17,7 +17,7 @@
+   PermissionConfirmationRequest,
+ } from '../types.js';
+ import type { CommandContext, SlashCommand } from '../commands/types.js';
+-import type { TextBuffer } from '../components/shared/text-buffer.js';
++
+ import type {
+   IdeContext,
+   ApprovalMode,
+@@ -143,11 +143,6 @@
+   initError: string | null;
+   pendingGeminiHistoryItems: HistoryItemWithoutId[];
+   thought: ThoughtSummary | null;
+-  shellModeActive: boolean;
+-  userMessages: string[];
+-  buffer: TextBuffer;
+-  inputWidth: number;
+-  suggestionsWidth: number;
+   isInputActive: boolean;
+   isResuming: boolean;
+   shouldShowIdePrompt: boolean;
+@@ -162,7 +157,6 @@
+   renderMarkdown: boolean;
+   ctrlCPressedOnce: boolean;
+   ctrlDPressedOnce: boolean;
+-  showEscapePrompt: boolean;
+   shortcutsHelpVisible: boolean;
+   cleanUiDetailsVisible: boolean;
+   elapsedTime: number;
+@@ -207,7 +201,6 @@
+   embeddedShellFocused: boolean;
+   showDebugProfiler: boolean;
+   showFullTodos: boolean;
+-  copyModeEnabled: boolean;
+   bannerData: {
+     defaultText: string;
+     warningText: string;
+--- a/packages/cli/src/ui/utils/CodeColorizer.tsx
++++ b/packages/cli/src/ui/utils/CodeColorizer.tsx
+@@ -136,7 +136,6 @@
+   hideLineNumbers?: boolean;
+   disableColor?: boolean;
+   returnLines?: boolean;
+-  paddingX?: number;
+ }
+ 
+ /**
+@@ -161,7 +160,6 @@
+   hideLineNumbers = false,
+   disableColor = false,
+   returnLines = false,
+-  paddingX = 0,
+ }: ColorizeCodeOptions): React.ReactNode | React.ReactNode[] {
+   const codeToHighlight = code.replace(/\n$/, '');
+   const activeTheme = theme || themeManager.getActiveTheme();
+@@ -169,29 +167,26 @@
+     ? false
+     : settings.merged.ui.showLineNumbers;
+ 
+-  // We force MaxSizedBox if availableHeight is provided, even if alternate buffer is enabled,
+-  // because this might be rendered in a constrained UI box (like tool confirmation).
+-  const useMaxSizedBox =
+-    (!settings.merged.ui.useAlternateBuffer || availableHeight !== undefined) &&
+-    !returnLines;
++  const useMaxSizedBox = !settings.merged.ui.useAlternateBuffer && !returnLines;
++  try {
++    // Render the HAST tree using the adapted theme
++    // Apply the theme's default foreground color to the top-level Text element
++    let lines = codeToHighlight.split(/\r?\n/);
++    const padWidth = String(lines.length).length; // Calculate padding width based on number of lines
+ 
+-  let hiddenLinesCount = 0;
+-  let finalLines = codeToHighlight.split(/\r?\n/);
++    let hiddenLinesCount = 0;
+ 
+-  try {
+     // Optimization to avoid highlighting lines that cannot possibly be displayed.
+     if (availableHeight !== undefined && useMaxSizedBox) {
+       availableHeight = Math.max(availableHeight, MINIMUM_MAX_HEIGHT);
+-      if (finalLines.length > availableHeight) {
+-        const sliceIndex = finalLines.length - availableHeight;
++      if (lines.length > availableHeight) {
++        const sliceIndex = lines.length - availableHeight;
+         hiddenLinesCount = sliceIndex;
+-        finalLines = finalLines.slice(sliceIndex);
++        lines = lines.slice(sliceIndex);
+       }
+     }
+ 
+-    const padWidth = String(finalLines.length + hiddenLinesCount).length;
+-
+-    const renderedLines = finalLines.map((line, index) => {
++    const renderedLines = lines.map((line, index) => {
+       const contentToRender = disableColor
+         ? line
+         : highlightAndRenderLine(line, language, activeTheme);
+@@ -228,7 +223,6 @@
+     if (useMaxSizedBox) {
+       return (
+         <MaxSizedBox
+-          paddingX={paddingX}
+           maxHeight={availableHeight}
+           maxWidth={maxWidth}
+           additionalHiddenLinesCount={hiddenLinesCount}
+@@ -250,8 +244,10 @@
+       error,
+     );
+     // Fall back to plain text with default color on error
+-    const padWidth = String(finalLines.length + hiddenLinesCount).length;
+-    const fallbackLines = finalLines.map((line, index) => (
++    // Also display line numbers in fallback
++    const lines = codeToHighlight.split(/\r?\n/);
++    const padWidth = String(lines.length).length; // Calculate padding width based on number of lines
++    const fallbackLines = lines.map((line, index) => (
+       <Box key={index} minHeight={1}>
+         {showLineNumbers && (
+           <Box
+@@ -262,7 +258,7 @@
+             justifyContent="flex-end"
+           >
+             <Text color={disableColor ? undefined : activeTheme.defaultColor}>
+-              {`${index + 1 + hiddenLinesCount}`}
++              {`${index + 1}`}
+             </Text>
+           </Box>
+         )}
+@@ -279,10 +275,8 @@
+     if (useMaxSizedBox) {
+       return (
+         <MaxSizedBox
+-          paddingX={paddingX}
+           maxHeight={availableHeight}
+           maxWidth={maxWidth}
+-          additionalHiddenLinesCount={hiddenLinesCount}
+           overflowDirection="top"
+         >
+           {fallbackLines}
+--- a/packages/cli/src/ui/AppContainer.tsx
++++ b/packages/cli/src/ui/AppContainer.tsx
+@@ -193,6 +193,8 @@
+   APPROVAL_MODE_REVEAL_DURATION_MS,
+ } from './hooks/useVisibilityToggle.js';
+ import { useKeyMatchers } from './hooks/useKeyMatchers.js';
++
++import { InputContext } from './contexts/InputContext.js';
+ 
+ /**
+  * The fraction of the terminal width to allocate to the shell.
+@@ -2328,6 +2330,27 @@
+     };
+   }, [config, refreshStatic]);
+ 
++  const inputState = useMemo(
++    () => ({
++      buffer,
++      userMessages: inputHistory,
++      shellModeActive,
++      showEscapePrompt,
++      copyModeEnabled,
++      inputWidth,
++      suggestionsWidth,
++    }),
++    [
++      buffer,
++      inputHistory,
++      shellModeActive,
++      showEscapePrompt,
++      copyModeEnabled,
++      inputWidth,
++      suggestionsWidth,
++    ],
++  );
++
+   const uiState: UIState = useMemo(
+     () => ({
+       history: historyManager.history,
+@@ -2371,11 +2394,6 @@
+       initError,
+       pendingGeminiHistoryItems,
+       thought,
+-      shellModeActive,
+-      userMessages: inputHistory,
+-      buffer,
+-      inputWidth,
+-      suggestionsWidth,
+       isInputActive,
+       isResuming,
+       shouldShowIdePrompt,
+@@ -2391,7 +2409,6 @@
+       renderMarkdown,
+       ctrlCPressedOnce: ctrlCPressCount >= 1,
+       ctrlDPressedOnce: ctrlDPressCount >= 1,
+-      showEscapePrompt,
+       shortcutsHelpVisible,
+       cleanUiDetailsVisible,
+       isFocused,
+@@ -2443,7 +2460,6 @@
+       embeddedShellFocused,
+       showDebugProfiler,
+       customDialog,
+-      copyModeEnabled,
+       transientMessage,
+       bannerData,
+       bannerVisible,
+@@ -2498,11 +2514,6 @@
+       initError,
+       pendingGeminiHistoryItems,
+       thought,
+-      shellModeActive,
+-      inputHistory,
+-      buffer,
+-      inputWidth,
+-      suggestionsWidth,
+       isInputActive,
+       isResuming,
+       shouldShowIdePrompt,
+@@ -2518,7 +2529,6 @@
+       renderMarkdown,
+       ctrlCPressCount,
+       ctrlDPressCount,
+-      showEscapePrompt,
+       shortcutsHelpVisible,
+       cleanUiDetailsVisible,
+       isFocused,
+@@ -2570,7 +2580,6 @@
+       customDialog,
+       apiKeyDefaultValue,
+       authState,
+-      copyModeEnabled,
+       transientMessage,
+       bannerData,
+       bannerVisible,
+@@ -2757,32 +2766,34 @@
+ 
+   return (
+     <UIStateContext.Provider value={uiState}>
+-      <UIActionsContext.Provider value={uiActions}>
+-        <ConfigContext.Provider value={config}>
+-          <AppContext.Provider
+-            value={{
+-              version: props.version,
+-              startupWarnings: props.startupWarnings || [],
+-            }}
+-          >
+-            <ToolActionsProvider
+-              config={config}
+-              toolCalls={allToolCalls}
+-              isExpanded={isExpanded}
+-              toggleExpansion={toggleExpansion}
+-              toggleAllExpansion={toggleAllExpansion}
++      <InputContext.Provider value={inputState}>
++        <UIActionsContext.Provider value={uiActions}>
++          <ConfigContext.Provider value={config}>
++            <AppContext.Provider
++              value={{
++                version: props.version,
++                startupWarnings: props.startupWarnings || [],
++              }}
+             >
+-              <ShellFocusContext.Provider value={isFocused}>
+-                <MouseProvider mouseEventsEnabled={mouseMode}>
+-                  <ScrollProvider>
+-                    <App key={`app-${forceRerenderKey}`} />
+-                  </ScrollProvider>
+-                </MouseProvider>
+-              </ShellFocusContext.Provider>
+-            </ToolActionsProvider>
+-          </AppContext.Provider>
+-        </ConfigContext.Provider>
+-      </UIActionsContext.Provider>
++              <ToolActionsProvider
++                config={config}
++                toolCalls={allToolCalls}
++                isExpanded={isExpanded}
++                toggleExpansion={toggleExpansion}
++                toggleAllExpansion={toggleAllExpansion}
++              >
++                <ShellFocusContext.Provider value={isFocused}>
++                  <MouseProvider mouseEventsEnabled={mouseMode}>
++                    <ScrollProvider>
++                      <App key={`app-${forceRerenderKey}`} />
++                    </ScrollProvider>
++                  </MouseProvider>
++                </ShellFocusContext.Provider>
++              </ToolActionsProvider>
++            </AppContext.Provider>
++          </ConfigContext.Provider>
++        </UIActionsContext.Provider>
++      </InputContext.Provider>
+     </UIStateContext.Provider>
+   );
+ };
+--- a/packages/cli/src/ui/components/CopyModeWarning.tsx
++++ b/packages/cli/src/ui/components/CopyModeWarning.tsx
+@@ -6,11 +6,11 @@
+ 
+ import type React from 'react';
+ import { Box, Text } from 'ink';
+-import { useUIState } from '../contexts/UIStateContext.js';
++import { useInputState } from '../contexts/InputContext.js';
+ import { theme } from '../semantic-colors.js';
+ 
+ export const CopyModeWarning: React.FC = () => {
+-  const { copyModeEnabled } = useUIState();
++  const { copyModeEnabled } = useInputState();
+ 
+   return (
+     <Box height={1}>
+--- a/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
++++ b/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
+@@ -24,14 +24,13 @@
+   RadioButtonSelect,
+   type RadioSelectItem,
+ } from '../shared/RadioButtonSelect.js';
+-import { MaxSizedBox } from '../shared/MaxSizedBox.js';
++import { MaxSizedBox, MINIMUM_MAX_HEIGHT } from '../shared/MaxSizedBox.js';
+ import {
+   sanitizeForDisplay,
+   stripUnsafeCharacters,
+ } from '../../utils/textUtils.js';
+ import { useKeypress } from '../../hooks/useKeypress.js';
+ import { theme } from '../../semantic-colors.js';
+-import { themeManager } from '../../themes/theme-manager.js';
+ import { useSettings } from '../../contexts/SettingsContext.js';
+ import { Command } from '../../key/keyMatchers.js';
+ import { formatCommand } from '../../key/keybindingUtils.js';
+@@ -45,7 +44,6 @@
+   type DeceptiveUrlDetails,
+ } from '../../utils/urlSecurityUtils.js';
+ import { useKeyMatchers } from '../../hooks/useKeyMatchers.js';
+-import { isShellTool } from './ToolShared.js';
+ 
+ export interface ToolConfirmationMessageProps {
+   callId: string;
+@@ -55,9 +53,13 @@
+   isFocused?: boolean;
+   availableTerminalHeight?: number;
+   terminalWidth: number;
+-  toolName: string;
+ }
+ 
++const REDIRECTION_WARNING_NOTE_LABEL = 'Note: ';
++const REDIRECTION_WARNING_NOTE_TEXT =
++  'Command contains redirection which can be undesirable.';
++const REDIRECTION_WARNING_TIP_LABEL = 'Tip:  '; // Padded to align with "Note: "
++
+ export const ToolConfirmationMessage: React.FC<
+   ToolConfirmationMessageProps
+ > = ({
+@@ -68,7 +70,6 @@
+   isFocused = true,
+   availableTerminalHeight,
+   terminalWidth,
+-  toolName,
+ }) => {
+   const keyMatchers = useKeyMatchers();
+   const { confirm, isDiffingEnabled } = useToolActions();
+@@ -151,7 +152,6 @@
+   }, []);
+ 
+   const settings = useSettings();
+-  const activeTheme = themeManager.getActiveTheme();
+   const allowPermanentApproval =
+     settings.merged.security.enablePermanentToolApproval &&
+     !config.getDisableAlwaysAllow();
+@@ -254,6 +254,8 @@
+         return true;
+       }
+       if (keyMatchers[Command.QUIT](key)) {
++        // Return false to let ctrl-C bubble up to AppContainer for exit flow.
++        // AppContainer will call cancelOngoingRequest which will cancel the tool.
+         return false;
+       }
+       return false;
+@@ -396,6 +398,7 @@
+         key: 'No, suggest changes (esc)',
+       });
+     } else if (confirmationDetails.type === 'mcp') {
++      // mcp tool confirmation
+       options.push({
+         label: 'Allow once',
+         value: ToolConfirmationOutcome.ProceedOnce,
+@@ -446,66 +449,40 @@
+ 
+     // Calculate the vertical space (in lines) consumed by UI elements
+     // surrounding the main body content.
+-    const PADDING_OUTER_Y = 0;
+-    const HEIGHT_QUESTION = 1;
+-    const MARGIN_QUESTION_TOP = 0;
+-    const MARGIN_QUESTION_BOTTOM = 1;
+-    const SECURITY_WARNING_BOTTOM_MARGIN = 1;
+-    const SHOW_MORE_LINES_HEIGHT = 1;
++    const PADDING_OUTER_Y = 1; // Main container has `paddingBottom={1}`.
++    const HEIGHT_QUESTION = 1; // The question text is one line.
++    const MARGIN_QUESTION_BOTTOM = 1; // Margin on the question container.
++    const SECURITY_WARNING_BOTTOM_MARGIN = 1; // Margin on the securityWarnings container.
++    const SHOW_MORE_LINES_HEIGHT = 1; // The "Press Ctrl+O to show more lines" hint.
+ 
+     const optionsCount = getOptions().length;
+ 
++    // The measured height includes the margin inside WarningMessage (1 line).
++    // We also add 1 line for the marginBottom on the securityWarnings container.
+     const securityWarningsHeight = deceptiveUrlWarningText
+       ? measuredSecurityWarningsHeight + SECURITY_WARNING_BOTTOM_MARGIN
+       : 0;
+ 
+-    let extraInfoLines = 0;
+-    if (confirmationDetails.type === 'sandbox_expansion') {
+-      const { additionalPermissions } = confirmationDetails;
+-      if (additionalPermissions?.network) extraInfoLines++;
+-      extraInfoLines += additionalPermissions?.fileSystem?.read?.length || 0;
+-      extraInfoLines += additionalPermissions?.fileSystem?.write?.length || 0;
+-    } else if (confirmationDetails.type === 'exec') {
+-      const executionProps = confirmationDetails;
+-      const commandsToDisplay =
+-        executionProps.commands && executionProps.commands.length > 0
+-          ? executionProps.commands
+-          : [executionProps.command];
+-      const containsRedirection = commandsToDisplay.some((cmd) =>
+-        hasRedirection(cmd),
+-      );
+-      const isAutoEdit =
+-        config.getApprovalMode() === ApprovalMode.YOLO ||
+-        config.getApprovalMode() === ApprovalMode.AUTO_EDIT;
+-      if (containsRedirection && !isAutoEdit) {
+-        extraInfoLines = 1; // Warning line
+-      }
+-    }
+-
+     const surroundingElementsHeight =
+       PADDING_OUTER_Y +
+       HEIGHT_QUESTION +
+-      MARGIN_QUESTION_TOP +
+       MARGIN_QUESTION_BOTTOM +
+       SHOW_MORE_LINES_HEIGHT +
+       optionsCount +
+-      securityWarningsHeight +
+-      extraInfoLines;
++      securityWarningsHeight;
+ 
+-    return Math.max(availableTerminalHeight - surroundingElementsHeight, 2);
++    return Math.max(availableTerminalHeight - surroundingElementsHeight, 1);
+   }, [
+     availableTerminalHeight,
+     handlesOwnUI,
+     getOptions,
+     measuredSecurityWarningsHeight,
+     deceptiveUrlWarningText,
+-    confirmationDetails,
+-    config,
+   ]);
+ 
+   const { question, bodyContent, options, securityWarnings, initialIndex } =
+     useMemo<{
+-      question: React.ReactNode;
++      question: string;
+       bodyContent: React.ReactNode;
+       options: Array<RadioSelectItem<ToolConfirmationOutcome>>;
+       securityWarnings: React.ReactNode;
+@@ -513,7 +490,7 @@
+     }>(() => {
+       let bodyContent: React.ReactNode | null = null;
+       let securityWarnings: React.ReactNode | null = null;
+-      let question: React.ReactNode = '';
++      let question = '';
+       const options = getOptions();
+ 
+       let initialIndex = 0;
+@@ -542,8 +519,6 @@
+         securityWarnings = <WarningMessage text={deceptiveUrlWarningText} />;
+       }
+ 
+-      const bodyHeight = availableBodyContentHeight();
+-
+       if (confirmationDetails.type === 'ask_user') {
+         bodyContent = (
+           <AskUserDialog
+@@ -555,7 +530,7 @@
+               handleConfirm(ToolConfirmationOutcome.Cancel);
+             }}
+             width={terminalWidth}
+-            availableHeight={bodyHeight}
++            availableHeight={availableBodyContentHeight()}
+           />
+         );
+         return {
+@@ -588,7 +563,7 @@
+               handleConfirm(ToolConfirmationOutcome.Cancel);
+             }}
+             width={terminalWidth}
+-            availableHeight={bodyHeight}
++            availableHeight={availableBodyContentHeight()}
+           />
+         );
+         return {
+@@ -603,109 +578,85 @@
+       if (confirmationDetails.type === 'edit') {
+         if (!confirmationDetails.isModifying) {
+           question = `Apply this change?`;
++        }
++      } else if (confirmationDetails.type === 'sandbox_expansion') {
++        question = `Allow sandbox expansion for: '${sanitizeForDisplay(confirmationDetails.rootCommand)}'?`;
++      } else if (confirmationDetails.type === 'exec') {
++        const executionProps = confirmationDetails;
++
++        if (executionProps.commands && executionProps.commands.length > 1) {
++          question = `Allow execution of ${executionProps.commands.length} commands?`;
++        } else {
++          question = `Allow execution of: '${sanitizeForDisplay(executionProps.rootCommand)}'?`;
++        }
++      } else if (confirmationDetails.type === 'info') {
++        question = `Do you want to proceed?`;
++      } else if (confirmationDetails.type === 'mcp') {
++        // mcp tool confirmation
++        const mcpProps = confirmationDetails;
++        question = `Allow execution of MCP tool "${sanitizeForDisplay(mcpProps.toolName)}" from server "${sanitizeForDisplay(mcpProps.serverName)}"?`;
++      }
++
++      if (confirmationDetails.type === 'edit') {
++        if (!confirmationDetails.isModifying) {
+           bodyContent = (
+-            <>
+-              <Box
+-                borderStyle="round"
+-                borderColor={theme.border.default}
+-                paddingX={1}
+-                paddingY={0}
+-                marginBottom={0}
+-              >
+-                <DiffRenderer
+-                  diffContent={stripUnsafeCharacters(
+-                    confirmationDetails.fileDiff,
+-                  )}
+-                  filename={sanitizeForDisplay(confirmationDetails.fileName)}
+-                  availableTerminalHeight={
+-                    bodyHeight !== undefined
+-                      ? Math.max(bodyHeight - 2, 2)
+-                      : undefined
+-                  }
+-                  terminalWidth={Math.max(terminalWidth, 1) - 4}
+-                />
+-              </Box>
+-            </>
++            <DiffRenderer
++              diffContent={stripUnsafeCharacters(confirmationDetails.fileDiff)}
++              filename={sanitizeForDisplay(confirmationDetails.fileName)}
++              availableTerminalHeight={availableBodyContentHeight()}
++              terminalWidth={terminalWidth}
++            />
+           );
+         }
+       } else if (confirmationDetails.type === 'sandbox_expansion') {
+-        const { additionalPermissions, command, rootCommand } =
+-          confirmationDetails;
++        const { additionalPermissions } = confirmationDetails;
+         const readPaths = additionalPermissions?.fileSystem?.read || [];
+         const writePaths = additionalPermissions?.fileSystem?.write || [];
+         const network = additionalPermissions?.network;
+-        const isShell = isShellTool(toolName);
+ 
+-        const rootCmds = rootCommand
+-          .split(',')
+-          .map((c) => c.trim().split(/\s+/)[0])
+-          .filter((c) => c && !c.startsWith('redirection'));
+-        const commandNames = Array.from(new Set(rootCmds)).join(', ');
+-        question = '';
+-
+         bodyContent = (
+-          <>
+-            <Box
+-              borderStyle="round"
+-              borderColor={theme.border.default}
+-              paddingX={1}
+-              paddingY={0}
+-              marginBottom={0}
+-            >
+-              {colorizeCode({
+-                code: command.trim(),
+-                language: 'bash',
+-                maxWidth: Math.max(terminalWidth, 1) - 6,
+-                settings,
+-                theme: activeTheme,
+-                hideLineNumbers: true,
+-                availableHeight:
+-                  bodyHeight !== undefined
+-                    ? Math.max(bodyHeight - 2, 2)
+-                    : undefined,
+-              })}
+-            </Box>
+-            <Box flexDirection="column">
+-              <Text>
+-                To run{' '}
+-                <Text
+-                  color={isShell ? theme.status.warning : undefined}
+-                  bold={isShell}
+-                >
+-                  [{sanitizeForDisplay(commandNames)}]
+-                </Text>
+-                , allow access to the following?
++          <Box flexDirection="column" padding={1}>
++            <Text color={theme.text.secondary} italic>
++              The agent is requesting additional sandbox permissions to execute
++              this command:
++            </Text>
++            <Box paddingY={1}>
++              <Text color={theme.text.secondary}>
++                {sanitizeForDisplay(confirmationDetails.command)}
+               </Text>
+-              {network && (
+-                <Text>
+-                  <Text color={isShell ? theme.status.warning : undefined} bold>
+-                    • Network:
+-                  </Text>{' '}
+-                  All Urls
+-                </Text>
+-              )}
+-              {writePaths.length > 0 && (
+-                <Text>
+-                  <Text color={isShell ? theme.status.warning : undefined} bold>
+-                    • Write:
+-                  </Text>{' '}
+-                  {writePaths.map((p) => sanitizeForDisplay(p)).join(', ')}
+-                </Text>
+-              )}
+-              {readPaths.length > 0 && (
+-                <Text>
+-                  <Text color={isShell ? theme.status.warning : undefined} bold>
+-                    • Read:
+-                  </Text>{' '}
+-                  {readPaths.map((p) => sanitizeForDisplay(p)).join(', ')}
+-                </Text>
+-              )}
+             </Box>
+-          </>
++            {network && (
++              <Box>
++                <Text color={theme.status.warning}>• Network Access</Text>
++              </Box>
++            )}
++            {readPaths.length > 0 && (
++              <Box flexDirection="column">
++                <Text color={theme.status.success}>• Read Access:</Text>
++                {readPaths.map((p, i) => (
++                  <Text key={i} color={theme.text.secondary}>
++                    {' '}
++                    {sanitizeForDisplay(p)}
++                  </Text>
++                ))}
++              </Box>
++            )}
++            {writePaths.length > 0 && (
++              <Box flexDirection="column">
++                <Text color={theme.status.error}>• Write Access:</Text>
++                {writePaths.map((p, i) => (
++                  <Text key={i} color={theme.text.secondary}>
++                    {' '}
++                    {sanitizeForDisplay(p)}
++                  </Text>
++                ))}
++              </Box>
++            )}
++          </Box>
+         );
+       } else if (confirmationDetails.type === 'exec') {
+         const executionProps = confirmationDetails;
+-        const isShell = isShellTool(toolName);
++
+         const commandsToDisplay =
+           executionProps.commands && executionProps.commands.length > 1
+             ? executionProps.commands
+@@ -713,96 +664,80 @@
+         const containsRedirection = commandsToDisplay.some((cmd) =>
+           hasRedirection(cmd),
+         );
+-        const isAutoEdit =
+-          config.getApprovalMode() === ApprovalMode.YOLO ||
+-          config.getApprovalMode() === ApprovalMode.AUTO_EDIT;
+-
++
++        let bodyContentHeight = availableBodyContentHeight();
+         let warnings: React.ReactNode = null;
++
++        const isAutoEdit = config.getApprovalMode() === ApprovalMode.AUTO_EDIT;
+         if (containsRedirection && !isAutoEdit) {
+-          const tipText = `To auto-accept, press ${formatCommand(Command.CYCLE_APPROVAL_MODE)}`;
++          // Calculate lines needed for Note and Tip
++          const safeWidth = Math.max(terminalWidth, 1);
++          const noteLength =
++            REDIRECTION_WARNING_NOTE_LABEL.length +
++            REDIRECTION_WARNING_NOTE_TEXT.length;
++          const tipText = `Toggle auto-edit (${formatCommand(Command.CYCLE_APPROVAL_MODE)}) to allow redirection in the future.`;
++          const tipLength =
++            REDIRECTION_WARNING_TIP_LABEL.length + tipText.length;
++
++          const noteLines = Math.ceil(noteLength / safeWidth);
++          const tipLines = Math.ceil(tipLength / safeWidth);
++          const spacerLines = 1;
++          const warningHeight = noteLines + tipLines + spacerLines;
++
++          if (bodyContentHeight !== undefined) {
++            bodyContentHeight = Math.max(
++              bodyContentHeight - warningHeight,
++              MINIMUM_MAX_HEIGHT,
++            );
++          }
++
+           warnings = (
+-            <Box flexDirection="column" marginBottom={0}>
+-              <Text color={theme.text.primary}>
+-                Redirection detected.{' '}
+-                <Text color={theme.text.secondary}>{tipText}</Text>
+-              </Text>
+-            </Box>
++            <>
++              <Box height={1} />
++              <Box>
++                <Text color={theme.text.primary}>
++                  <Text bold>{REDIRECTION_WARNING_NOTE_LABEL}</Text>
++                  {REDIRECTION_WARNING_NOTE_TEXT}
++                </Text>
++              </Box>
++              <Box>
++                <Text color={theme.border.default}>
++                  <Text bold>{REDIRECTION_WARNING_TIP_LABEL}</Text>
++                  {tipText}
++                </Text>
++              </Box>
++            </>
+           );
+         }
+ 
+-        const commandNames = Array.from(
+-          new Set(
+-            commandsToDisplay
+-              .map((cmd) => cmd.trim().split(/\s+/)[0])
+-              .filter(Boolean),
+-          ),
+-        ).join(', ');
+-
+-        const allowQuestion = (
+-          <Text>
+-            Allow execution of{' '}
+-            <Text
+-              color={isShell ? theme.status.warning : undefined}
+-              bold={isShell}
+-            >
+-              [{sanitizeForDisplay(commandNames)}]
+-            </Text>
+-            {'?'}
+-          </Text>
+-        );
+-
+-        question = (
++        bodyContent = (
+           <Box flexDirection="column">
+-            {allowQuestion}
++            <MaxSizedBox
++              maxHeight={bodyContentHeight}
++              maxWidth={Math.max(terminalWidth, 1)}
++            >
++              <Box flexDirection="column">
++                {commandsToDisplay.map((cmd, idx) => (
++                  <Box
++                    key={idx}
++                    flexDirection="column"
++                    paddingBottom={idx < commandsToDisplay.length - 1 ? 1 : 0}
++                  >
++                    {colorizeCode({
++                      code: cmd,
++                      language: 'bash',
++                      maxWidth: Math.max(terminalWidth, 1),
++                      settings,
++                      hideLineNumbers: true,
++                    })}
++                  </Box>
++                ))}
++              </Box>
++            </MaxSizedBox>
+             {warnings}
+           </Box>
+-        );
+-
+-        bodyContent = (
+-          <>
+-            <Box
+-              borderStyle="round"
+-              borderColor={theme.border.default}
+-              paddingX={1}
+-              paddingY={0}
+-              marginBottom={0}
+-            >
+-              <MaxSizedBox
+-                maxHeight={
+-                  bodyHeight !== undefined
+-                    ? Math.max(bodyHeight - 2, 2)
+-                    : undefined
+-                }
+-                maxWidth={Math.max(terminalWidth, 1) - 4}
+-              >
+-                <Box flexDirection="column">
+-                  {commandsToDisplay.map((cmd, idx) => (
+-                    <Box
+-                      key={idx}
+-                      flexDirection="column"
+-                      paddingBottom={idx < commandsToDisplay.length - 1 ? 1 : 0}
+-                    >
+-                      {colorizeCode({
+-                        code: cmd.trim(),
+-                        language: 'bash',
+-                        maxWidth: Math.max(terminalWidth, 1) - 6,
+-                        settings,
+-                        theme: activeTheme,
+-                        hideLineNumbers: true,
+-                        availableHeight:
+-                          bodyHeight !== undefined
+-                            ? Math.max(bodyHeight - 2, 2)
+-                            : undefined,
+-                      })}
+-                    </Box>
+-                  ))}
+-                </Box>
+-              </MaxSizedBox>
+-            </Box>
+-          </>
+         );
+       } else if (confirmationDetails.type === 'info') {
+-        question = `Do you want to proceed?`;
+         const infoProps = confirmationDetails;
+         const displayUrls =
+           infoProps.urls &&
+@@ -833,8 +768,8 @@
+           </Box>
+         );
+       } else if (confirmationDetails.type === 'mcp') {
++        // mcp tool confirmation
+         const mcpProps = confirmationDetails;
+-        question = `Allow execution of MCP tool "${sanitizeForDisplay(mcpProps.toolName)}" from server "${sanitizeForDisplay(mcpProps.serverName)}"?`;
+ 
+         bodyContent = (
+           <Box flexDirection="column">
+@@ -855,26 +790,7 @@
+                       (press {expandDetailsHintKey} to collapse MCP tool
+                       details)
+                     </Text>
+-                    <Box
+-                      borderStyle="round"
+-                      borderColor={theme.border.default}
+-                      paddingX={1}
+-                      paddingY={0}
+-                      marginBottom={0}
+-                    >
+-                      {colorizeCode({
+-                        code: mcpToolDetailsText || '',
+-                        language: 'json',
+-                        maxWidth: Math.max(terminalWidth, 1) - 4,
+-                        settings,
+-                        theme: activeTheme,
+-                        hideLineNumbers: true,
+-                        availableHeight:
+-                          bodyHeight !== undefined
+-                            ? Math.max(bodyHeight - 2, 2)
+-                            : undefined,
+-                      })}
+-                    </Box>
++                    <Text color={theme.text.link}>{mcpToolDetailsText}</Text>
+                   </>
+                 ) : (
+                   <Text color={theme.text.secondary}>
+@@ -903,9 +819,7 @@
+       isTrustedFolder,
+       allowPermanentApproval,
+       settings,
+-      activeTheme,
+       config,
+-      toolName,
+     ]);
+ 
+   const bodyOverflowDirection: 'top' | 'bottom' =
+@@ -913,30 +827,6 @@
+       ? 'bottom'
+       : 'top';
+ 
+-  const renderRadioItem = useCallback(
+-    (
+-      item: RadioSelectItem<ToolConfirmationOutcome>,
+-      { titleColor }: { titleColor: string },
+-    ) => {
+-      if (item.value === ToolConfirmationOutcome.ProceedAlwaysAndSave) {
+-        return (
+-          <Text color={titleColor} wrap="truncate">
+-            {item.label}{' '}
+-            <Text color={theme.text.secondary}>
+-              ~/.gemini/policies/auto-saved.toml
+-            </Text>
+-          </Text>
+-        );
+-      }
+-      return (
+-        <Text color={titleColor} wrap="truncate">
+-          {item.label}
+-        </Text>
+-      );
+-    },
+-    [],
+-  );
+-
+   if (confirmationDetails.type === 'edit') {
+     if (confirmationDetails.isModifying) {
+       return (
+@@ -959,8 +849,13 @@
+   }
+ 
+   return (
+-    <Box flexDirection="column" paddingTop={0} paddingBottom={0}>
+-      {!!confirmationDetails.systemMessage && (
++    <Box
++      flexDirection="column"
++      paddingTop={0}
++      paddingBottom={handlesOwnUI ? 0 : 1}
++    >
++      {/* System message from hook */}
++      {confirmationDetails.systemMessage && (
+         <Box marginBottom={1}>
+           <Text color={theme.status.warning}>
+             {confirmationDetails.systemMessage}
+@@ -972,11 +867,7 @@
+         bodyContent
+       ) : (
+         <>
+-          <Box
+-            flexShrink={1}
+-            overflow="hidden"
+-            marginBottom={!question && !securityWarnings ? 1 : 0}
+-          >
++          <Box flexGrow={1} flexShrink={1} overflow="hidden">
+             <MaxSizedBox
+               maxHeight={availableBodyContentHeight()}
+               maxWidth={terminalWidth}
+@@ -996,15 +887,9 @@
+             </Box>
+           )}
+ 
+-          {!!question && (
+-            <Box marginBottom={1} flexShrink={0}>
+-              {typeof question === 'string' ? (
+-                <Text color={theme.text.primary}>{question}</Text>
+-              ) : (
+-                question
+-              )}
+-            </Box>
+-          )}
++          <Box marginBottom={1} flexShrink={0}>
++            <Text color={theme.text.primary}>{question}</Text>
++          </Box>
+ 
+           <Box flexShrink={0}>
+             <RadioButtonSelect
+@@ -1012,7 +897,6 @@
+               onSelect={handleSelect}
+               isFocused={isFocused}
+               initialIndex={initialIndex}
+-              renderItem={renderRadioItem}
+             />
+           </Box>
+         </>
+--- a/packages/cli/src/ui/components/messages/DiffRenderer.tsx
++++ b/packages/cli/src/ui/components/messages/DiffRenderer.tsx
+@@ -33,7 +33,6 @@
+     const hunkMatch = line.match(hunkHeaderRegex);
+     if (hunkMatch) {
+       currentOldLine = parseInt(hunkMatch[1], 10);
+-      currentOldLine = parseInt(hunkMatch[1], 10);
+       currentNewLine = parseInt(hunkMatch[2], 10);
+       inHunk = true;
+       result.push({ type: 'hunk', content: line });
+@@ -90,7 +89,6 @@
+   terminalWidth: number;
+   theme?: Theme;
+   disableColor?: boolean;
+-  paddingX?: number;
+ }
+ 
+ const DEFAULT_TAB_WIDTH = 4; // Spaces per tab for normalization
+@@ -103,7 +101,6 @@
+   terminalWidth,
+   theme,
+   disableColor = false,
+-  paddingX = 0,
+ }) => {
+   const settings = useSettings();
+ 
+@@ -125,7 +122,11 @@
+ 
+     if (parsedLines.length === 0) {
+       return (
+-        <Box padding={1}>
++        <Box
++          borderStyle="round"
++          borderColor={semanticTheme.border.default}
++          padding={1}
++        >
+           <Text dimColor>No changes detected.</Text>
+         </Box>
+       );
+@@ -161,14 +162,12 @@
+         theme,
+         settings,
+         disableColor,
+-        paddingX,
+       });
+     } else {
+       const key = filename ? `diff-box-${filename}` : undefined;
+ 
+       return (
+         <MaxSizedBox
+-          paddingX={paddingX}
+           maxHeight={availableTerminalHeight}
+           maxWidth={terminalWidth}
+           key={key}
+@@ -195,7 +194,6 @@
+     settings,
+     tabWidth,
+     disableColor,
+-    paddingX,
+   ]);
+ 
+   return renderedOutput;
+@@ -241,7 +239,12 @@
+ 
+   if (displayableLines.length === 0) {
+     return [
+-      <Box key="no-changes" padding={1}>
++      <Box
++        key="no-changes"
++        borderStyle="round"
++        borderColor={semanticTheme.border.default}
++        padding={1}
++      >
+         <Text dimColor>No changes detected.</Text>
+       </Box>,
+     ];
+--- a/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -85,32 +85,43 @@
+     width,
+     containerWidth,
+     itemKey,
+-    itemRef,
++    index,
++    onSetRef,
+   }: {
+     content: React.ReactElement;
+     shouldBeStatic: boolean;
+     width: number | string | undefined;
+     containerWidth: number;
+     itemKey: string;
+-    itemRef: (el: DOMElement | null) => void;
+-  }) => (
+-    <Box width="100%" flexDirection="column" flexShrink={0} ref={itemRef}>
+-      {shouldBeStatic ? (
+-        <StaticRender
+-          width={typeof width === 'number' ? width : containerWidth}
+-          key={
+-            itemKey +
+-            '-static-' +
+-            (typeof width === 'number' ? width : containerWidth)
+-          }
+-        >
+-          {content}
+-        </StaticRender>
+-      ) : (
+-        content
+-      )}
+-    </Box>
+-  ),
++    index: number;
++    onSetRef: (index: number, el: DOMElement | null) => void;
++  }) => {
++    const itemRef = useCallback(
++      (el: DOMElement | null) => {
++        onSetRef(index, el);
++      },
++      [index, onSetRef],
++    );
++
++    return (
++      <Box width="100%" flexDirection="column" flexShrink={0} ref={itemRef}>
++        {shouldBeStatic ? (
++          <StaticRender
++            width={typeof width === 'number' ? width : containerWidth}
++            key={
++              itemKey +
++              '-static-' +
++              (typeof width === 'number' ? width : containerWidth)
++            }
++          >
++            {content}
++          </StaticRender>
++        ) : (
++          content
++        )}
++      </Box>
++    );
++  },
+ );
+ 
+ VirtualizedListItem.displayName = 'VirtualizedListItem';
+@@ -195,6 +206,10 @@
+   const containerObserverRef = useRef<ResizeObserver | null>(null);
+   const nodeToKeyRef = useRef(new WeakMap<DOMElement, string>());
+ 
++  const onSetRef = useCallback((index: number, el: DOMElement | null) => {
++    itemRefs.current[index] = el;
++  }, []);
++
+   const containerRefCallback = useCallback((node: DOMElement | null) => {
+     containerObserverRef.current?.disconnect();
+     containerRef.current = node;
+@@ -517,7 +532,6 @@
+     observedNodes.current = currentNodes;
+   });
+ 
+-  const renderedItems = [];
+   const renderRangeStart =
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+@@ -533,7 +547,12 @@
+     process.env['NODE_ENV'] === 'test' ||
+     (width !== undefined && typeof width === 'number');
+ 
+-  if (isReady) {
++  const renderedItems = useMemo(() => {
++    if (!isReady) {
++      return [];
++    }
++
++    const items = [];
+     for (let i = renderRangeStart; i <= renderRangeEnd; i++) {
+       const item = data[i];
+       if (item) {
+@@ -545,7 +564,7 @@
+         const content = renderItem({ item, index: i });
+         const key = keyExtractor(item, i);
+ 
+-        renderedItems.push(
++        items.push(
+           <VirtualizedListItem
+             key={key}
+             itemKey={key}
+@@ -553,16 +572,28 @@
+             shouldBeStatic={shouldBeStatic}
+             width={width}
+             containerWidth={containerWidth}
+-            itemRef={(el: DOMElement | null) => {
+-              if (i >= renderRangeStart && i <= renderRangeEnd) {
+-                itemRefs.current[i] = el;
+-              }
+-            }}
++            index={i}
++            onSetRef={onSetRef}
+           />,
+         );
+       }
+     }
+-  }
++    return items;
++  }, [
++    isReady,
++    renderRangeStart,
++    renderRangeEnd,
++    data,
++    startIndex,
++    endIndex,
++    renderStatic,
++    isStaticItem,
++    renderItem,
++    keyExtractor,
++    width,
++    containerWidth,
++    onSetRef,
++  ]);
+ 
+   const { getScrollTop, setPendingScrollTop } = useBatchedScroll(scrollTop);
+ 
+--- a/packages/cli/src/ui/components/shared/MaxSizedBox.tsx
++++ b/packages/cli/src/ui/components/shared/MaxSizedBox.tsx
+@@ -26,7 +26,6 @@
+   maxHeight?: number;
+   overflowDirection?: 'top' | 'bottom';
+   additionalHiddenLinesCount?: number;
+-  paddingX?: number;
+ }
+ 
+ /**
+@@ -39,7 +38,6 @@
+   maxHeight,
+   overflowDirection = 'top',
+   additionalHiddenLinesCount = 0,
+-  paddingX = 0,
+ }) => {
+   const id = useId();
+   const { addOverflowingId, removeOverflowingId } = useOverflowActions() || {};
+@@ -134,13 +132,11 @@
+       flexShrink={0}
+     >
+       {totalHiddenLines > 0 && overflowDirection === 'top' && (
+-        <Box paddingX={paddingX}>
+-          <Text color={theme.text.secondary} wrap="truncate">
+-            {isNarrow
+-              ? `... ${totalHiddenLines} hidden (${showMoreKey}) ...`
+-              : `... first ${totalHiddenLines} line${totalHiddenLines === 1 ? '' : 's'} hidden (${showMoreKey} to show) ...`}
+-          </Text>
+-        </Box>
++        <Text color={theme.text.secondary} wrap="truncate">
++          {isNarrow
++            ? `... ${totalHiddenLines} hidden (${showMoreKey}) ...`
++            : `... first ${totalHiddenLines} line${totalHiddenLines === 1 ? '' : 's'} hidden (${showMoreKey} to show) ...`}
++        </Text>
+       )}
+       <Box
+         flexDirection="column"
+@@ -158,13 +154,11 @@
+         </Box>
+       </Box>
+       {totalHiddenLines > 0 && overflowDirection === 'bottom' && (
+-        <Box paddingX={paddingX}>
+-          <Text color={theme.text.secondary} wrap="truncate">
+-            {isNarrow
+-              ? `... ${totalHiddenLines} hidden (${showMoreKey}) ...`
+-              : `... last ${totalHiddenLines} line${totalHiddenLines === 1 ? '' : 's'} hidden (${showMoreKey} to show) ...`}
+-          </Text>
+-        </Box>
++        <Text color={theme.text.secondary} wrap="truncate">
++          {isNarrow
++            ? `... ${totalHiddenLines} hidden (${showMoreKey}) ...`
++            : `... last ${totalHiddenLines} line${totalHiddenLines === 1 ? '' : 's'} hidden (${showMoreKey} to show) ...`}
++        </Text>
+       )}
+     </Box>
+   );
+--- a/packages/cli/src/ui/components/Footer.tsx
++++ b/packages/cli/src/ui/components/Footer.tsx
+@@ -26,6 +26,7 @@
+ import { useConfig } from '../contexts/ConfigContext.js';
+ import { useSettings } from '../contexts/SettingsContext.js';
+ import { useVimMode } from '../contexts/VimModeContext.js';
++import { useInputState } from '../contexts/InputContext.js';
+ import {
+   ALL_ITEMS,
+   type FooterItemId,
+@@ -173,6 +174,7 @@
+ 
+ export const Footer: React.FC = () => {
+   const uiState = useUIState();
++  const { copyModeEnabled } = useInputState();
+   const config = useConfig();
+   const settings = useSettings();
+   const { vimEnabled, vimMode } = useVimMode();
+@@ -365,10 +367,7 @@
+           id,
+           header,
+           () => (
+-            <MemoryUsageDisplay
+-              color={itemColor}
+-              isActive={!uiState.copyModeEnabled}
+-            />
++            <MemoryUsageDisplay color={itemColor} isActive={!copyModeEnabled} />
+           ),
+           10,
+         );
+--- a/packages/cli/src/ui/components/Composer.tsx
++++ b/packages/cli/src/ui/components/Composer.tsx
+@@ -9,6 +9,7 @@
+ import { useConfig } from '../contexts/ConfigContext.js';
+ import { useSettings } from '../contexts/SettingsContext.js';
+ import { useUIState } from '../contexts/UIStateContext.js';
++import { useInputState } from '../contexts/InputContext.js';
+ import { useUIActions } from '../contexts/UIActionsContext.js';
+ import { useVimMode } from '../contexts/VimModeContext.js';
+ import { useAlternateBuffer } from '../hooks/useAlternateBuffer.js';
+@@ -30,6 +31,7 @@
+ 
+ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
+   const uiState = useUIState();
++  const inputState = useInputState();
+   const uiActions = useUIActions();
+   const settings = useSettings();
+   const config = useConfig();
+@@ -81,12 +83,12 @@
+     return null;
+   }
+ 
+-  const hasToast = shouldShowToast(uiState);
++  const showToast = shouldShowToast(uiState, inputState);
+   const hideUiDetailsForSuggestions =
+     suggestionsVisible && suggestionsPosition === 'above';
+ 
+   // Mini Mode VIP Flags (Pure Content Triggers)
+-  const showMinimalToast = hasToast;
++  const showMinimalToast = showToast;
+ 
+   return (
+     <Box
+@@ -141,17 +143,12 @@
+ 
+       {uiState.isInputActive && (
+         <InputPrompt
+-          buffer={uiState.buffer}
+-          inputWidth={uiState.inputWidth}
+-          suggestionsWidth={uiState.suggestionsWidth}
+           onSubmit={uiActions.handleFinalSubmit}
+-          userMessages={uiState.userMessages}
+           setBannerVisible={uiActions.setBannerVisible}
+           onClearScreen={uiActions.handleClearScreen}
+           config={config}
+           slashCommands={uiState.slashCommands || []}
+           commandContext={uiState.commandContext}
+-          shellModeActive={uiState.shellModeActive}
+           setShellModeActive={uiActions.setShellModeActive}
+           approvalMode={uiState.showApprovalModeIndicator}
+           onEscapePromptChange={uiActions.onEscapePromptChange}
+@@ -165,7 +162,7 @@
+               ? vimMode === 'INSERT'
+                 ? "  Press 'Esc' for NORMAL mode."
+                 : "  Press 'i' for INSERT mode."
+-              : uiState.shellModeActive
++              : inputState.shellModeActive
+                 ? '  Type your shell command'
+                 : '  Type your message or @path/to/file'
+           }
+@@ -173,7 +170,6 @@
+           streamingState={uiState.streamingState}
+           suggestionsPosition={suggestionsPosition}
+           onSuggestionsVisibilityChange={setSuggestionsVisible}
+-          copyModeEnabled={uiState.copyModeEnabled}
+         />
+       )}
+ 
+--- a/packages/cli/src/ui/components/ToastDisplay.tsx
++++ b/packages/cli/src/ui/components/ToastDisplay.tsx
+@@ -8,15 +8,19 @@
+ import { Text } from 'ink';
+ import { theme } from '../semantic-colors.js';
+ import { useUIState, type UIState } from '../contexts/UIStateContext.js';
++import { useInputState, type InputState } from '../contexts/InputContext.js';
+ import { TransientMessageType } from '../../utils/events.js';
+ 
+-export function shouldShowToast(uiState: UIState): boolean {
++export function shouldShowToast(
++  uiState: UIState,
++  inputState: InputState,
++): boolean {
+   return (
+     uiState.ctrlCPressedOnce ||
+     Boolean(uiState.transientMessage) ||
+     uiState.ctrlDPressedOnce ||
+-    (uiState.showEscapePrompt &&
+-      (uiState.buffer.text.length > 0 || uiState.history.length > 0)) ||
++    (inputState.showEscapePrompt &&
++      (inputState.buffer.text.length > 0 || uiState.history.length > 0)) ||
+     Boolean(uiState.queueErrorMessage) ||
+     uiState.showIsExpandableHint
+   );
+@@ -24,6 +28,7 @@
+ 
+ export const ToastDisplay: React.FC = () => {
+   const uiState = useUIState();
++  const inputState = useInputState();
+ 
+   if (uiState.ctrlCPressedOnce) {
+     return (
+@@ -46,8 +51,8 @@
+     );
+   }
+ 
+-  if (uiState.showEscapePrompt) {
+-    const isPromptEmpty = uiState.buffer.text.length === 0;
++  if (inputState.showEscapePrompt) {
++    const isPromptEmpty = inputState.buffer.text.length === 0;
+     const hasHistory = uiState.history.length > 0;
+ 
+     if (isPromptEmpty && !hasHistory) {
+--- a/packages/cli/src/ui/components/StatusRow.tsx
++++ b/packages/cli/src/ui/components/StatusRow.tsx
+@@ -153,6 +153,8 @@
+   );
+ };
+ 
++import { useInputState } from '../contexts/InputContext.js';
++
+ export const StatusRow: React.FC<StatusRowProps> = ({
+   showUiDetails,
+   isNarrow,
+@@ -162,6 +164,7 @@
+   hasPendingActionRequired,
+ }) => {
+   const uiState = useUIState();
++  const inputState = useInputState();
+   const settings = useSettings();
+   const {
+     isInteractiveShellWaiting,
+@@ -225,7 +228,7 @@
+       settings.merged.ui.showShortcutsHint &&
+       !hideUiDetailsForSuggestions &&
+       !hasPendingActionRequired &&
+-      uiState.buffer.text.length === 0
++      inputState.buffer.text.length === 0
+     ) {
+       return showUiDetails ? '? for shortcuts' : 'press tab twice for more';
+     }
+@@ -391,13 +394,14 @@
+           >
+             {showUiDetails ? (
+               <>
+-                {!hideUiDetailsForSuggestions && !uiState.shellModeActive && (
+-                  <ApprovalModeIndicator
+-                    approvalMode={uiState.showApprovalModeIndicator}
+-                    allowPlanMode={uiState.allowPlanMode}
+-                  />
+-                )}
+-                {uiState.shellModeActive && (
++                {!hideUiDetailsForSuggestions &&
++                  !inputState.shellModeActive && (
++                    <ApprovalModeIndicator
++                      approvalMode={uiState.showApprovalModeIndicator}
++                      allowPlanMode={uiState.allowPlanMode}
++                    />
++                  )}
++                {inputState.shellModeActive && (
+                   <Box marginLeft={LAYOUT.INDICATOR_LEFT_MARGIN}>
+                     <ShellModeIndicator />
+                   </Box>
+--- a/packages/cli/src/ui/components/ToolConfirmationQueue.tsx
++++ b/packages/cli/src/ui/components/ToolConfirmationQueue.tsx
+@@ -9,11 +9,7 @@
+ import { theme } from '../semantic-colors.js';
+ import { useConfig } from '../contexts/ConfigContext.js';
+ import { ToolConfirmationMessage } from './messages/ToolConfirmationMessage.js';
+-import {
+-  isShellTool,
+-  ToolStatusIndicator,
+-  ToolInfo,
+-} from './messages/ToolShared.js';
++import { ToolStatusIndicator, ToolInfo } from './messages/ToolShared.js';
+ import { useUIState } from '../contexts/UIStateContext.js';
+ import type { ConfirmingToolState } from '../hooks/useConfirmingTool.js';
+ import { StickyHeader } from './StickyHeader.js';
+@@ -35,16 +31,6 @@
+   return headers[details.type] ?? 'Action Required';
+ }
+ 
+-function getConfirmationLabel(
+-  toolName: string,
+-  details: SerializableConfirmationDetails | undefined,
+-): string {
+-  if (details?.type === 'ask_user') return 'Questions';
+-  if (details?.type === 'exit_plan_mode') return 'Implementation';
+-  if (isShellTool(toolName)) return 'Shell';
+-  return toolName;
+-}
+-
+ interface ToolConfirmationQueueProps {
+   confirmingTool: ConfirmingToolState;
+ }
+@@ -72,78 +58,22 @@
+       ? Math.max(uiAvailableHeight, 4)
+       : Math.floor(terminalHeight * 0.5);
+ 
+-  const isShell = isShellTool(tool.name);
+-  const isEdit = tool.confirmationDetails?.type === 'edit';
+-
+-  if (isShell || isEdit) {
+-    // Use the new simplified layout for Shell and Edit tools
+-    const borderColor = theme.border.default;
+-    const availableContentHeight = constrainHeight
+-      ? Math.max(maxHeight - 3, 4)
+-      : undefined;
+-
+-    const toolLabel = getConfirmationLabel(tool.name, tool.confirmationDetails);
+-
+-    return (
+-      <Box
+-        flexDirection="column"
+-        width={mainAreaWidth}
+-        flexShrink={0}
+-        borderStyle="round"
+-        borderColor={borderColor}
+-        paddingX={1}
+-      >
+-        {/* Header Line */}
+-        <Box justifyContent="space-between" marginBottom={0}>
+-          <Box flexDirection="row" flexShrink={1} overflow="hidden">
+-            <Text color={theme.status.warning} bold>
+-              ? {toolLabel}
+-              {!isEdit && !!tool.description && '  '}
+-            </Text>
+-            {!isEdit && !!tool.description && (
+-              <Box flexShrink={1} overflow="hidden">
+-                <Text color={theme.text.primary} wrap="truncate-end">
+-                  {tool.description}
+-                </Text>
+-              </Box>
+-            )}
+-          </Box>
+-          {total > 1 && (
+-            <Text color={theme.text.secondary}>
+-              {index} of {total}
+-            </Text>
+-          )}
+-        </Box>
+-
+-        {/* Interactive Area */}
+-        <Box flexDirection="column">
+-          <ToolConfirmationMessage
+-            callId={tool.callId}
+-            confirmationDetails={tool.confirmationDetails}
+-            config={config}
+-            getPreferredEditor={getPreferredEditor}
+-            terminalWidth={mainAreaWidth - 4} // Adjust for parent border/padding
+-            availableTerminalHeight={availableContentHeight}
+-            toolName={tool.name}
+-            isFocused={true}
+-          />
+-        </Box>
+-      </Box>
+-    );
+-  }
+-
+-  // Restore original logic for other tools
+   const isRoutine =
+     tool.confirmationDetails?.type === 'ask_user' ||
+     tool.confirmationDetails?.type === 'exit_plan_mode';
+   const borderColor = isRoutine ? theme.status.success : theme.status.warning;
+   const hideToolIdentity = isRoutine;
+ 
++  // ToolConfirmationMessage needs to know the height available for its OWN content.
++  // We subtract the lines used by the Queue wrapper:
++  // - 2 lines for the rounded border
++  // - 2 lines for the Header (text + margin)
++  // - 2 lines for Tool Identity (text + margin)
+   const availableContentHeight = constrainHeight
+     ? Math.max(maxHeight - (hideToolIdentity ? 4 : 6), 4)
+     : undefined;
+ 
+-  return (
++  const content = (
+     <Box flexDirection="column" width={mainAreaWidth} flexShrink={0}>
+       <StickyHeader
+         width={mainAreaWidth}
+@@ -192,6 +122,11 @@
+         paddingX={1}
+         flexDirection="column"
+       >
++        {/* Interactive Area */}
++        {/*
++          Note: We force isFocused={true} because if this component is rendered,
++          it effectively acts as a modal over the shell/composer.
++        */}
+         <ToolConfirmationMessage
+           callId={tool.callId}
+           confirmationDetails={tool.confirmationDetails}
+@@ -199,7 +134,6 @@
+           getPreferredEditor={getPreferredEditor}
+           terminalWidth={mainAreaWidth - 4} // Adjust for parent border/padding
+           availableTerminalHeight={availableContentHeight}
+-          toolName={tool.name}
+           isFocused={true}
+         />
+       </Box>
+@@ -215,4 +149,6 @@
+       />
+     </Box>
+   );
++
++  return content;
+ };
+--- a/packages/cli/src/ui/components/InputPrompt.tsx
++++ b/packages/cli/src/ui/components/InputPrompt.tsx
+@@ -70,6 +70,7 @@
+ import { isLowColorDepth } from '../utils/terminalUtils.js';
+ import { useShellFocusState } from '../contexts/ShellFocusContext.js';
+ import { useUIState } from '../contexts/UIStateContext.js';
++import { useInputState } from '../contexts/InputContext.js';
+ import {
+   appEvents,
+   AppEvent,
+@@ -104,18 +105,13 @@
+   | { type: 'ghostLine'; ghostLine: string; index: number };
+ 
+ export interface InputPromptProps {
+-  buffer: TextBuffer;
+   onSubmit: (value: string) => void;
+-  userMessages: readonly string[];
+   onClearScreen: () => void;
+   config: Config;
+   slashCommands: readonly SlashCommand[];
+   commandContext: CommandContext;
+   placeholder?: string;
+   focus?: boolean;
+-  inputWidth: number;
+-  suggestionsWidth: number;
+-  shellModeActive: boolean;
+   setShellModeActive: (value: boolean) => void;
+   approvalMode: ApprovalMode;
+   onEscapePromptChange?: (showPrompt: boolean) => void;
+@@ -128,7 +124,6 @@
+   onQueueMessage?: (message: string) => void;
+   suggestionsPosition?: 'above' | 'below';
+   setBannerVisible: (visible: boolean) => void;
+-  copyModeEnabled?: boolean;
+ }
+ 
+ // The input content, input container, and input suggestions list may have different widths
+@@ -199,18 +194,13 @@
+ }
+ 
+ export const InputPrompt: React.FC<InputPromptProps> = ({
+-  buffer,
+   onSubmit,
+-  userMessages,
+   onClearScreen,
+   config,
+   slashCommands,
+   commandContext,
+   placeholder = '  Type your message or @path/to/file',
+   focus = true,
+-  inputWidth,
+-  suggestionsWidth,
+-  shellModeActive,
+   setShellModeActive,
+   approvalMode,
+   onEscapePromptChange,
+@@ -223,8 +213,16 @@
+   onQueueMessage,
+   suggestionsPosition = 'below',
+   setBannerVisible,
+-  copyModeEnabled = false,
+ }) => {
++  const inputState = useInputState();
++  const {
++    buffer,
++    userMessages,
++    shellModeActive,
++    copyModeEnabled,
++    inputWidth,
++    suggestionsWidth,
++  } = inputState;
+   const isHelpDismissKey = useIsHelpDismissKey();
+   const keyMatchers = useKeyMatchers();
+   const { stdout } = useStdout();
+--- a/packages/cli/src/ui/layouts/DefaultAppLayout.tsx
++++ b/packages/cli/src/ui/layouts/DefaultAppLayout.tsx
+@@ -17,9 +17,11 @@
+ import { CopyModeWarning } from '../components/CopyModeWarning.js';
+ import { BackgroundTaskDisplay } from '../components/BackgroundTaskDisplay.js';
+ import { StreamingState } from '../types.js';
++import { useInputState } from '../contexts/InputContext.js';
+ 
+ export const DefaultAppLayout: React.FC = () => {
+   const uiState = useUIState();
++  const { copyModeEnabled } = useInputState();
+   const isAlternateBuffer = useAlternateBuffer();
+ 
+   const { rootUiRef, terminalHeight } = uiState;
+@@ -62,9 +64,7 @@
+         flexShrink={0}
+         flexGrow={0}
+         width={uiState.terminalWidth}
+-        height={
+-          uiState.copyModeEnabled ? uiState.stableControlsHeight : undefined
+-        }
++        height={copyModeEnabled ? uiState.stableControlsHeight : undefined}
+       >
+         <Notifications />
+         <CopyModeWarning />
+--- a/packages/cli/src/ui/hooks/useExecutionLifecycle.ts
++++ b/packages/cli/src/ui/hooks/useExecutionLifecycle.ts
+@@ -554,7 +554,6 @@
+                 italic: false,
+                 underline: false,
+                 inverse: false,
+-                isUninitialized: false,
+               },
+             ]);
+             return [...newLines, [], ...output];
+--- a/packages/cli/src/test-utils/render.tsx
++++ b/packages/cli/src/test-utils/render.tsx
+@@ -597,6 +597,9 @@
+   getPreferredEditor: vi.fn(),
+   clearAccountSuspension: vi.fn(),
+ };
++
++import { type TextBuffer } from '../ui/components/shared/text-buffer.js';
++import { InputContext, type InputState } from '../ui/contexts/InputContext.js';
+ 
+ let capturedOverflowState: OverflowState | undefined;
+ let capturedOverflowActions: OverflowActions | undefined;
+@@ -614,6 +617,7 @@
+     shellFocus = true,
+     settings = mockSettings,
+     uiState: providedUiState,
++    inputState: providedInputState,
+     width,
+     mouseEventsEnabled = false,
+     config,
+@@ -625,6 +629,7 @@
+     shellFocus?: boolean;
+     settings?: LoadedSettings;
+     uiState?: Partial<UIState>;
++    inputState?: Partial<InputState>;
+     width?: number;
+     mouseEventsEnabled?: boolean;
+     config?: Config;
+@@ -658,6 +663,18 @@
+       },
+     },
+   ) as UIState;
++
++  const inputState = {
++    buffer: { text: '' } as unknown as TextBuffer,
++    userMessages: [],
++    shellModeActive: false,
++    showEscapePrompt: false,
++    copyModeEnabled: false,
++    inputWidth: 80,
++    suggestionsWidth: 40,
++    ...(providedUiState as unknown as Partial<InputState>),
++    ...providedInputState,
++  };
+ 
+   if (persistentState?.get) {
+     persistentStateMock.get.mockImplementation(persistentState.get);
+@@ -708,63 +725,65 @@
+     <AppContext.Provider value={appState}>
+       <ConfigContext.Provider value={config}>
+         <SettingsContext.Provider value={settings}>
+-          <UIStateContext.Provider value={finalUiState}>
+-            <VimModeProvider>
+-              <ShellFocusContext.Provider value={shellFocus}>
+-                <SessionStatsProvider>
+-                  <StreamingContext.Provider
+-                    value={finalUiState.streamingState}
+-                  >
+-                    <UIActionsContext.Provider value={finalUIActions}>
+-                      <OverflowProvider>
+-                        <ToolActionsProvider
+-                          config={config}
+-                          toolCalls={allToolCalls}
+-                          isExpanded={
+-                            toolActions?.isExpanded ??
+-                            vi.fn().mockReturnValue(false)
+-                          }
+-                          toggleExpansion={
+-                            toolActions?.toggleExpansion ?? vi.fn()
+-                          }
+-                          toggleAllExpansion={
+-                            toolActions?.toggleAllExpansion ?? vi.fn()
+-                          }
+-                        >
+-                          <AskUserActionsProvider
+-                            request={null}
+-                            onSubmit={vi.fn()}
+-                            onCancel={vi.fn()}
++          <InputContext.Provider value={inputState}>
++            <UIStateContext.Provider value={finalUiState}>
++              <VimModeProvider>
++                <ShellFocusContext.Provider value={shellFocus}>
++                  <SessionStatsProvider>
++                    <StreamingContext.Provider
++                      value={finalUiState.streamingState}
++                    >
++                      <UIActionsContext.Provider value={finalUIActions}>
++                        <OverflowProvider>
++                          <ToolActionsProvider
++                            config={config}
++                            toolCalls={allToolCalls}
++                            isExpanded={
++                              toolActions?.isExpanded ??
++                              vi.fn().mockReturnValue(false)
++                            }
++                            toggleExpansion={
++                              toolActions?.toggleExpansion ?? vi.fn()
++                            }
++                            toggleAllExpansion={
++                              toolActions?.toggleAllExpansion ?? vi.fn()
++                            }
+                           >
+-                            <KeypressProvider>
+-                              <MouseProvider
+-                                mouseEventsEnabled={mouseEventsEnabled}
+-                              >
+-                                <TerminalProvider>
+-                                  <ScrollProvider>
+-                                    <ContextCapture>
+-                                      <Box
+-                                        width={terminalWidth}
+-                                        flexShrink={0}
+-                                        flexGrow={0}
+-                                        flexDirection="column"
+-                                      >
+-                                        {comp}
+-                                      </Box>
+-                                    </ContextCapture>
+-                                  </ScrollProvider>
+-                                </TerminalProvider>
+-                              </MouseProvider>
+-                            </KeypressProvider>
+-                          </AskUserActionsProvider>
+-                        </ToolActionsProvider>
+-                      </OverflowProvider>
+-                    </UIActionsContext.Provider>
+-                  </StreamingContext.Provider>
+-                </SessionStatsProvider>
+-              </ShellFocusContext.Provider>
+-            </VimModeProvider>
+-          </UIStateContext.Provider>
++                            <AskUserActionsProvider
++                              request={null}
++                              onSubmit={vi.fn()}
++                              onCancel={vi.fn()}
++                            >
++                              <KeypressProvider>
++                                <MouseProvider
++                                  mouseEventsEnabled={mouseEventsEnabled}
++                                >
++                                  <TerminalProvider>
++                                    <ScrollProvider>
++                                      <ContextCapture>
++                                        <Box
++                                          width={terminalWidth}
++                                          flexShrink={0}
++                                          flexGrow={0}
++                                          flexDirection="column"
++                                        >
++                                          {comp}
++                                        </Box>
++                                      </ContextCapture>
++                                    </ScrollProvider>
++                                  </TerminalProvider>
++                                </MouseProvider>
++                              </KeypressProvider>
++                            </AskUserActionsProvider>
++                          </ToolActionsProvider>
++                        </OverflowProvider>
++                      </UIActionsContext.Provider>
++                    </StreamingContext.Provider>
++                  </SessionStatsProvider>
++                </ShellFocusContext.Provider>
++              </VimModeProvider>
++            </UIStateContext.Provider>
++          </InputContext.Provider>
+         </SettingsContext.Provider>
+       </ConfigContext.Provider>
+     </AppContext.Provider>
+--- a/packages/cli/src/config/settingsSchema.ts
++++ b/packages/cli/src/config/settingsSchema.ts
+@@ -1711,10 +1711,10 @@
+         type: 'boolean',
+         label: 'Tool Sandboxing',
+         category: 'Security',
+-        requiresRestart: true,
++        requiresRestart: false,
+         default: false,
+         description:
+-          'Tool-level sandboxing. Isolates individual tools instead of the entire CLI process.',
++          'Experimental tool-level sandboxing (implementation in progress).',
+         showInDialog: true,
+       },
+       disableYoloMode: {
+--- a/packages/cli/src/utils/sessionUtils.ts
++++ b/packages/cli/src/utils/sessionUtils.ts
+@@ -607,7 +607,6 @@
+         tools: msg.toolCalls.map((tool) => ({
+           callId: tool.id,
+           name: tool.displayName || tool.name,
+-          args: tool.args,
+           description: tool.description || '',
+           renderOutputAsMarkdown: tool.renderOutputAsMarkdown ?? true,
+           status:
+--- a/packages/cli/src/acp/commandHandler.ts
++++ b/packages/cli/src/acp/commandHandler.ts
+@@ -10,7 +10,6 @@
+ import { ExtensionsCommand } from './commands/extensions.js';
+ import { InitCommand } from './commands/init.js';
+ import { RestoreCommand } from './commands/restore.js';
+-import { AboutCommand } from './commands/about.js';
+ 
+ export class CommandHandler {
+   private registry: CommandRegistry;
+@@ -25,7 +24,6 @@
+     registry.register(new ExtensionsCommand());
+     registry.register(new InitCommand());
+     registry.register(new RestoreCommand());
+-    registry.register(new AboutCommand());
+     return registry;
+   }
+ 

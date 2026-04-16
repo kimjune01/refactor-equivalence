@@ -1,0 +1,1049 @@
+--- a/packages/core/src/test-utils/mock-tool.ts
++++ b/packages/core/src/test-utils/mock-tool.ts
+@@ -14,7 +14,6 @@
+   Kind,
+   type ToolCallConfirmationDetails,
+   type ToolInvocation,
+-  type ToolLiveOutput,
+   type ToolResult,
+   type ExecuteOptions,
+ } from '../tools/tools.js';
+@@ -54,11 +53,8 @@
+     super(params, messageBus, tool.name, tool.displayName);
+   }
+ 
+-  execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-    options?: ExecuteOptions,
+-  ): Promise<ToolResult> {
++  execute(options: ExecuteOptions): Promise<ToolResult> {
++    const { abortSignal: signal, updateOutput } = options;
+     return this.tool.execute(
+       this.params,
+       signal,
+@@ -158,11 +154,7 @@
+     super(params, messageBus, tool.name, tool.displayName);
+   }
+ 
+-  async execute(
+-    _signal: AbortSignal,
+-    _updateOutput?: (output: ToolLiveOutput) => void,
+-    _options?: ExecuteOptions,
+-  ): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const result = this.tool.executeFn(this.params);
+     return (
+       result ?? {
+--- a/packages/core/src/tools/web-search.ts
++++ b/packages/core/src/tools/web-search.ts
+@@ -13,6 +13,7 @@
+   Kind,
+   type ToolInvocation,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { ToolErrorType } from './tool-error.js';
+ 
+@@ -84,7 +85,9 @@
+     return `Searching the web for: "${this.params.query}"`;
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<WebSearchToolResult> {
++  async execute({
++    abortSignal: signal,
++  }: ExecuteOptions): Promise<WebSearchToolResult> {
+     const geminiClient = this.context.geminiClient;
+ 
+     try {
+--- a/packages/core/src/tools/web-fetch.ts
++++ b/packages/core/src/tools/web-fetch.ts
+@@ -13,6 +13,7 @@
+   type ToolInvocation,
+   type ToolResult,
+   type PolicyUpdateOptions,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import { ToolErrorType } from './tool-error.js';
+@@ -761,7 +762,7 @@
+     }
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     if (this.context.config.getDirectWebFetch()) {
+       return this.executeExperimental(signal);
+     }
+--- a/packages/core/src/tools/mcp-tool.ts
++++ b/packages/core/src/tools/mcp-tool.ts
+@@ -16,6 +16,7 @@
+   type ToolMcpConfirmationDetails,
+   type ToolResult,
+   type PolicyUpdateOptions,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { CallableTool, FunctionCall, Part } from '@google/genai';
+ import { ToolErrorType } from './tool-error.js';
+@@ -264,7 +265,7 @@
+     return false;
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     this.cliConfig?.setUserInteractedWithMcp?.();
+     const functionCalls: FunctionCall[] = [
+       {
+--- a/packages/core/src/tools/shellBackgroundTools.ts
++++ b/packages/core/src/tools/shellBackgroundTools.ts
+@@ -11,7 +11,9 @@
+   BaseToolInvocation,
+   Kind,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
++
+ import { ToolErrorType } from './tool-error.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import type { AgentLoopContext } from '../config/agent-loop-context.js';
+@@ -40,7 +42,7 @@
+     return 'Lists all active and recently completed background processes for the current session.';
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const processes = ShellExecutionService.listBackgroundProcesses(
+       this.context.config.getSessionId(),
+     );
+@@ -128,7 +130,7 @@
+     return `Reading output for background process ${this.params.pid}`;
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const pid = this.params.pid;
+ 
+     if (this.params.delay_ms && this.params.delay_ms > 0) {
+--- a/packages/core/src/tools/activate-skill.ts
++++ b/packages/core/src/tools/activate-skill.ts
+@@ -15,6 +15,7 @@
+   type ToolCallConfirmationDetails,
+   type ToolInvocation,
+   type ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { Config } from '../config/config.js';
+ import { ACTIVATE_SKILL_TOOL_NAME } from './tool-names.js';
+@@ -107,7 +108,7 @@
+     return confirmationDetails;
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const skillName = this.params.name;
+     const skillManager = this.config.getSkillManager();
+     const skill = skillManager.getSkill(skillName);
+--- a/packages/core/src/tools/write-file.ts
++++ b/packages/core/src/tools/write-file.ts
+@@ -24,6 +24,7 @@
+   type ToolResult,
+   type ToolConfirmationOutcome,
+   type PolicyUpdateOptions,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { buildFilePathArgsPattern } from '../policy/utils.js';
+ import { ToolErrorType } from './tool-error.js';
+@@ -261,7 +262,9 @@
+     return confirmationDetails;
+   }
+ 
+-  async execute(abortSignal: AbortSignal): Promise<ToolResult> {
++  async execute({
++    abortSignal,
++  }: ExecuteOptions): Promise<ToolResult> {
+     const validationError = this.config.validatePathAccess(this.resolvedPath);
+     if (validationError) {
+       return {
+--- a/packages/core/src/tools/tool-registry.ts
++++ b/packages/core/src/tools/tool-registry.ts
+@@ -12,6 +12,7 @@
+   type AnyDeclarativeTool,
+   type ToolResult,
+   type ToolInvocation,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { Config } from '../config/config.js';
+ import { ApprovalMode } from '../policy/types.js';
+@@ -55,10 +56,7 @@
+     return safeJsonStringify(this.params);
+   }
+ 
+-  async execute(
+-    _signal: AbortSignal,
+-    _updateOutput?: (output: string) => void,
+-  ): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const callCommand = this.config.getToolCallCommand()!;
+     const args = [this.originalToolName];
+ 
+--- a/packages/core/src/tools/read-file.ts
++++ b/packages/core/src/tools/read-file.ts
+@@ -16,6 +16,7 @@
+   type ToolResult,
+   type PolicyUpdateOptions,
+   type ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { ToolErrorType } from './tool-error.js';
+ import { buildFilePathArgsPattern } from '../policy/utils.js';
+@@ -104,7 +105,7 @@
+     };
+   }
+ 
+-  async execute(): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const validationError = this.config.validatePathAccess(
+       this.resolvedPath,
+       'read',
+--- a/packages/core/src/tools/exit-plan-mode.ts
++++ b/packages/core/src/tools/exit-plan-mode.ts
+@@ -13,6 +13,7 @@
+   type ToolExitPlanModeConfirmationDetails,
+   type ToolExitPlanModeConfirmationPayload,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import path from 'node:path';
+@@ -182,7 +183,7 @@
+     return path.join(this.config.storage.getPlansDir(), safeFilename);
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const resolvedPlanPath = this.getResolvedPlanPath();
+ 
+     if (this.planValidationError) {
+--- a/packages/core/src/tools/glob.ts
++++ b/packages/core/src/tools/glob.ts
+@@ -16,6 +16,7 @@
+   type ToolResult,
+   type PolicyUpdateOptions,
+   type ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { shortenPath, makeRelative } from '../utils/paths.js';
+ import { type Config } from '../config/config.js';
+@@ -129,7 +130,7 @@
+     };
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const workspaceContext = this.config.getWorkspaceContext();
+       const workspaceDirectories = workspaceContext.getDirectories();
+--- a/packages/core/src/tools/ls.ts
++++ b/packages/core/src/tools/ls.ts
+@@ -15,6 +15,7 @@
+   type ToolResult,
+   type PolicyUpdateOptions,
+   type ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { makeRelative, shortenPath } from '../utils/paths.js';
+ import type { Config } from '../config/config.js';
+@@ -155,7 +156,7 @@
+    * Executes the LS operation with the given parameters
+    * @returns Result of the LS operation
+    */
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const resolvedDirPath = path.resolve(
+       this.config.getTargetDir(),
+       this.params.dir_path,
+--- a/packages/core/src/tools/grep.ts
++++ b/packages/core/src/tools/grep.ts
+@@ -23,6 +23,7 @@
+   type ToolResult,
+   type PolicyUpdateOptions,
+   type ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { makeRelative, shortenPath } from '../utils/paths.js';
+ import { getErrorMessage, isNodeError } from '../utils/errors.js';
+@@ -138,7 +139,7 @@
+     return null;
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const workspaceContext = this.config.getWorkspaceContext();
+       const pathParam = this.params.dir_path;
+--- a/packages/core/src/tools/enter-plan-mode.ts
++++ b/packages/core/src/tools/enter-plan-mode.ts
+@@ -12,6 +12,7 @@
+   Kind,
+   type ToolInfoConfirmationDetails,
+   ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import type { Config } from '../config/config.js';
+@@ -114,7 +115,7 @@
+     };
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     if (this.confirmationOutcome === ToolConfirmationOutcome.Cancel) {
+       return {
+         llmContent: 'User cancelled entering Plan Mode.',
+--- a/packages/core/src/tools/edit.ts
++++ b/packages/core/src/tools/edit.ts
+@@ -21,6 +21,7 @@
+   type ToolResult,
+   type ToolResultDisplay,
+   type PolicyUpdateOptions,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { buildFilePathArgsPattern } from '../policy/utils.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+@@ -832,7 +833,7 @@
+    * @param params Parameters for the edit operation
+    * @returns Result of the edit operation
+    */
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     const validationError = this.config.validatePathAccess(this.resolvedPath);
+     if (validationError) {
+       return {
+--- a/packages/core/src/tools/trackerTools.ts
++++ b/packages/core/src/tools/trackerTools.ts
+@@ -23,7 +23,12 @@
+   TRACKER_UPDATE_TASK_TOOL_NAME,
+   TRACKER_VISUALIZE_TOOL_NAME,
+ } from './tool-names.js';
+-import type { ToolResult, TodoList, TodoStatus } from './tools.js';
++import type {
++  ToolResult,
++  TodoList,
++  TodoStatus,
++  ExecuteOptions,
++} from './tools.js';
+ import { BaseDeclarativeTool, BaseToolInvocation, Kind } from './tools.js';
+ import { ToolErrorType } from './tool-error.js';
+ import type { TrackerTask, TaskType } from '../services/trackerTypes.js';
+@@ -135,7 +140,7 @@
+     return `Creating task: ${this.params.title}`;
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const task = await this.service.createTask({
+         title: this.params.title,
+@@ -225,7 +230,7 @@
+     return `Updating task ${this.params.id}`;
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const { id, ...updates } = this.params;
+     try {
+       const task = await this.service.updateTask(id, updates);
+@@ -305,7 +310,7 @@
+     return `Retrieving task ${this.params.id}`;
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const task = await this.service.getTask(this.params.id);
+     if (!task) {
+       return {
+@@ -379,7 +384,7 @@
+     return 'Listing tasks.';
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     let tasks = await this.service.listTasks();
+     if (this.params.status) {
+       tasks = tasks.filter((t) => t.status === this.params.status);
+@@ -466,7 +471,7 @@
+     return `Adding dependency: ${this.params.taskId} depends on ${this.params.dependencyId}`;
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     if (this.params.taskId === this.params.dependencyId) {
+       return {
+         llmContent: `Error: Task ${this.params.taskId} cannot depend on itself.`,
+@@ -576,7 +581,7 @@
+     return 'Visualizing the task graph.';
+   }
+ 
+-  override async execute(_signal: AbortSignal): Promise<ToolResult> {
++  override async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const tasks = await this.service.listTasks();
+     if (tasks.length === 0) {
+       return {
+--- a/packages/core/src/tools/shell.ts
++++ b/packages/core/src/tools/shell.ts
+@@ -26,7 +26,6 @@
+   type ToolCallConfirmationDetails,
+   type ToolExecuteConfirmationDetails,
+   type PolicyUpdateOptions,
+-  type ToolLiveOutput,
+   type ExecuteOptions,
+   type ForcedToolDecision,
+ } from './tools.js';
+@@ -434,12 +433,13 @@
+     return confirmationDetails;
+   }
+ 
+-  async execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-    options?: ExecuteOptions,
+-  ): Promise<ToolResult> {
+-    const { shellExecutionConfig, setExecutionIdCallback } = options ?? {};
++  async execute(options: ExecuteOptions): Promise<ToolResult> {
++    const {
++      abortSignal: signal,
++      updateOutput,
++      shellExecutionConfig,
++      setExecutionIdCallback,
++    } = options;
+     const strippedCommand = stripShellWrapper(this.params.command);
+ 
+     if (signal.aborted) {
+--- a/packages/core/src/tools/ripGrep.ts
++++ b/packages/core/src/tools/ripGrep.ts
+@@ -15,6 +15,7 @@
+   Kind,
+   type ToolInvocation,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { ToolErrorType } from './tool-error.js';
+ import { makeRelative, shortenPath } from '../utils/paths.js';
+@@ -192,7 +193,7 @@
+     super(params, messageBus, _toolName, _toolDisplayName);
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     try {
+       // Default to '.' if path is explicitly undefined/null.
+       // This forces CWD search instead of 'all workspaces' search by default.
+--- a/packages/core/src/tools/tools.ts
++++ b/packages/core/src/tools/tools.ts
+@@ -34,6 +34,8 @@
+  * only relevant to specific tool types.
+  */
+ export interface ExecuteOptions {
++  abortSignal: AbortSignal;
++  updateOutput?: (output: ToolLiveOutput) => void;
+   shellExecutionConfig?: ShellExecutionConfig;
+   setExecutionIdCallback?: (executionId: number) => void;
+ }
+@@ -90,16 +92,10 @@
+ 
+   /**
+    * Executes the tool with the validated parameters.
+-   * @param signal AbortSignal for tool cancellation.
+-   * @param updateOutput Optional callback to stream output.
+-   * @param setExecutionIdCallback Optional callback for tools that expose a background execution handle.
++   * @param options Options for tool execution including signal and output updates.
+    * @returns Result of the tool execution.
+    */
+-  execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-    options?: ExecuteOptions,
+-  ): Promise<TResult>;
++  execute(options: ExecuteOptions): Promise<TResult>;
+ 
+   /**
+    * Returns tool-specific options for policy updates.
+@@ -374,11 +370,7 @@
+     });
+   }
+ 
+-  abstract execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-    options?: ExecuteOptions,
+-  ): Promise<TResult>;
++  abstract execute(options: ExecuteOptions): Promise<TResult>;
+ 
+   toJSON() {
+     return {
+@@ -609,10 +601,14 @@
+     params: TParams,
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+-    options?: ExecuteOptions,
++    options?: Omit<ExecuteOptions, 'abortSignal' | 'updateOutput'>,
+   ): Promise<TResult> {
+     const invocation = this.build(params);
+-    return invocation.execute(signal, updateOutput, options);
++    return invocation.execute({
++      ...options,
++      abortSignal: signal,
++      updateOutput,
++    });
+   }
+ 
+   /**
+@@ -658,7 +654,7 @@
+     }
+ 
+     try {
+-      return await invocationOrError.execute(abortSignal);
++      return await invocationOrError.execute({ abortSignal });
+     } catch (error) {
+       const errorMessage =
+         error instanceof Error ? error.message : String(error);
+--- a/packages/core/src/tools/complete-task.ts
++++ b/packages/core/src/tools/complete-task.ts
+@@ -9,7 +9,9 @@
+   BaseToolInvocation,
+   type ToolResult,
+   Kind,
++  type ExecuteOptions,
+ } from './tools.js';
++
+ import {
+   COMPLETE_TASK_TOOL_NAME,
+   COMPLETE_TASK_DISPLAY_NAME,
+@@ -48,51 +50,40 @@
+   private static buildParameterSchema(
+     outputConfig?: OutputConfig<z.ZodTypeAny>,
+   ): unknown {
+-    if (outputConfig) {
+-      const jsonSchema = zodToJsonSchema(outputConfig.schema);
+-      const {
+-        $schema: _$schema,
+-        definitions: _definitions,
+-        ...schema
+-      } = jsonSchema;
++    if (!outputConfig) {
+       return {
+         type: 'object',
+         properties: {
+-          [outputConfig.outputName]: schema,
++          result: {
++            type: 'string',
++            description:
++              'Your final results or findings to return to the orchestrator. ' +
++              'Ensure this is comprehensive and follows any formatting requested in your instructions.',
++          },
+         },
+-        required: [outputConfig.outputName],
++        required: ['result'],
+       };
+     }
++
++    const jsonSchema = zodToJsonSchema(outputConfig.schema);
++    const {
++      $schema: _$schema,
++      definitions: _definitions,
++      ...schema
++    } = jsonSchema;
+     return {
+       type: 'object',
+       properties: {
+-        result: {
+-          type: 'string',
+-          description:
+-            'Your final results or findings to return to the orchestrator. ' +
+-            'Ensure this is comprehensive and follows any formatting requested in your instructions.',
+-        },
++        [outputConfig.outputName]: schema,
+       },
+-      required: ['result'],
++      required: [outputConfig.outputName],
+     };
+   }
+ 
+   protected override validateToolParamValues(
+     params: Record<string, unknown>,
+   ): string | null {
+-    if (this.outputConfig) {
+-      const outputName = this.outputConfig.outputName;
+-      if (params[outputName] === undefined) {
+-        return `Missing required argument '${outputName}' for completion.`;
+-      }
+-
+-      const validationResult = this.outputConfig.schema.safeParse(
+-        params[outputName],
+-      );
+-      if (!validationResult.success) {
+-        return `Output validation failed: ${JSON.stringify(validationResult.error.flatten())}`;
+-      }
+-    } else {
++    if (!this.outputConfig) {
+       const resultArg = params['result'];
+       if (
+         resultArg === undefined ||
+@@ -101,7 +92,20 @@
+       ) {
+         return 'Missing required "result" argument. You must provide your findings when calling complete_task.';
+       }
++      return null;
+     }
++
++    const outputName = this.outputConfig.outputName;
++    if (params[outputName] === undefined) {
++      return `Missing required argument '${outputName}' for completion.`;
++    }
++
++    const validationResult = this.outputConfig.schema.safeParse(
++      params[outputName],
++    );
++    if (!validationResult.success) {
++      return `Output validation failed: ${JSON.stringify(validationResult.error.flatten())}`;
++    }
+     return null;
+   }
+ 
+@@ -140,28 +144,18 @@
+     return 'Completing task and submitting results.';
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
+-    let submittedOutput: string | null = null;
+-    let outputValue: unknown;
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
++    const outputValue = this.outputConfig
++      ? this.params[this.outputConfig.outputName]
++      : this.params['result'];
+ 
+-    if (this.outputConfig) {
+-      outputValue = this.params[this.outputConfig.outputName];
+-      if (this.processOutput) {
+-        // We validated the params in validateToolParamValues, so safe to cast
+-        submittedOutput = this.processOutput(outputValue as z.infer<TOutput>);
+-      } else {
+-        submittedOutput =
+-          typeof outputValue === 'string'
+-            ? outputValue
+-            : JSON.stringify(outputValue, null, 2);
+-      }
+-    } else {
+-      outputValue = this.params['result'];
+-      submittedOutput =
+-        typeof outputValue === 'string'
++    const submittedOutput =
++      this.outputConfig && this.processOutput
++        ? // We validated the params in validateToolParamValues, so safe to cast
++          this.processOutput(outputValue as z.infer<TOutput>)
++        : typeof outputValue === 'string'
+           ? outputValue
+           : JSON.stringify(outputValue, null, 2);
+-    }
+ 
+     const returnDisplay = this.outputConfig
+       ? 'Output submitted and task completed.'
+--- a/packages/core/src/tools/read-many-files.ts
++++ b/packages/core/src/tools/read-many-files.ts
+@@ -14,6 +14,7 @@
+   type PolicyUpdateOptions,
+   type ToolConfirmationOutcome,
+   type ReadManyFilesResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { getErrorMessage } from '../utils/errors.js';
+ import * as fsPromises from 'node:fs/promises';
+@@ -136,9 +137,9 @@
+   }
+ 
+   getDescription(): string {
+-    const pathDesc = `using patterns: 
++    const pathDesc = `using patterns:
+ ${this.params.include.join('`, `')}
+- (within target directory: 
++ (within target directory:
+ ${this.config.getTargetDir()}
+ ) `;
+ 
+@@ -152,7 +153,7 @@
+ 
+     const excludeDesc = `Excluding: ${
+       finalExclusionPatternsForDescription.length > 0
+-        ? `patterns like 
++        ? `patterns like
+ ${finalExclusionPatternsForDescription
+   .slice(0, 2)
+   .join(
+@@ -175,7 +176,7 @@
+     };
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     const { include, exclude = [], useDefaultExcludes = true } = this.params;
+ 
+     const filesToConsider = new Set<string>();
+--- a/packages/core/src/tools/topicTool.ts
++++ b/packages/core/src/tools/topicTool.ts
+@@ -16,6 +16,7 @@
+   BaseToolInvocation,
+   Kind,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import { debugLogger } from '../utils/debugLogger.js';
+@@ -50,7 +51,7 @@
+     return `Update tactical intent: "${intent || '...'}"`;
+   }
+ 
+-  async execute(): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const title = this.params[TOPIC_PARAM_TITLE];
+     const summary = this.params[TOPIC_PARAM_SUMMARY];
+     const strategicIntent = this.params[TOPIC_PARAM_STRATEGIC_INTENT];
+--- a/packages/core/src/tools/get-internal-docs.ts
++++ b/packages/core/src/tools/get-internal-docs.ts
+@@ -11,6 +11,7 @@
+   type ToolInvocation,
+   type ToolResult,
+   type ToolCallConfirmationDetails,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { GET_INTERNAL_DOCS_TOOL_NAME } from './tool-names.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+@@ -96,7 +97,7 @@
+     return 'Listing all available internal documentation.';
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const docsRoot = await getDocsRoot();
+ 
+--- a/packages/core/src/tools/memoryTool.ts
++++ b/packages/core/src/tools/memoryTool.ts
+@@ -11,6 +11,7 @@
+   ToolConfirmationOutcome,
+   type ToolEditConfirmationDetails,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import * as fs from 'node:fs/promises';
+ import * as path from 'node:path';
+@@ -226,7 +227,7 @@
+     return confirmationDetails;
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const { fact, modified_by_user, modified_content } = this.params;
+     const memoryFilePath = this.getMemoryFilePath();
+ 
+--- a/packages/core/src/tools/write-todos.ts
++++ b/packages/core/src/tools/write-todos.ts
+@@ -11,6 +11,7 @@
+   type ToolInvocation,
+   type Todo,
+   type ToolResult,
++  type ExecuteOptions,
+ } from './tools.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import { WRITE_TODOS_TOOL_NAME } from './tool-names.js';
+@@ -53,10 +54,7 @@
+     return `Set ${count} todo(s)`;
+   }
+ 
+-  async execute(
+-    _signal: AbortSignal,
+-    _updateOutput?: (output: string) => void,
+-  ): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const todos = this.params.todos ?? [];
+     const todoListString = todos
+       .map(
+--- a/packages/core/src/tools/ask-user.ts
++++ b/packages/core/src/tools/ask-user.ts
+@@ -12,6 +12,7 @@
+   type ToolAskUserConfirmationDetails,
+   type ToolConfirmationPayload,
+   ToolConfirmationOutcome,
++  type ExecuteOptions,
+ } from './tools.js';
+ import { ToolErrorType } from './tool-error.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+@@ -152,7 +153,7 @@
+     return `Asking user: ${this.params.questions.map((q) => q.question).join(', ')}`;
+   }
+ 
+-  async execute(_signal: AbortSignal): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     const questionTypes = this.params.questions.map((q) => q.type);
+ 
+     if (this.confirmationOutcome === ToolConfirmationOutcome.Cancel) {
+--- a/packages/core/src/core/coreToolHookTriggers.ts
++++ b/packages/core/src/core/coreToolHookTriggers.ts
+@@ -71,7 +71,7 @@
+   signal: AbortSignal,
+   tool: AnyDeclarativeTool,
+   liveOutputCallback?: (outputChunk: ToolLiveOutput) => void,
+-  options?: ExecuteOptions,
++  options?: Omit<ExecuteOptions, 'abortSignal' | 'updateOutput'>,
+   config?: Config,
+   originalRequestName?: string,
+   skipBeforeHook?: boolean,
+@@ -154,11 +154,11 @@
+ 
+   // Execute the actual tool. Tools that support backgrounding can optionally
+   // surface an execution ID via the callback.
+-  const toolResult: ToolResult = await invocation.execute(
+-    signal,
+-    liveOutputCallback,
+-    options,
+-  );
++  const toolResult: ToolResult = await invocation.execute({
++    ...options,
++    abortSignal: signal,
++    updateOutput: liveOutputCallback,
++  });
+ 
+   // Append notification if parameters were modified
+   if (inputWasModified) {
+--- a/packages/core/src/agents/local-invocation.ts
++++ b/packages/core/src/agents/local-invocation.ts
+@@ -10,7 +10,7 @@
+ import {
+   BaseToolInvocation,
+   type ToolResult,
+-  type ToolLiveOutput,
++  type ExecuteOptions,
+ } from '../tools/tools.js';
+ import {
+   type LocalAgentDefinition,
+@@ -103,10 +103,8 @@
+    * agent's thoughts, to the user interface.
+    * @returns A `Promise` that resolves with the final `ToolResult`.
+    */
+-  async execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-  ): Promise<ToolResult> {
++  async execute(options: ExecuteOptions): Promise<ToolResult> {
++    const { abortSignal: signal, updateOutput } = options;
+     const recentActivity: SubagentActivityItem[] = [];
+ 
+     try {
+--- a/packages/core/src/agents/browser/mcpToolWrapper.ts
++++ b/packages/core/src/agents/browser/mcpToolWrapper.ts
+@@ -26,6 +26,7 @@
+   type ToolInvocation,
+   type ToolCallConfirmationDetails,
+   type PolicyUpdateOptions,
++  type ExecuteOptions,
+ } from '../../tools/tools.js';
+ import type { MessageBus } from '../../confirmation-bus/message-bus.js';
+ import {
+@@ -117,7 +118,7 @@
+     return this.shouldDisableInput && INTERACTIVE_TOOLS.has(this.toolName);
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     try {
+       // Hard block for file uploads if configured
+       if (this.blockFileUploads && this.toolName === 'upload_file') {
+--- a/packages/core/src/agents/browser/analyzeScreenshot.ts
++++ b/packages/core/src/agents/browser/analyzeScreenshot.ts
+@@ -23,6 +23,7 @@
+   Kind,
+   type ToolResult,
+   type ToolInvocation,
++  type ExecuteOptions,
+ } from '../../tools/tools.js';
+ import { Environment } from '@google/genai';
+ import type { MessageBus } from '../../confirmation-bus/message-bus.js';
+@@ -80,7 +81,7 @@
+     return `Visual analysis: "${instruction}"`;
+   }
+ 
+-  async execute(signal: AbortSignal): Promise<ToolResult> {
++  async execute({ abortSignal: signal }: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const instruction = String(this.params['instruction'] ?? '');
+ 
+--- a/packages/core/src/agents/browser/browserAgentInvocation.ts
++++ b/packages/core/src/agents/browser/browserAgentInvocation.ts
+@@ -22,7 +22,7 @@
+ import {
+   BaseToolInvocation,
+   type ToolResult,
+-  type ToolLiveOutput,
++  type ExecuteOptions,
+ } from '../../tools/tools.js';
+ import { ToolErrorType } from '../../tools/tool-error.js';
+ import {
+@@ -107,10 +107,8 @@
+    * 3. Runs the agent via LocalAgentExecutor
+    * 4. Cleans up browser resources
+    */
+-  async execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-  ): Promise<ToolResult> {
++  async execute(options: ExecuteOptions): Promise<ToolResult> {
++    const { abortSignal: signal, updateOutput } = options;
+     const invocationStartMs = Date.now();
+     let browserManager;
+     let recentActivity: SubagentActivityItem[] = [];
+--- a/packages/core/src/agents/remote-invocation.ts
++++ b/packages/core/src/agents/remote-invocation.ts
+@@ -9,6 +9,7 @@
+   type ToolConfirmationOutcome,
+   type ToolResult,
+   type ToolCallConfirmationDetails,
++  type ExecuteOptions,
+ } from '../tools/tools.js';
+ import {
+   DEFAULT_QUERY_STRING,
+@@ -28,7 +29,6 @@
+ import { extractIdsFromResponse, A2AResultReassembler } from './a2aUtils.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { debugLogger } from '../utils/debugLogger.js';
+-import type { AnsiOutput } from '../utils/terminalSerializer.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import { A2AAgentError } from './a2a-errors.js';
+ 
+@@ -126,10 +126,8 @@
+     };
+   }
+ 
+-  async execute(
+-    _signal: AbortSignal,
+-    updateOutput?: (output: string | AnsiOutput | SubagentProgress) => void,
+-  ): Promise<ToolResult> {
++  async execute(options: ExecuteOptions): Promise<ToolResult> {
++    const { abortSignal: _signal, updateOutput } = options;
+     // 1. Ensure the agent is loaded (cached by manager)
+     // We assume the user has provided an access token via some mechanism (TODO),
+     // or we rely on ADC.
+--- a/packages/core/src/agents/agent-tool.ts
++++ b/packages/core/src/agents/agent-tool.ts
+@@ -11,7 +11,7 @@
+   type ToolResult,
+   BaseToolInvocation,
+   type ToolCallConfirmationDetails,
+-  type ToolLiveOutput,
++  type ExecuteOptions,
+ } from '../tools/tools.js';
+ import { type AgentLoopContext } from '../config/agent-loop-context.js';
+ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+@@ -185,10 +185,8 @@
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+-  async execute(
+-    signal: AbortSignal,
+-    updateOutput?: (output: ToolLiveOutput) => void,
+-  ): Promise<ToolResult> {
++  async execute(options: ExecuteOptions): Promise<ToolResult> {
++    const { abortSignal: signal, updateOutput } = options;
+     const hintedParams = this.withUserHints(this.mappedInputs);
+     const invocation = this.buildChildInvocation(hintedParams);
+ 
+@@ -204,7 +202,10 @@
+       },
+       async ({ metadata }) => {
+         metadata.input = this.params;
+-        const result = await invocation.execute(signal, updateOutput);
++        const result = await invocation.execute({
++          abortSignal: signal,
++          updateOutput,
++        });
+         metadata.output = result;
+         return result;
+       },
+--- a/packages/cli/src/ui/key/keyBindings.ts
++++ b/packages/cli/src/ui/key/keyBindings.ts
+@@ -637,8 +637,7 @@
+   [Command.PASTE_CLIPBOARD]: 'Paste from the clipboard.',
+ 
+   // App Controls
+-  [Command.SHOW_ERROR_DETAILS]:
+-    'Toggle the debug console for detailed error information.',
++  [Command.SHOW_ERROR_DETAILS]: 'Toggle detailed error information.',
+   [Command.SHOW_FULL_TODOS]: 'Toggle the full TODO list.',
+   [Command.SHOW_IDE_CONTEXT_DETAIL]: 'Show IDE context details.',
+   [Command.TOGGLE_MARKDOWN]: 'Toggle Markdown rendering.',
+--- a/packages/cli/src/ui/hooks/atCommandProcessor.ts
++++ b/packages/cli/src/ui/hooks/atCommandProcessor.ts
+@@ -533,7 +533,7 @@
+   let invocation: AnyToolInvocation | undefined = undefined;
+   try {
+     invocation = readManyFilesTool.build(toolArgs);
+-    const result = await invocation.execute(signal);
++    const result = await invocation.execute({ abortSignal: signal });
+     const display: IndividualToolCallDisplay = {
+       callId: `client-read-${userMessageTimestamp}`,
+       name: readManyFilesTool.displayName,
+--- a/packages/cli/src/acp/acpClient.ts
++++ b/packages/cli/src/acp/acpClient.ts
+@@ -1129,7 +1129,9 @@
+         });
+       }
+ 
+-      const toolResult: ToolResult = await invocation.execute(abortSignal);
++      const toolResult: ToolResult = await invocation.execute({
++        abortSignal,
++      });
+       const content = toToolCallContent(toolResult);
+ 
+       const updateContent: acp.ToolCallContent[] = content ? [content] : [];
+@@ -1671,7 +1673,7 @@
+           kind: toAcpToolKind(readManyFilesTool.kind),
+         });
+ 
+-        const result = await invocation.execute(abortSignal);
++        const result = await invocation.execute({ abortSignal });
+         const content = toToolCallContent(result) || {
+           type: 'content',
+           content: {
+--- a/packages/sdk/src/tool.ts
++++ b/packages/sdk/src/tool.ts
+@@ -11,6 +11,7 @@
+   BaseToolInvocation,
+   type ToolResult,
+   type ToolInvocation,
++  type ExecuteOptions,
+   Kind,
+   type MessageBus,
+ } from '@google/gemini-cli-core';
+@@ -58,10 +59,7 @@
+     return `Executing ${this._toolName}...`;
+   }
+ 
+-  async execute(
+-    _signal: AbortSignal,
+-    _updateOutput?: (output: string) => void,
+-  ): Promise<ToolResult> {
++  async execute(_options: ExecuteOptions): Promise<ToolResult> {
+     try {
+       const result = await this.action(this.params, this.context);
+       const output =
+--- a/packages/a2a-server/src/commands/memory.ts
++++ b/packages/a2a-server/src/commands/memory.ts
+@@ -101,8 +101,8 @@
+     const tool = toolRegistry.getTool(result.toolName);
+     if (tool) {
+       const abortController = new AbortController();
+-      const signal = abortController.signal;
+-      await tool.buildAndExecute(result.toolArgs, signal, undefined, {
++      const abortSignal = abortController.signal;
++      await tool.buildAndExecute(result.toolArgs, abortSignal, undefined, {
+         shellExecutionConfig: {
+           sanitizationConfig: DEFAULT_SANITIZATION_CONFIG,
+           sandboxManager: loopContext.sandboxManager,

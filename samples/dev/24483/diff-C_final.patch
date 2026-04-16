@@ -1,0 +1,1261 @@
+--- a/packages/core/src/tools/web-fetch.ts
++++ b/packages/core/src/tools/web-fetch.ts
+@@ -338,7 +338,7 @@
+       textContent = rawContent;
+     }
+ 
+-    if (!this.context.config.isAutoDistillationEnabled()) {
++    if (!this.context.config.isContextManagementEnabled()) {
+       return truncateString(
+         textContent,
+         MAX_CONTENT_LENGTH,
+@@ -413,7 +413,7 @@
+     }
+ 
+     const finalContentsByUrl = new Map<string, string>();
+-    if (this.context.config.isAutoDistillationEnabled()) {
++    if (this.context.config.isContextManagementEnabled()) {
+       successes.forEach((success) =>
+         finalContentsByUrl.set(success.url, success.content),
+       );
+@@ -659,7 +659,7 @@
+ 
+       if (status >= 400) {
+         let rawResponseText = bodyBuffer.toString('utf8');
+-        if (!this.context.config.isAutoDistillationEnabled()) {
++        if (!this.context.config.isContextManagementEnabled()) {
+           rawResponseText = truncateString(
+             rawResponseText,
+             10000,
+@@ -689,7 +689,7 @@
+         lowContentType.includes('application/json')
+       ) {
+         let text = bodyBuffer.toString('utf8');
+-        if (!this.context.config.isAutoDistillationEnabled()) {
++        if (!this.context.config.isContextManagementEnabled()) {
+           text = truncateString(text, MAX_CONTENT_LENGTH, TRUNCATION_WARNING);
+         }
+         return {
+@@ -706,7 +706,7 @@
+             { selector: 'a', options: { ignoreHref: false, baseUrl: url } },
+           ],
+         });
+-        if (!this.context.config.isAutoDistillationEnabled()) {
++        if (!this.context.config.isContextManagementEnabled()) {
+           textContent = truncateString(
+             textContent,
+             MAX_CONTENT_LENGTH,
+@@ -738,7 +738,7 @@
+ 
+       // Fallback for unknown types - try as text
+       let text = bodyBuffer.toString('utf8');
+-      if (!this.context.config.isAutoDistillationEnabled()) {
++      if (!this.context.config.isContextManagementEnabled()) {
+         text = truncateString(text, MAX_CONTENT_LENGTH, TRUNCATION_WARNING);
+       }
+       return {
+--- a/packages/core/src/tools/jit-context.ts
++++ b/packages/core/src/tools/jit-context.ts
+@@ -25,15 +25,18 @@
+     return '';
+   }
+ 
+-  const contextManager = config.getContextManager();
+-  if (!contextManager) {
++  const memoryContextManager = config.getMemoryContextManager();
++  if (!memoryContextManager) {
+     return '';
+   }
+ 
+   const trustedRoots = [...config.getWorkspaceContext().getDirectories()];
+ 
+   try {
+-    return await contextManager.discoverContext(accessedPath, trustedRoots);
++    return await memoryContextManager.discoverContext(
++      accessedPath,
++      trustedRoots,
++    );
+   } catch {
+     // JIT context is supplementary — never fail the tool's primary operation.
+     return '';
+--- a/packages/core/src/context/profiles.ts
++++ b/packages/core/src/context/profiles.ts
+@@ -0,0 +1,27 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++import type { ContextManagementConfig } from './types.js';
++
++export const generalistProfile: ContextManagementConfig = {
++  enabled: true,
++  historyWindow: { maxTokens: 150_000, retainedTokens: 80_000 },
++  messageLimits: {
++    normalMaxTokens: 3_000,
++    retainedMaxTokens: 30_000,
++    normalizationHeadRatio: 0.15,
++  },
++  tools: {
++    distillation: {
++      maxOutputTokens: 10_000,
++      summarizationThresholdTokens: 20_000,
++    },
++    outputMasking: {
++      protectionThresholdTokens: 50_000,
++      minPrunableThresholdTokens: 30_000,
++      protectLatestTurn: true,
++    },
++  },
++};
+--- a/packages/core/src/context/types.ts
++++ b/packages/core/src/context/types.ts
+@@ -0,0 +1,39 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++export interface AgentHistoryProviderConfig {
++  maxTokens: number;
++  retainedTokens: number;
++  normalMessageTokens: number;
++  maximumMessageTokens: number;
++  normalizationHeadRatio: number;
++}
++
++export interface ToolOutputMaskingConfig {
++  protectionThresholdTokens: number;
++  minPrunableThresholdTokens: number;
++  protectLatestTurn: boolean;
++}
++
++export interface ContextManagementConfig {
++  enabled: boolean;
++  historyWindow: {
++    maxTokens: number;
++    retainedTokens: number;
++  };
++  messageLimits: {
++    normalMaxTokens: number;
++    retainedMaxTokens: number;
++    normalizationHeadRatio: number;
++  };
++  tools: {
++    distillation: {
++      maxOutputTokens: number;
++      summarizationThresholdTokens: number;
++    };
++    outputMasking: ToolOutputMaskingConfig;
++  };
++}
+--- a/packages/core/src/context/memoryContextManager.ts
++++ b/packages/core/src/context/memoryContextManager.ts
+@@ -0,0 +1,203 @@
++/**
++ * @license
++ * Copyright 2025 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import {
++  loadJitSubdirectoryMemory,
++  concatenateInstructions,
++  getGlobalMemoryPaths,
++  getUserProjectMemoryPaths,
++  getExtensionMemoryPaths,
++  getEnvironmentMemoryPaths,
++  readGeminiMdFiles,
++  categorizeAndConcatenate,
++  type GeminiFileContent,
++  deduplicatePathsByFileIdentity,
++} from '../utils/memoryDiscovery.js';
++import type { Config } from '../config/config.js';
++import { coreEvents, CoreEvent } from '../utils/events.js';
++
++export class MemoryContextManager {
++  private readonly loadedPaths: Set<string> = new Set();
++  private readonly loadedFileIdentities: Set<string> = new Set();
++  private readonly config: Config;
++  private globalMemory: string = '';
++  private extensionMemory: string = '';
++  private projectMemory: string = '';
++  private userProjectMemoryContent: string = '';
++
++  constructor(config: Config) {
++    this.config = config;
++  }
++
++  /**
++   * Refreshes the memory by reloading global, extension, and project memory.
++   */
++  async refresh(): Promise<void> {
++    this.loadedPaths.clear();
++    this.loadedFileIdentities.clear();
++
++    const paths = await this.discoverMemoryPaths();
++    const contentsMap = await this.loadMemoryContents(paths);
++
++    this.categorizeMemoryContents(paths, contentsMap);
++    this.emitMemoryChanged();
++  }
++
++  private async discoverMemoryPaths() {
++    const [global, extension, project, userProjectMemory] = await Promise.all([
++      getGlobalMemoryPaths(),
++      Promise.resolve(
++        getExtensionMemoryPaths(this.config.getExtensionLoader()),
++      ),
++      this.config.isTrustedFolder()
++        ? getEnvironmentMemoryPaths(
++            [...this.config.getWorkspaceContext().getDirectories()],
++            this.config.getMemoryBoundaryMarkers(),
++          )
++        : Promise.resolve([]),
++      getUserProjectMemoryPaths(this.config.storage.getProjectMemoryDir()),
++    ]);
++
++    return { global, extension, project, userProjectMemory };
++  }
++
++  private async loadMemoryContents(paths: {
++    global: string[];
++    extension: string[];
++    project: string[];
++    userProjectMemory: string[];
++  }) {
++    const allPathsStringDeduped = Array.from(
++      new Set([
++        ...paths.global,
++        ...paths.extension,
++        ...paths.project,
++        ...paths.userProjectMemory,
++      ]),
++    );
++
++    // deduplicate by file identity to handle case-insensitive filesystems
++    const { paths: allPaths, identityMap: pathIdentityMap } =
++      await deduplicatePathsByFileIdentity(allPathsStringDeduped);
++
++    const allContents = await readGeminiMdFiles(
++      allPaths,
++      this.config.getImportFormat(),
++      this.config.getMemoryBoundaryMarkers(),
++    );
++
++    const loadedFilePaths = allContents
++      .filter((c) => c.content !== null)
++      .map((c) => c.filePath);
++    this.markAsLoaded(loadedFilePaths);
++
++    // Cache file identities for performance optimization
++    for (const filePath of loadedFilePaths) {
++      const identity = pathIdentityMap.get(filePath);
++      if (identity) {
++        this.loadedFileIdentities.add(identity);
++      }
++    }
++
++    return new Map(allContents.map((c) => [c.filePath, c]));
++  }
++
++  private categorizeMemoryContents(
++    paths: {
++      global: string[];
++      extension: string[];
++      project: string[];
++      userProjectMemory: string[];
++    },
++    contentsMap: Map<string, GeminiFileContent>,
++  ) {
++    const hierarchicalMemory = categorizeAndConcatenate(paths, contentsMap);
++
++    this.globalMemory = hierarchicalMemory.global || '';
++    this.extensionMemory = hierarchicalMemory.extension || '';
++    this.userProjectMemoryContent = hierarchicalMemory.userProjectMemory || '';
++
++    const mcpInstructions =
++      this.config.getMcpClientManager()?.getMcpInstructions() || '';
++    const projectMemoryWithMcp = [
++      hierarchicalMemory.project,
++      mcpInstructions.trimStart(),
++    ]
++      .filter(Boolean)
++      .join('\n\n');
++
++    this.projectMemory = this.config.isTrustedFolder()
++      ? projectMemoryWithMcp
++      : '';
++  }
++
++  /**
++   * Discovers and loads context for a specific accessed path (Tier 3 - JIT).
++   * Traverses upwards from the accessed path to the project root.
++   */
++  async discoverContext(
++    accessedPath: string,
++    trustedRoots: string[],
++  ): Promise<string> {
++    if (!this.config.isTrustedFolder()) {
++      return '';
++    }
++    const result = await loadJitSubdirectoryMemory(
++      accessedPath,
++      trustedRoots,
++      this.loadedPaths,
++      this.loadedFileIdentities,
++      this.config.getMemoryBoundaryMarkers(),
++    );
++
++    if (result.files.length === 0) {
++      return '';
++    }
++
++    const newFilePaths = result.files.map((f) => f.path);
++    this.markAsLoaded(newFilePaths);
++
++    // Cache identities for newly loaded files
++    if (result.fileIdentities) {
++      for (const identity of result.fileIdentities) {
++        this.loadedFileIdentities.add(identity);
++      }
++    }
++    return concatenateInstructions(
++      result.files.map((f) => ({ filePath: f.path, content: f.content })),
++    );
++  }
++
++  private emitMemoryChanged(): void {
++    coreEvents.emit(CoreEvent.MemoryChanged, {
++      fileCount: this.loadedPaths.size,
++    });
++  }
++
++  getGlobalMemory(): string {
++    return this.globalMemory;
++  }
++
++  getExtensionMemory(): string {
++    return this.extensionMemory;
++  }
++
++  getEnvironmentMemory(): string {
++    return this.projectMemory;
++  }
++
++  getUserProjectMemory(): string {
++    return this.userProjectMemoryContent;
++  }
++
++  private markAsLoaded(paths: string[]): void {
++    paths.forEach((p) => this.loadedPaths.add(p));
++  }
++
++  getLoadedPaths(): ReadonlySet<string> {
++    return this.loadedPaths;
++  }
++}
+--- a/packages/core/src/context/agentHistoryProvider.ts
++++ b/packages/core/src/context/agentHistoryProvider.ts
+@@ -9,7 +9,7 @@
+ import { estimateTokenCountSync } from '../utils/tokenCalculation.js';
+ import { LlmRole } from '../telemetry/llmRole.js';
+ import { debugLogger } from '../utils/debugLogger.js';
+-import type { AgentHistoryProviderConfig } from '../services/types.js';
++import type { AgentHistoryProviderConfig } from './types.js';
+ import type { Config } from '../config/config.js';
+ import {
+   MIN_TARGET_TOKENS,
+@@ -35,7 +35,7 @@
+     history: readonly Content[],
+     abortSignal?: AbortSignal,
+   ): Promise<readonly Content[]> {
+-    if (!this.providerConfig.isTruncationEnabled || history.length === 0) {
++    if (history.length === 0) {
+       return history;
+     }
+ 
+@@ -288,13 +288,6 @@
+   ): Promise<string> {
+     if (messagesToTruncate.length === 0) return '';
+ 
+-    if (!this.providerConfig.isSummarizationEnabled) {
+-      debugLogger.log(
+-        'AgentHistoryProvider: Summarization disabled, using fallback note.',
+-      );
+-      return this.getFallbackSummaryText(messagesToTruncate);
+-    }
+-
+     try {
+       // Use the first few messages of the Grace Zone as a "contextual bridge"
+       // to give the summarizer lookahead into the current state.
+--- a/packages/core/src/context/contextCompressionService.ts
++++ b/packages/core/src/context/contextCompressionService.ts
+@@ -0,0 +1,526 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++import { type Config } from '../config/config.js';
++import type { Content, Part } from '@google/genai';
++import { LlmRole } from '../telemetry/types.js';
++import { debugLogger } from '../utils/debugLogger.js';
++import { getResponseText } from '../utils/partUtils.js';
++import * as fs from 'node:fs/promises';
++import { existsSync } from 'node:fs';
++import * as path from 'node:path';
++import * as crypto from 'node:crypto';
++
++export type FileLevel = 'FULL' | 'PARTIAL' | 'SUMMARY' | 'EXCLUDED';
++
++export interface FileRecord {
++  level: FileLevel;
++  cachedSummary?: string;
++  contentHash?: string;
++  startLine?: number;
++  endLine?: number;
++}
++
++interface CompressionRecord {
++  level: FileLevel;
++  startLine?: number;
++  endLine?: number;
++}
++
++interface CompressionRecordJSON {
++  level: FileLevel;
++  start_line?: number;
++  end_line?: number;
++}
++
++function hashStringSlice(
++  content: string,
++  start: number = 0,
++  end: number = 12,
++): string {
++  return crypto
++    .createHash('sha256')
++    .update(content)
++    .digest('hex')
++    .slice(start, end);
++}
++
++export class ContextCompressionService {
++  private config: Config;
++  private state: Map<string, FileRecord> = new Map();
++  private stateFilePath: string;
++
++  constructor(config: Config) {
++    this.config = config;
++    const dir = this.config.storage.getProjectTempDir();
++    this.stateFilePath = path.join(dir, 'compression_state.json');
++  }
++
++  async loadState() {
++    try {
++      if (existsSync(this.stateFilePath)) {
++        const data = await fs.readFile(this.stateFilePath, 'utf-8');
++        // Just throw if any invariant fails.
++        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
++        const parsed: Record<string, FileRecord> = JSON.parse(data);
++        for (const [k, v] of Object.entries(parsed)) {
++          this.state.set(k, v);
++        }
++      }
++    } catch (e) {
++      debugLogger.warn(`Failed to load compression state: ${e}`);
++    }
++  }
++
++  getState(): Record<string, FileRecord> {
++    const obj: Record<string, FileRecord> = {};
++    for (const [k, v] of this.state.entries()) {
++      obj[k] = v;
++    }
++    return obj;
++  }
++
++  setState(stateData: Record<string, FileRecord>) {
++    this.state.clear();
++    for (const [k, v] of Object.entries(stateData)) {
++      this.state.set(k, v);
++    }
++  }
++
++  async saveState() {
++    try {
++      const obj: Record<string, FileRecord> = {};
++      for (const [k, v] of this.state.entries()) {
++        obj[k] = v;
++      }
++      await fs.writeFile(
++        this.stateFilePath,
++        JSON.stringify(obj, null, 2),
++        'utf-8',
++      );
++    } catch (e) {
++      debugLogger.warn(`Failed to save compression state: ${e}`);
++    }
++  }
++
++  async compressHistory(
++    history: Content[],
++    userPrompt: string,
++    abortSignal?: AbortSignal,
++  ): Promise<Content[]> {
++    const enabled = this.config.isContextManagementEnabled();
++    if (!enabled) return history;
++
++    const RECENT_TURNS_PROTECTED = 2;
++    const cutoff = Math.max(0, history.length - RECENT_TURNS_PROTECTED * 2);
++
++    // Pass 1: Find protected files
++    const protectedFiles = new Set<string>();
++    for (let i = 0; i < history.length; i++) {
++      const turn = history[i];
++      if (!turn.parts) continue;
++
++      for (const part of turn.parts) {
++        if (
++          part.functionCall &&
++          (part.functionCall.name === 'read_file' ||
++            part.functionCall.name === 'read_many_files')
++        ) {
++          const args = part.functionCall.args;
++          if (args) {
++            if (Array.isArray(args['paths'])) {
++              if (i >= cutoff) {
++                for (const path of args['paths']) {
++                  protectedFiles.add(path);
++                }
++              }
++            }
++            const filepath = args['filepath'];
++            if (filepath && typeof filepath === 'string') {
++              // If this read happened within the protected window, it's protected.
++              if (i >= cutoff) {
++                protectedFiles.add(filepath);
++              }
++            }
++          }
++        }
++      }
++    }
++
++    // Pass 2: Collect files needing routing decisions
++    type PendingFile = {
++      filepath: string;
++      rawContent: string;
++      contentToProcess: string;
++      lines: string[];
++      preview: string;
++      lineCount: number;
++    };
++    const pendingFiles: PendingFile[] = [];
++    const pendingFilesSet = new Set<string>(); // deduplicate by filepath
++
++    for (let i = 0; i < history.length; i++) {
++      const turn = history[i];
++      if (i >= cutoff || turn.role !== 'user' || !turn.parts) continue;
++
++      for (const part of turn.parts) {
++        const resp = part.functionResponse;
++        if (!resp) continue;
++        if (resp.name !== 'read_file' && resp.name !== 'read_many_files')
++          continue;
++
++        const output = resp.response?.['output'];
++        if (!output || typeof output !== 'string') continue;
++
++        const match = output.match(/--- (.+?) ---\n/);
++        let filepath = '';
++        if (match) {
++          filepath = match[1];
++        } else {
++          const lines = output.split('\n');
++          if (lines[0] && lines[0].includes('---')) {
++            filepath = lines[0].replace(/---/g, '').trim();
++          }
++        }
++
++        if (!filepath || protectedFiles.has(filepath)) continue;
++
++        const hash = hashStringSlice(output);
++        const existing = this.state.get(filepath);
++        if (
++          existing?.level === 'SUMMARY' &&
++          existing.cachedSummary &&
++          existing.contentHash === hash
++        ) {
++          continue; // Cache hit — skip routing for this file
++        }
++
++        if (pendingFilesSet.has(filepath)) continue; // already queued
++        pendingFilesSet.add(filepath);
++
++        let contentToProcess = output;
++        if (contentToProcess.startsWith('--- ')) {
++          const firstNewline = contentToProcess.indexOf('\n');
++          if (firstNewline !== -1) {
++            contentToProcess = contentToProcess.substring(firstNewline + 1);
++          }
++        }
++        const lines = contentToProcess.split('\n');
++
++        pendingFiles.push({
++          filepath,
++          rawContent: output,
++          contentToProcess,
++          lines,
++          preview: lines.slice(0, 30).join('\n'),
++          lineCount: lines.length,
++        });
++      }
++    }
++
++    // Pass 3: Single batched routing call for all pending files
++    const routingDecisions = await this.batchQueryModel(
++      pendingFiles.map((f) => ({
++        filepath: f.filepath,
++        lineCount: f.lineCount,
++        preview: f.preview,
++      })),
++      userPrompt,
++      abortSignal,
++    );
++
++    // Update state and save once for all files
++    for (const f of pendingFiles) {
++      const decision = routingDecisions.get(f.filepath) ?? {
++        level: 'FULL' as FileLevel,
++      };
++      const record = this.state.get(f.filepath) ?? {
++        level: 'FULL' as FileLevel,
++      };
++      const hash = hashStringSlice(f.rawContent);
++      if (record.contentHash && record.contentHash !== hash) {
++        record.cachedSummary = undefined;
++      }
++      record.contentHash = hash;
++      record.level = decision.level;
++      record.startLine = decision.startLine;
++      record.endLine = decision.endLine;
++      this.state.set(f.filepath, record);
++    }
++    await this.saveState();
++
++    // Pass 4: Apply decisions — now applyCompressionDecision reads from state, no model calls
++    const result: Content[] = [];
++    for (let i = 0; i < history.length; i++) {
++      const turn = history[i];
++      if (i >= cutoff || turn.role !== 'user' || !turn.parts) {
++        result.push(turn);
++        continue;
++      }
++
++      const newParts = await Promise.all(
++        turn.parts.map((part: Part) =>
++          this.applyCompressionDecision(
++            part,
++            protectedFiles,
++            userPrompt,
++            abortSignal,
++          ),
++        ),
++      );
++      result.push({ ...turn, parts: newParts });
++    }
++
++    // Check for invalid mixed-part turns (functionResponse combined with text parts).
++    for (let i = 0; i < result.length; i++) {
++      const turn = result[i];
++      if (turn.role !== 'user' || !turn.parts) continue;
++      const hasFunctionResponse = turn.parts.some((p) => !!p.functionResponse);
++      const hasNonFunctionResponse = turn.parts.some(
++        (p) => !p.functionResponse,
++      );
++      if (hasFunctionResponse && hasNonFunctionResponse) {
++        debugLogger.warn(
++          'Compression produced a mixed-part turn. Restoring original turn.',
++        );
++        result[i] = history[i];
++      }
++    }
++
++    // Validate structural integrity: every functionCall MUST be followed by a functionResponse in the next turn.
++    for (let i = 0; i < result.length; i++) {
++      const turn = result[i];
++      if (turn.parts) {
++        for (const part of turn.parts) {
++          if (part.functionCall) {
++            // Check the very next turn
++            const nextTurn = result[i + 1];
++
++            // If the functionCall is the final element of the existing payload,
++            // the functionResponse is implicitly represented by the current incoming turn in client.ts
++            if (!nextTurn) {
++              continue;
++            }
++
++            if (nextTurn.role !== 'user' || !nextTurn.parts) {
++              debugLogger.warn(
++                'Compression broke functionCall/functionResponse adjacency invariant. Falling back to uncompressed history.',
++              );
++              return history;
++            }
++            const hasMatchingResponse = nextTurn.parts.some(
++              (p) =>
++                p.functionResponse &&
++                p.functionResponse.name === part.functionCall!.name,
++            );
++            if (!hasMatchingResponse) {
++              debugLogger.warn(
++                'Compression broke functionCall/functionResponse adjacency invariant. Falling back to uncompressed history.',
++              );
++              return history;
++            }
++          }
++        }
++      }
++    }
++
++    return result;
++  }
++
++  private async applyCompressionDecision(
++    part: Part,
++    protectedFiles: Set<string>,
++    userPrompt: string,
++    abortSignal?: AbortSignal,
++  ): Promise<Part> {
++    const resp = part.functionResponse;
++    if (!resp) return part;
++    if (resp.name !== 'read_file' && resp.name !== 'read_many_files')
++      return part;
++
++    const output = resp.response?.['output'];
++    if (!output || typeof output !== 'string') return part;
++
++    const match = output.match(/--- (.+?) ---\n/);
++    let filepath = '';
++    if (match) {
++      filepath = match[1];
++    } else {
++      const lines = output.split('\n');
++      if (lines[0] && lines[0].includes('---')) {
++        filepath = lines[0].replace(/---/g, '').trim();
++      } else {
++        return part;
++      }
++    }
++
++    if (protectedFiles.has(filepath)) return part;
++
++    const record = this.state.get(filepath);
++    if (!record || record.level === 'FULL') return part;
++
++    let contentToProcess = output;
++    if (contentToProcess.startsWith('--- ')) {
++      const firstNewline = contentToProcess.indexOf('\n');
++      if (firstNewline !== -1) {
++        contentToProcess = contentToProcess.substring(firstNewline + 1);
++      }
++    }
++    const lines = contentToProcess.split('\n');
++
++    let compressed: string;
++
++    if (record.level === 'PARTIAL' && record.startLine && record.endLine) {
++      const start = Math.max(0, record.startLine - 1);
++      const end = Math.min(lines.length, record.endLine);
++      const snippet = lines
++        .slice(start, end)
++        .map((l, i) => `${start + i + 1} | ${l}`)
++        .join('\n');
++      compressed =
++        `[Showing lines ${record.startLine}–${record.endLine} of ${lines.length} ` +
++        `in ${path.basename(filepath)}. Full file available via read_file.]\n\n${snippet}`;
++    } else if (record.level === 'SUMMARY') {
++      if (!record.cachedSummary) {
++        record.cachedSummary = await this.generateSummary(
++          filepath,
++          contentToProcess,
++          abortSignal,
++        );
++        this.state.set(filepath, record);
++        await this.saveState();
++      }
++      compressed =
++        `[Summary of ${path.basename(filepath)} (${lines.length} lines). ` +
++        `Full file available via read_file.]\n\n${record.cachedSummary}`;
++    } else if (record.level === 'EXCLUDED') {
++      compressed =
++        `[${path.basename(filepath)} omitted as not relevant to current query. ` +
++        `Request via read_file if needed.]`;
++    } else {
++      return part;
++    }
++
++    if (compressed === output) return part;
++
++    return {
++      functionResponse: {
++        // `FunctionResponse` should be safe to spread
++        // eslint-disable-next-line @typescript-eslint/no-misused-spread
++        ...resp,
++        response: { ...resp.response, output: compressed },
++      },
++    };
++  }
++
++  getFileState(filepath: string): FileRecord | undefined {
++    return this.state.get(filepath);
++  }
++
++  private async batchQueryModel(
++    files: Array<{ filepath: string; lineCount: number; preview: string }>,
++    userPrompt: string,
++    abortSignal?: AbortSignal,
++  ): Promise<Map<string, CompressionRecord>> {
++    const results = new Map<string, CompressionRecord>();
++
++    // Default all to FULL so any failure is safe
++    for (const f of files) {
++      results.set(f.filepath, { level: 'FULL' });
++    }
++
++    if (files.length === 0) return results;
++
++    const systemPrompt = `You are a context routing agent for a coding AI session.
++For each file listed, decide what level of content to send to the main model.
++Levels: FULL, PARTIAL (with line range), SUMMARY, EXCLUDED.
++Rules:
++- FULL if the file is directly relevant to the query or small (<80 lines)
++- PARTIAL if only a specific section is needed — provide start_line and end_line
++- SUMMARY for background context files not directly needed
++- EXCLUDED for completely unrelated files
++Respond ONLY with a JSON object where each key is the filepath and the value is:
++{"level":"FULL"|"PARTIAL"|"SUMMARY"|"EXCLUDED","start_line":null,"end_line":null}`;
++
++    const fileList = files
++      .map(
++        (f) =>
++          `File: ${f.filepath} (${f.lineCount} lines)\nPreview:\n${f.preview}`,
++      )
++      .join('\n\n---\n\n');
++
++    const userMessage = `Query: "${userPrompt}"\n\n${fileList}`;
++
++    const client = this.config.getBaseLlmClient();
++    try {
++      // Build per-file schema properties dynamically
++      const properties: Record<string, object> = {};
++      for (const f of files) {
++        properties[f.filepath] = {
++          type: 'OBJECT',
++          properties: {
++            level: { type: 'STRING' },
++            start_line: { type: 'INTEGER' },
++            end_line: { type: 'INTEGER' },
++          },
++          required: ['level'],
++        };
++      }
++
++      const responseJson = await client.generateJson({
++        modelConfigKey: { model: 'chat-compression-2.5-flash-lite' },
++        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
++        systemInstruction: systemPrompt,
++        schema: { properties, required: files.map((f) => f.filepath) },
++        promptId: 'context-compression-batch-query',
++        role: LlmRole.UTILITY_COMPRESSOR,
++        abortSignal: abortSignal ?? new AbortController().signal,
++      });
++
++      for (const f of files) {
++        // Just throw if JSON parsing fails.
++        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
++        const decision = responseJson[f.filepath] as
++          | CompressionRecordJSON
++          | undefined;
++        if (typeof decision !== 'object') continue;
++        if (typeof decision === 'object' && decision && decision.level) {
++          results.set(f.filepath, {
++            level: decision.level ?? 'FULL',
++            startLine: decision.start_line ?? undefined,
++            endLine: decision.end_line ?? undefined,
++          });
++        }
++      }
++    } catch (e) {
++      debugLogger.warn(
++        `Batch cloud routing failed: ${e}. Defaulting all to FULL.`,
++      );
++    }
++    return results;
++  }
++
++  private async generateSummary(
++    filepath: string,
++    content: string,
++    abortSignal?: AbortSignal,
++  ): Promise<string> {
++    const promptMessage = `Summarize this file in 2-3 sentences. Be technical and specific about what it exports, its key functions, and dependencies. File: ${filepath}\n\n${content.slice(0, 4000)}`;
++    const client = this.config.getBaseLlmClient();
++    try {
++      const response = await client.generateContent({
++        modelConfigKey: { model: 'chat-compression-2.5-flash-lite' },
++        contents: [{ role: 'user', parts: [{ text: promptMessage }] }],
++        promptId: 'local-context-compression-summary',
++        role: LlmRole.UTILITY_COMPRESSOR,
++        abortSignal: abortSignal ?? new AbortController().signal,
++      });
++      const text = getResponseText(response) ?? '';
++      return text.trim();
++    } catch (e) {
++      return `[Summary generation failed for ${filepath} (cloud error): ${e}]`;
++    }
++  }
++}
+--- a/packages/core/src/core/client.ts
++++ b/packages/core/src/core/client.ts
+@@ -312,7 +312,7 @@
+     this.updateTelemetryTokenCount();
+     // Reset JIT context loaded paths so subdirectory context can be
+     // re-discovered in the new session.
+-    await this.config.getContextManager()?.refresh();
++    await this.config.getMemoryContextManager()?.refresh();
+   }
+ 
+   dispose() {
+--- a/packages/core/src/config/config.ts
++++ b/packages/core/src/config/config.ts
+@@ -11,7 +11,11 @@
+ import process from 'node:process';
+ import { z } from 'zod';
+ import type { ConversationRecord } from '../services/chatRecordingService.js';
+-import type { AgentHistoryProviderConfig } from '../services/types.js';
++import type {
++  AgentHistoryProviderConfig,
++  ContextManagementConfig,
++  ToolOutputMaskingConfig,
++} from '../context/types.js';
+ export type { ConversationRecord };
+ import {
+   AuthType,
+@@ -120,7 +124,7 @@
+   type ModelConfigServiceConfig,
+ } from '../services/modelConfigService.js';
+ import { DEFAULT_MODEL_CONFIGS } from './defaultModelConfigs.js';
+-import { ContextManager } from '../context/contextManager.js';
++import { MemoryContextManager } from '../context/memoryContextManager.js';
+ import { TrackerService } from '../services/trackerService.js';
+ import type { GenerateContentParameters } from '@google/genai';
+ 
+@@ -210,32 +214,6 @@
+   format?: OutputFormat;
+ }
+ 
+-export interface ToolOutputMaskingConfig {
+-  protectionThresholdTokens: number;
+-  minPrunableThresholdTokens: number;
+-  protectLatestTurn: boolean;
+-}
+-
+-export interface ContextManagementConfig {
+-  enabled: boolean;
+-  historyWindow: {
+-    maxTokens: number;
+-    retainedTokens: number;
+-  };
+-  messageLimits: {
+-    normalMaxTokens: number;
+-    retainedMaxTokens: number;
+-    normalizationHeadRatio: number;
+-  };
+-  tools: {
+-    distillation: {
+-      maxOutputTokens: number;
+-      summarizationThresholdTokens: number;
+-    };
+-    outputMasking: ToolOutputMaskingConfig;
+-  };
+-}
+-
+ export interface GemmaModelRouterSettings {
+   enabled?: boolean;
+   classifier?: {
+@@ -962,7 +940,7 @@
+   private readonly trackerEnabled: boolean;
+   private readonly planModeRoutingEnabled: boolean;
+   private readonly modelSteering: boolean;
+-  private contextManager?: ContextManager;
++  private memoryContextManager?: MemoryContextManager;
+   private readonly contextManagement: ContextManagementConfig;
+   private terminalBackground: string | undefined = undefined;
+   private remoteAdminSettings: AdminControlsSettings | undefined;
+@@ -1493,8 +1471,8 @@
+     }
+ 
+     if (this.experimentalJitContext) {
+-      this.contextManager = new ContextManager(this);
+-      await this.contextManager.refresh();
++      this.memoryContextManager = new MemoryContextManager(this);
++      await this.memoryContextManager.refresh();
+     }
+ 
+     await this._geminiClient.initialize();
+@@ -2302,12 +2280,12 @@
+   }
+ 
+   getUserMemory(): string | HierarchicalMemory {
+-    if (this.experimentalJitContext && this.contextManager) {
++    if (this.experimentalJitContext && this.memoryContextManager) {
+       return {
+-        global: this.contextManager.getGlobalMemory(),
+-        extension: this.contextManager.getExtensionMemory(),
+-        project: this.contextManager.getEnvironmentMemory(),
+-        userProjectMemory: this.contextManager.getUserProjectMemory(),
++        global: this.memoryContextManager.getGlobalMemory(),
++        extension: this.memoryContextManager.getExtensionMemory(),
++        project: this.memoryContextManager.getEnvironmentMemory(),
++        userProjectMemory: this.memoryContextManager.getUserProjectMemory(),
+       };
+     }
+     return this.userMemory;
+@@ -2317,8 +2295,8 @@
+    * Refreshes the MCP context, including memory, tools, and system instructions.
+    */
+   async refreshMcpContext(): Promise<void> {
+-    if (this.experimentalJitContext && this.contextManager) {
+-      await this.contextManager.refresh();
++    if (this.experimentalJitContext && this.memoryContextManager) {
++      await this.memoryContextManager.refresh();
+     } else {
+       const { refreshServerHierarchicalMemory } = await import(
+         '../utils/memoryDiscovery.js'
+@@ -2344,9 +2322,10 @@
+    * via system instruction updates.
+    */
+   getSystemInstructionMemory(): string | HierarchicalMemory {
+-    if (this.experimentalJitContext && this.contextManager) {
+-      const global = this.contextManager.getGlobalMemory();
+-      const userProjectMemory = this.contextManager.getUserProjectMemory();
++    if (this.experimentalJitContext && this.memoryContextManager) {
++      const global = this.memoryContextManager.getGlobalMemory();
++      const userProjectMemory =
++        this.memoryContextManager.getUserProjectMemory();
+       if (userProjectMemory?.trim()) {
+         return { global, userProjectMemory };
+       }
+@@ -2361,12 +2340,12 @@
+    * disabled (Tier 2 memory is already in the system instruction).
+    */
+   getSessionMemory(): string {
+-    if (!this.experimentalJitContext || !this.contextManager) {
++    if (!this.experimentalJitContext || !this.memoryContextManager) {
+       return '';
+     }
+     const sections: string[] = [];
+-    const extension = this.contextManager.getExtensionMemory();
+-    const project = this.contextManager.getEnvironmentMemory();
++    const extension = this.memoryContextManager.getExtensionMemory();
++    const project = this.memoryContextManager.getEnvironmentMemory();
+     if (extension?.trim()) {
+       sections.push(
+         `<extension_context>\n${extension.trim()}\n</extension_context>`,
+@@ -2380,22 +2359,22 @@
+   }
+ 
+   getGlobalMemory(): string {
+-    return this.contextManager?.getGlobalMemory() ?? '';
++    return this.memoryContextManager?.getGlobalMemory() ?? '';
+   }
+ 
+   getEnvironmentMemory(): string {
+-    return this.contextManager?.getEnvironmentMemory() ?? '';
++    return this.memoryContextManager?.getEnvironmentMemory() ?? '';
+   }
+ 
+-  getContextManager(): ContextManager | undefined {
+-    return this.contextManager;
++  getMemoryContextManager(): MemoryContextManager | undefined {
++    return this.memoryContextManager;
+   }
+ 
+   isJitContextEnabled(): boolean {
+     return this.experimentalJitContext;
+   }
+ 
+-  isAutoDistillationEnabled(): boolean {
++  isContextManagementEnabled(): boolean {
+     return this.contextManagement.enabled;
+   }
+ 
+@@ -2413,8 +2392,6 @@
+ 
+   get agentHistoryProviderConfig(): AgentHistoryProviderConfig {
+     return {
+-      isTruncationEnabled: this.contextManagement.enabled,
+-      isSummarizationEnabled: this.contextManagement.enabled,
+       maxTokens: this.contextManagement.historyWindow.maxTokens,
+       retainedTokens: this.contextManagement.historyWindow.retainedTokens,
+       normalMessageTokens: this.contextManagement.messageLimits.normalMaxTokens,
+@@ -2471,8 +2448,8 @@
+   }
+ 
+   getGeminiMdFileCount(): number {
+-    if (this.experimentalJitContext && this.contextManager) {
+-      return this.contextManager.getLoadedPaths().size;
++    if (this.experimentalJitContext && this.memoryContextManager) {
++      return this.memoryContextManager.getLoadedPaths().size;
+     }
+     return this.geminiMdFileCount;
+   }
+@@ -2482,8 +2459,8 @@
+   }
+ 
+   getGeminiMdFilePaths(): string[] {
+-    if (this.experimentalJitContext && this.contextManager) {
+-      return Array.from(this.contextManager.getLoadedPaths());
++    if (this.experimentalJitContext && this.memoryContextManager) {
++      return Array.from(this.memoryContextManager.getLoadedPaths());
+     }
+     return this.geminiMdFilePaths;
+   }
+--- a/packages/core/src/scheduler/tool-executor.ts
++++ b/packages/core/src/scheduler/tool-executor.ts
+@@ -197,7 +197,7 @@
+     call: ToolCall,
+     content: PartListUnion,
+   ): Promise<{ truncatedContent: PartListUnion; outputFile?: string }> {
+-    if (this.config.isAutoDistillationEnabled()) {
++    if (this.config.isContextManagementEnabled()) {
+       const distiller = new ToolOutputDistillationService(
+         this.config,
+         this.context.geminiClient,
+--- a/packages/core/src/commands/memory.ts
++++ b/packages/core/src/commands/memory.ts
+@@ -51,7 +51,7 @@
+   let fileCount = 0;
+ 
+   if (config.isJitContextEnabled()) {
+-    await config.getContextManager()?.refresh();
++    await config.getMemoryContextManager()?.refresh();
+     memoryContent = flattenMemory(config.getUserMemory());
+     fileCount = config.getGeminiMdFileCount();
+   } else {
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -140,7 +140,7 @@
+ export * from './sandbox/windows/WindowsSandboxManager.js';
+ export * from './services/sessionSummaryUtils.js';
+ export { startMemoryService } from './services/memoryService.js';
+-export * from './context/contextManager.js';
++export * from './context/memoryContextManager.js';
+ export * from './services/trackerService.js';
+ export * from './services/trackerTypes.js';
+ export * from './services/keychainService.js';
+@@ -276,3 +276,7 @@
+ 
+ // Export types from @google/genai
+ export type { Content, Part, FunctionCall } from '@google/genai';
++
++// Export context types and profiles
++export * from './context/types.js';
++export * from './context/profiles.js';
+--- a/packages/cli/src/ui/AppContainer.tsx
++++ b/packages/cli/src/ui/AppContainer.tsx
+@@ -1034,7 +1034,7 @@
+       let fileCount: number;
+ 
+       if (config.isJitContextEnabled()) {
+-        await config.getContextManager()?.refresh();
++        await config.getMemoryContextManager()?.refresh();
+         config.updateSystemInstructionIfInitialized();
+         flattenedMemory = flattenMemory(config.getUserMemory());
+         fileCount = config.getGeminiMdFileCount();
+--- a/packages/cli/src/ui/commands/rewindCommand.tsx
++++ b/packages/cli/src/ui/commands/rewindCommand.tsx
+@@ -61,7 +61,9 @@
+     client.setHistory(clientHistory as Content[]);
+ 
+     // Reset context manager as we are rewinding history
+-    await context.services.agentContext?.config.getContextManager()?.refresh();
++    await context.services.agentContext?.config
++      .getMemoryContextManager()
++      ?.refresh();
+ 
+     // Update UI History
+     // We generate IDs based on index for the rewind history
+--- a/packages/cli/src/config/settingsSchema.ts
++++ b/packages/cli/src/config/settingsSchema.ts
+@@ -2147,6 +2147,16 @@
+         default: false,
+         description:
+           'Replace the built-in save_memory tool with a memory manager subagent that supports adding, removing, de-duplicating, and organizing memories.',
++        showInDialog: true,
++      },
++      generalistProfile: {
++        type: 'boolean',
++        label: 'Use the generalist profile to manage agent contexts.',
++        category: 'Experimental',
++        requiresRestart: true,
++        default: false,
++        description:
++          'Suitable for general coding and software development tasks.',
+         showInDialog: true,
+       },
+       contextManagement: {
+--- a/packages/cli/src/config/config.ts
++++ b/packages/cli/src/config/config.ts
+@@ -46,6 +46,7 @@
+   type HookEventName,
+   type OutputFormat,
+   detectIdeFromEnv,
++  generalistProfile,
+ } from '@google/gemini-cli-core';
+ import {
+   type Settings,
+@@ -882,6 +883,16 @@
+       clientName = `acp-${ide.name}`;
+     }
+   }
++
++  const useGeneralistProfile =
++    settings.experimental?.generalistProfile ?? false;
++  const useContextManagement =
++    settings.experimental?.contextManagement ?? false;
++  const contextManagement = {
++    ...(useGeneralistProfile ? generalistProfile : {}),
++    ...(useContextManagement ? settings?.contextManagement : {}),
++    enabled: useContextManagement || useGeneralistProfile,
++  };
+ 
+   return new Config({
+     acpMode: isAcpMode,
+@@ -977,10 +988,7 @@
+     disabledSkills: settings.skills?.disabled,
+     experimentalJitContext: settings.experimental?.jitContext,
+     experimentalMemoryManager: settings.experimental?.memoryManager,
+-    contextManagement: {
+-      enabled: settings.experimental?.contextManagement,
+-      ...settings?.contextManagement,
+-    },
++    contextManagement,
+     modelSteering: settings.experimental?.modelSteering,
+     topicUpdateNarration: settings.experimental?.topicUpdateNarration,
+     noBrowser: !!process.env['NO_BROWSER'],
+--- a/packages/a2a-server/src/utils/testing_utils.ts
++++ b/packages/a2a-server/src/utils/testing_utils.ts
+@@ -109,7 +109,7 @@
+         enableEnvironmentVariableRedaction: false,
+       },
+     }),
+-    isAutoDistillationEnabled: vi.fn().mockReturnValue(false),
++    isContextManagementEnabled: vi.fn().mockReturnValue(false),
+     getContextManagementConfig: vi.fn().mockReturnValue({ enabled: false }),
+     ...overrides,
+   } as unknown as Config;

@@ -278,3 +278,23 @@ Pilot feasibility conditions all clear:
 - PR size bounds appropriate: yes (4/5 PRs > 1000 LOC of refactor scope)
 
 Next: reviewer-classified trajectory via phase 7 blind review (gemini primary, codex secondary where non-conflicted). That's the headline label per prereg.
+
+### 23:10 — Prereg retrospective section appended (R1-R7)
+
+Append-only retro on PREREG.md capturing lessons surfaced during pilot execution. R1 documents that the estimand is narrower than its wording (forge-wrapped, not LLM in general) and that a formal single-shot ablation isn't information-worth-trial — the practitioner prior is strong. R2 notes comparator-in-practice should have been named. R3 notes the reviewer additive bias reframe. R4 calls out small scalar deltas. R5-R7 are operational: parallel FS contention, hunt-code missed build-caught type error, codex volleys additively biased. Not amendments — the registered protocol stands.
+
+### 23:20 — Phase 7 setup: gemini-only review path for pilot
+
+Opus and codex both participated in blind-blind-merge on every pilot PR, so both are conflicted per prereg's no-self-review rule. Gemini is the only non-conflicted model. Prereg's ≥3 reviewer rule applies to the main sample, not the pilot (pilot is feasibility per prereg, question 5: "Can blind reviewers evaluate the diffs in reasonable time?"). Proceeding with gemini-only Phase 7 for pilot; locking 3-reviewer procedure for test set as pilot decision #3.
+
+### 23:45 — Phase 7 results: P3 ✓ at 80%, P2 ✗, blinding failed 5/5
+
+Gemini reviewed all 5 pilot PRs. **P3 cleared at 80%** (C_llm preferred in 4/5 forced-choice judgments, vs prereg target of 65%). **P2 failed at reviewer classification: 20% past C_final, 60% short, 20% wrong** — prereg target was past ≥50%, which isn't met.
+
+Blinding completely failed: gemini correctly identified C_llm as LLM-generated in 5/5 PRs. Cited signatures: "aggressive destructuring," "DRYing helpers," "ES6 shorthand and clean interface fulfillment." The LLM's refactor moves have distinctive surface patterns gemini pattern-matches against. Critical for test set to address.
+
+Scalar/reviewer disagreement: scalar said past-or-boundary-past on 5/5; reviewer says past on 1/5. The 3/5 boundary cases all collapsed to "short" under reviewer judgment. Scalar overestimates complexity improvement at small deltas.
+
+Wrong direction documented on PR 25101: gemini flagged C_llm's out-of-scope logic rewrite in `complete-task.ts` — a move reviewers had actively reverted in the original PR's C_final. The LLM pipeline repeated a mistake reviewers already pushed back on. P4 (some refactors make things worse) has its first clean datum.
+
+Full breakdown in `samples/dev/phase7-results.md`. Pilot is now information-complete on the registered outcomes; next is locking pilot decisions per prereg §Pilot Decisions.

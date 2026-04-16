@@ -1,0 +1,1016 @@
+--- a/evals/subagents.eval.ts
++++ b/evals/subagents.eval.ts
+@@ -9,10 +9,46 @@
+ 
+ import { describe, expect } from 'vitest';
+ 
+-import { evalTest, TEST_AGENTS } from './test-helper.js';
++import { AGENT_TOOL_NAME } from '@google/gemini-cli-core';
++import { evalTest, TEST_AGENTS, TestRig } from './test-helper.js';
+ 
+ const INDEX_TS = 'export const add = (a: number, b: number) => a + b;\n';
+ 
++/**
++ * Helper to verify that a specific subagent was successfully invoked via the unified tool.
++ */
++async function expectSubagentCall(rig: TestRig, agentName: string) {
++  await rig.expectToolCallSuccess(
++    [AGENT_TOOL_NAME],
++    undefined,
++    (args: string) => {
++      try {
++        const parsed = JSON.parse(args);
++        return parsed.agent_name === agentName;
++      } catch {
++        return false;
++      }
++    },
++  );
++}
++
++/**
++ * Helper to check if a subagent (either via unified tool or direct name) was called.
++ */
++function isSubagentCalled(toolLogs: any[], agentName: string): boolean {
++  return toolLogs.some((l) => {
++    if (l.toolRequest.name === AGENT_TOOL_NAME) {
++      try {
++        const args = JSON.parse(l.toolRequest.args);
++        return args.agent_name === agentName;
++      } catch {
++        return false;
++      }
++    }
++    return l.toolRequest.name === agentName;
++  });
++}
++
+ // A minimal package.json is used to provide a realistic workspace anchor.
+ // This prevents the agent from making incorrect assumptions about the environment
+ // and helps it properly navigate or act as if it is in a standard Node.js project.
+@@ -62,7 +98,7 @@
+       'README.md': 'TODO: update the README.\n',
+     },
+     assert: async (rig, _result) => {
+-      await rig.expectToolCallSuccess([TEST_AGENTS.DOCS_AGENT.name]);
++      await expectSubagentCall(rig, TEST_AGENTS.DOCS_AGENT.name);
+     },
+   });
+ 
+@@ -99,14 +135,10 @@
+       }>;
+ 
+       expect(updatedIndex).toContain('export const sum =');
+-      expect(
+-        toolLogs.some(
+-          (l) => l.toolRequest.name === TEST_AGENTS.DOCS_AGENT.name,
+-        ),
+-      ).toBe(false);
+-      expect(toolLogs.some((l) => l.toolRequest.name === 'generalist')).toBe(
++      expect(isSubagentCalled(toolLogs, TEST_AGENTS.DOCS_AGENT.name)).toBe(
+         false,
+       );
++      expect(isSubagentCalled(toolLogs, 'generalist')).toBe(false);
+     },
+   });
+ 
+@@ -140,13 +172,11 @@
+     },
+     assert: async (rig, _result) => {
+       const toolLogs = rig.readToolLogs() as Array<{
+-        toolRequest: { name: string };
++        toolRequest: { name: string; args: string };
+       }>;
+ 
+-      await rig.expectToolCallSuccess([TEST_AGENTS.TESTING_AGENT.name]);
+-      expect(toolLogs.some((l) => l.toolRequest.name === 'generalist')).toBe(
+-        false,
+-      );
++      await expectSubagentCall(rig, TEST_AGENTS.TESTING_AGENT.name);
++      expect(isSubagentCalled(toolLogs, 'generalist')).toBe(false);
+     },
+   });
+ 
+@@ -181,18 +211,15 @@
+     },
+     assert: async (rig, _result) => {
+       const toolLogs = rig.readToolLogs() as Array<{
+-        toolRequest: { name: string };
++        toolRequest: { name: string; args: string };
+       }>;
+       const readme = readProjectFile(rig, 'README.md');
+ 
+-      await rig.expectToolCallSuccess([
+-        TEST_AGENTS.DOCS_AGENT.name,
+-        TEST_AGENTS.TESTING_AGENT.name,
+-      ]);
++      await expectSubagentCall(rig, TEST_AGENTS.DOCS_AGENT.name);
++      await expectSubagentCall(rig, TEST_AGENTS.TESTING_AGENT.name);
++
+       expect(readme).not.toContain('TODO: update the README.');
+-      expect(toolLogs.some((l) => l.toolRequest.name === 'generalist')).toBe(
+-        false,
+-      );
++      expect(isSubagentCalled(toolLogs, 'generalist')).toBe(false);
+     },
+   });
+ 
+@@ -219,14 +246,11 @@
+       'package.json': MOCK_PACKAGE_JSON,
+     },
+     assert: async (rig, _result) => {
+-      const toolLogs = rig.readToolLogs() as Array<{
+-        toolRequest: { name: string };
+-      }>;
+-      await rig.expectToolCallSuccess(['database-agent']);
++      const toolLogs = rig.readToolLogs();
++      await expectSubagentCall(rig, TEST_AGENTS.DATABASE_AGENT.name);
+ 
+       // Ensure the generalist and other irrelevant specialists were not invoked
+       const uncalledAgents = [
+-        'generalist',
+         TEST_AGENTS.DOCS_AGENT.name,
+         TEST_AGENTS.TESTING_AGENT.name,
+         TEST_AGENTS.CSS_AGENT.name,
+@@ -239,10 +263,9 @@
+       ];
+ 
+       for (const agentName of uncalledAgents) {
+-        expect(toolLogs.some((l) => l.toolRequest.name === agentName)).toBe(
+-          false,
+-        );
++        expect(isSubagentCalled(toolLogs, agentName)).toBe(false);
+       }
++      expect(isSubagentCalled(toolLogs, 'generalist')).toBe(false);
+     },
+   });
+ 
+@@ -274,14 +297,11 @@
+       'package.json': MOCK_PACKAGE_JSON,
+     },
+     assert: async (rig, _result) => {
+-      const toolLogs = rig.readToolLogs() as Array<{
+-        toolRequest: { name: string };
+-      }>;
+-      await rig.expectToolCallSuccess(['database-agent']);
++      const toolLogs = rig.readToolLogs();
++      await expectSubagentCall(rig, TEST_AGENTS.DATABASE_AGENT.name);
+ 
+       // Ensure the generalist and other irrelevant specialists were not invoked
+       const uncalledAgents = [
+-        'generalist',
+         TEST_AGENTS.DOCS_AGENT.name,
+         TEST_AGENTS.TESTING_AGENT.name,
+         TEST_AGENTS.CSS_AGENT.name,
+@@ -294,10 +314,9 @@
+       ];
+ 
+       for (const agentName of uncalledAgents) {
+-        expect(toolLogs.some((l) => l.toolRequest.name === agentName)).toBe(
+-          false,
+-        );
++        expect(isSubagentCalled(toolLogs, agentName)).toBe(false);
+       }
++      expect(isSubagentCalled(toolLogs, 'generalist')).toBe(false);
+     },
+   });
+ });
+--- a/packages/test-utils/src/fixtures/agents.ts
++++ b/packages/test-utils/src/fixtures/agents.ts
+@@ -56,7 +56,7 @@
+   DOCS_AGENT: createAgent({
+     name: 'docs-agent',
+     description: 'An agent with expertise in updating documentation.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the docs agent. Update documentation clearly and accurately.',
+   }),
+ 
+@@ -66,7 +66,7 @@
+   TESTING_AGENT: createAgent({
+     name: 'testing-agent',
+     description: 'An agent with expertise in writing and updating tests.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the test agent. Add or update tests.',
+   }),
+   /**
+@@ -76,7 +76,7 @@
+     name: 'database-agent',
+     description:
+       'An expert in database schemas, SQL, and creating database migrations.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the database agent. Create and update SQL migrations.',
+   }),
+ 
+@@ -86,7 +86,7 @@
+   CSS_AGENT: createAgent({
+     name: 'css-agent',
+     description: 'An expert in CSS, styling, and UI design.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the CSS agent.',
+   }),
+ 
+@@ -96,7 +96,7 @@
+   I18N_AGENT: createAgent({
+     name: 'i18n-agent',
+     description: 'An expert in internationalization and translations.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the i18n agent.',
+   }),
+ 
+@@ -106,7 +106,7 @@
+   SECURITY_AGENT: createAgent({
+     name: 'security-agent',
+     description: 'An expert in security audits and vulnerability patches.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the security agent.',
+   }),
+ 
+@@ -116,7 +116,7 @@
+   DEVOPS_AGENT: createAgent({
+     name: 'devops-agent',
+     description: 'An expert in CI/CD, Docker, and deployment scripts.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the devops agent.',
+   }),
+ 
+@@ -126,7 +126,7 @@
+   ANALYTICS_AGENT: createAgent({
+     name: 'analytics-agent',
+     description: 'An expert in tracking, analytics, and metrics.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the analytics agent.',
+   }),
+ 
+@@ -136,7 +136,7 @@
+   ACCESSIBILITY_AGENT: createAgent({
+     name: 'accessibility-agent',
+     description: 'An expert in web accessibility and ARIA roles.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the accessibility agent.',
+   }),
+ 
+@@ -146,7 +146,7 @@
+   MOBILE_AGENT: createAgent({
+     name: 'mobile-agent',
+     description: 'An expert in React Native and mobile app development.',
+-    tools: ['read_file', 'write_file'],
++    tools: ['read_file', 'write_file', 'list_directory', 'grep_search', 'glob'],
+     body: 'You are the mobile agent.',
+   }),
+ } as const;
+--- a/packages/core/src/test-utils/mock-tool.ts
++++ b/packages/core/src/test-utils/mock-tool.ts
+@@ -27,6 +27,7 @@
+   description?: string;
+   canUpdateOutput?: boolean;
+   isOutputMarkdown?: boolean;
++  kind?: Kind;
+   shouldConfirmExecute?: (
+     params: { [key: string]: unknown },
+     signal: AbortSignal,
+@@ -101,7 +102,7 @@
+       options.name,
+       options.displayName ?? options.name,
+       options.description ?? options.name,
+-      Kind.Other,
++      options.kind ?? Kind.Other,
+       options.params,
+       options.messageBus ?? createMockMessageBus(),
+       options.isOutputMarkdown ?? false,
+--- a/packages/core/src/tools/tool-names.ts
++++ b/packages/core/src/tools/tool-names.ts
+@@ -188,6 +188,8 @@
+ export const TRACKER_ADD_DEPENDENCY_TOOL_NAME = 'tracker_add_dependency';
+ export const TRACKER_VISUALIZE_TOOL_NAME = 'tracker_visualize';
+ 
++export const AGENT_TOOL_NAME = 'invoke_agent';
++
+ // Tool Display Names
+ export const WRITE_FILE_DISPLAY_NAME = 'WriteFile';
+ export const EDIT_DISPLAY_NAME = 'Edit';
+@@ -269,6 +271,7 @@
+   EXIT_PLAN_MODE_TOOL_NAME,
+   UPDATE_TOPIC_TOOL_NAME,
+   COMPLETE_TASK_TOOL_NAME,
++  AGENT_TOOL_NAME,
+ ] as const;
+ 
+ /**
+--- a/packages/core/src/config/config.ts
++++ b/packages/core/src/config/config.ts
+@@ -43,6 +43,7 @@
+ import { AskUserTool } from '../tools/ask-user.js';
+ import { UpdateTopicTool } from '../tools/topicTool.js';
+ import { TopicState } from './topicState.js';
++import { AgentTool } from '../agents/agent-tool.js';
+ import { ExitPlanModeTool } from '../tools/exit-plan-mode.js';
+ import { EnterPlanModeTool } from '../tools/enter-plan-mode.js';
+ import {
+@@ -161,7 +162,6 @@
+ import { AgentRegistry } from '../agents/registry.js';
+ import { AcknowledgedAgentsService } from '../agents/acknowledgedAgents.js';
+ import { setGlobalProxy, updateGlobalFetchTimeouts } from '../utils/fetch.js';
+-import { SubagentTool } from '../agents/subagent-tool.js';
+ import { ExperimentFlags } from '../code_assist/experiments/flagNames.js';
+ import { debugLogger } from '../utils/debugLogger.js';
+ import { SkillManager, type SkillDefinition } from '../skills/skillManager.js';
+@@ -451,7 +451,6 @@
+ import { A2AClientManager } from '../agents/a2a-client-manager.js';
+ import { type McpContext } from '../tools/mcp-client.js';
+ import type { EnvironmentSanitizationConfig } from '../services/environmentSanitization.js';
+-import { getErrorMessage } from '../utils/errors.js';
+ 
+ export type { FileFilteringOptions };
+ export {
+@@ -3623,8 +3622,10 @@
+       );
+     }
+ 
+-    // Register Subagents as Tools
+-    this.registerSubAgentTools(registry);
++    // Register Subagent Tool
++    maybeRegister(AgentTool, () =>
++      registry.registerTool(new AgentTool(this, this.messageBus)),
++    );
+ 
+     await registry.discoverAllTools();
+     registry.sortTools();
+@@ -3632,51 +3633,6 @@
+   }
+ 
+   /**
+-   * Registers SubAgentTools for all available agents.
+-   */
+-  private registerSubAgentTools(registry: ToolRegistry): void {
+-    const agentsOverrides = this.getAgentsSettings().overrides ?? {};
+-    const discoveredDefinitions =
+-      this.agentRegistry.getAllDiscoveredAgentNames();
+-
+-    // First, unregister any agents that are now disabled
+-    for (const agentName of discoveredDefinitions) {
+-      if (
+-        !this.isAgentsEnabled() ||
+-        agentsOverrides[agentName]?.enabled === false
+-      ) {
+-        const tool = registry.getTool(agentName);
+-        if (tool instanceof SubagentTool) {
+-          registry.unregisterTool(agentName);
+-        }
+-      }
+-    }
+-
+-    const discoveredNames = this.agentRegistry.getAllDiscoveredAgentNames();
+-    for (const agentName of discoveredNames) {
+-      const definition = this.agentRegistry.getDiscoveredDefinition(agentName);
+-      if (!definition) {
+-        continue;
+-      }
+-      try {
+-        if (
+-          !this.isAgentsEnabled() ||
+-          agentsOverrides[definition.name]?.enabled === false
+-        ) {
+-          continue;
+-        }
+-
+-        const tool = new SubagentTool(definition, this, this.messageBus);
+-        registry.registerTool(tool);
+-      } catch (e: unknown) {
+-        debugLogger.warn(
+-          `Failed to register tool for agent ${definition.name}: ${getErrorMessage(e)}`,
+-        );
+-      }
+-    }
+-  }
+-
+-  /**
+    * Get the hook system instance
+    */
+   getHookSystem(): HookSystem | undefined {
+@@ -3766,9 +3722,8 @@
+   }
+ 
+   private onAgentsRefreshed = async () => {
+-    if (this._toolRegistry) {
+-      this.registerSubAgentTools(this._toolRegistry);
+-    }
++    await this.agentRegistry.initialize();
++
+     // Propagate updates to the active chat session
+     const client = this.geminiClient;
+     if (client?.isInitialized()) {
+--- a/packages/core/src/agents/agent-tool.ts
++++ b/packages/core/src/agents/agent-tool.ts
+@@ -0,0 +1,251 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import {
++  BaseDeclarativeTool,
++  Kind,
++  type ToolInvocation,
++  type ToolResult,
++  BaseToolInvocation,
++  type ToolCallConfirmationDetails,
++  type ToolLiveOutput,
++} from '../tools/tools.js';
++import { type AgentLoopContext } from '../config/agent-loop-context.js';
++import type { MessageBus } from '../confirmation-bus/message-bus.js';
++import type { AgentDefinition, AgentInputs } from './types.js';
++import { LocalSubagentInvocation } from './local-invocation.js';
++import { RemoteAgentInvocation } from './remote-invocation.js';
++import { BROWSER_AGENT_NAME } from './browser/browserAgentDefinition.js';
++import { BrowserAgentInvocation } from './browser/browserAgentInvocation.js';
++import { formatUserHintsForModel } from '../utils/fastAckHelper.js';
++import { isRecord } from '../utils/markdownUtils.js';
++import { runInDevTraceSpan } from '../telemetry/trace.js';
++import {
++  GeminiCliOperation,
++  GEN_AI_AGENT_DESCRIPTION,
++  GEN_AI_AGENT_NAME,
++} from '../telemetry/constants.js';
++import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
++
++/**
++ * A unified tool for invoking subagents.
++ *
++ * Handles looking up the subagent, validating its eligibility,
++ * mapping the general 'prompt' parameter to the agent's specific schema,
++ * and delegating execution.
++ */
++export class AgentTool extends BaseDeclarativeTool<
++  { agent_name: string; prompt: string },
++  ToolResult
++> {
++  static readonly Name = AGENT_TOOL_NAME;
++
++  constructor(
++    private readonly context: AgentLoopContext,
++    messageBus: MessageBus,
++  ) {
++    super(
++      AGENT_TOOL_NAME,
++      'Invoke Subagent',
++      'Invoke a subagent to perform a specific task or investigation.',
++      Kind.Agent,
++      {
++        type: 'object',
++        properties: {
++          agent_name: {
++            type: 'string',
++            description: 'Name of the subagent to invoke',
++          },
++          prompt: {
++            type: 'string',
++            description:
++              'The COMPLETE query to send the subagent. MUST be comprehensive and detailed. Include all context, background, questions, and expected output format. Do NOT send brief or incomplete instructions.',
++          },
++        },
++        required: ['agent_name', 'prompt'],
++      },
++      messageBus,
++      /* isOutputMarkdown */ true,
++      /* canUpdateOutput */ true,
++    );
++  }
++
++  protected createInvocation(
++    params: { agent_name: string; prompt: string },
++    messageBus: MessageBus,
++    _toolName?: string,
++    _toolDisplayName?: string,
++  ): ToolInvocation<{ agent_name: string; prompt: string }, ToolResult> {
++    const registry = this.context.config.getAgentRegistry();
++    const definition = registry.getDefinition(params.agent_name);
++
++    if (!definition) {
++      throw new Error(`Subagent '${params.agent_name}' not found.`);
++    }
++
++    // Smart Parameter Mapping
++    const mappedInputs = this.mapParams(
++      params.prompt,
++      definition.inputConfig.inputSchema,
++    );
++
++    return new DelegateInvocation(
++      params,
++      mappedInputs,
++      messageBus,
++      definition,
++      this.context,
++      _toolName,
++      _toolDisplayName,
++    );
++  }
++
++  private mapParams(prompt: string, schema: unknown): AgentInputs {
++    const schemaObj: unknown = schema;
++    if (!isRecord(schemaObj)) {
++      return { prompt };
++    }
++    const properties = schemaObj['properties'];
++    if (isRecord(properties)) {
++      const keys = Object.keys(properties);
++      if (keys.length === 1) {
++        return { [keys[0]]: prompt };
++      }
++    }
++    return { prompt };
++  }
++}
++
++class DelegateInvocation extends BaseToolInvocation<
++  { agent_name: string; prompt: string },
++  ToolResult
++> {
++  private readonly startIndex: number;
++
++  constructor(
++    params: { agent_name: string; prompt: string },
++    private readonly mappedInputs: AgentInputs,
++    messageBus: MessageBus,
++    private readonly definition: AgentDefinition,
++    private readonly context: AgentLoopContext,
++    _toolName?: string,
++    _toolDisplayName?: string,
++  ) {
++    super(
++      params,
++      messageBus,
++      _toolName ?? AGENT_TOOL_NAME,
++      _toolDisplayName ?? `Invoke ${definition.displayName ?? definition.name}`,
++    );
++    this.startIndex = context.config.injectionService.getLatestInjectionIndex();
++  }
++
++  getDescription(): string {
++    return `Delegating to agent '${this.definition.name}'`;
++  }
++
++  private buildChildInvocation(
++    agentArgs: AgentInputs,
++  ): ToolInvocation<AgentInputs, ToolResult> {
++    if (this.definition.name === BROWSER_AGENT_NAME) {
++      return new BrowserAgentInvocation(
++        this.context,
++        agentArgs,
++        this.messageBus,
++        this._toolName,
++        this._toolDisplayName,
++      );
++    }
++
++    if (this.definition.kind === 'remote') {
++      return new RemoteAgentInvocation(
++        this.definition,
++        this.context,
++        agentArgs,
++        this.messageBus,
++      );
++    } else {
++      return new LocalSubagentInvocation(
++        this.definition,
++        this.context,
++        agentArgs,
++        this.messageBus,
++      );
++    }
++  }
++
++  override async shouldConfirmExecute(
++    abortSignal: AbortSignal,
++  ): Promise<ToolCallConfirmationDetails | false> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    const invocation = this.buildChildInvocation(hintedParams);
++    return invocation.shouldConfirmExecute(abortSignal);
++  }
++
++  async execute(
++    signal: AbortSignal,
++    updateOutput?: (output: ToolLiveOutput) => void,
++  ): Promise<ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    const invocation = this.buildChildInvocation(hintedParams);
++
++    return runInDevTraceSpan(
++      {
++        operation: GeminiCliOperation.AgentCall,
++        logPrompts: this.context.config.getTelemetryLogPromptsEnabled(),
++        sessionId: this.context.config.getSessionId(),
++        attributes: {
++          [GEN_AI_AGENT_NAME]: this.definition.name,
++          [GEN_AI_AGENT_DESCRIPTION]: this.definition.description,
++        },
++      },
++      async ({ metadata }) => {
++        metadata.input = this.params;
++        const result = await invocation.execute(signal, updateOutput);
++        metadata.output = result;
++        return result;
++      },
++    );
++  }
++
++  private withUserHints(agentArgs: AgentInputs): AgentInputs {
++    if (this.definition.kind !== 'remote') {
++      return agentArgs;
++    }
++
++    const userHints = this.context.config.injectionService.getInjectionsAfter(
++      this.startIndex,
++      'user_steering',
++    );
++    const formattedHints = formatUserHintsForModel(userHints);
++    if (!formattedHints) {
++      return agentArgs;
++    }
++
++    // Find the primary key to append hints to
++    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
++    if (!isRecord(schemaObj)) {
++      return agentArgs;
++    }
++    const properties = schemaObj['properties'];
++    if (isRecord(properties)) {
++      const keys = Object.keys(properties);
++      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
++
++      const value = agentArgs[primaryKey];
++      if (typeof value !== 'string' || value.trim().length === 0) {
++        return agentArgs;
++      }
++
++      return {
++        ...agentArgs,
++        [primaryKey]: `${formattedHints}\n\n${value}`,
++      };
++    }
++
++    return agentArgs;
++  }
++}
+--- a/packages/core/src/agents/registry.ts
++++ b/packages/core/src/agents/registry.ts
+@@ -16,6 +16,7 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
++import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -37,6 +38,8 @@
+   return `${definition.name}-config`;
+ }
+ 
++export const DYNAMIC_RULE_SOURCE = 'AgentRegistry (Dynamic)';
++
+ /**
+  * Manages the discovery, loading, validation, and registration of
+  * AgentDefinitions.
+@@ -47,12 +50,20 @@
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   private readonly allDefinitions = new Map<string, AgentDefinition<any>>();
+ 
++  private initialized = false;
++
+   constructor(private readonly config: Config) {}
+ 
+   /**
+    * Discovers and loads agents.
+    */
+   async initialize(): Promise<void> {
++    if (this.initialized) {
++      await this.loadAgents();
++      return;
++    }
++    this.initialized = true;
++
+     coreEvents.on(CoreEvent.ModelChanged, this.onModelChanged);
+ 
+     await this.loadAgents();
+@@ -107,6 +118,9 @@
+     this.agents.clear();
+     this.allDefinitions.clear();
+     this.loadBuiltInAgents();
++
++    // Clear old dynamic rules before reloading
++    this.config.getPolicyEngine()?.removeRulesBySource(DYNAMIC_RULE_SOURCE);
+ 
+     if (!this.config.isAgentsEnabled()) {
+       return;
+@@ -377,19 +391,16 @@
+       return;
+     }
+ 
+-    // Clean up any old dynamic policy for this tool (e.g. if we are overwriting an agent)
+-    policyEngine.removeRulesForTool(definition.name, 'AgentRegistry (Dynamic)');
+-
+-    // Add the new dynamic policy
+-    policyEngine.addRule({
+-      toolName: definition.name,
+-      decision:
+-        definition.kind === 'local'
+-          ? PolicyDecision.ALLOW
+-          : PolicyDecision.ASK_USER,
+-      priority: PRIORITY_SUBAGENT_TOOL,
+-      source: 'AgentRegistry (Dynamic)',
+-    });
++    // Only add override for remote agents. Local agents are handled by blanket allow.
++    if (definition.kind === 'remote') {
++      policyEngine.addRule({
++        toolName: AgentTool.Name,
++        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        decision: PolicyDecision.ASK_USER,
++        priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
++        source: DYNAMIC_RULE_SOURCE,
++      });
++    }
+   }
+ 
+   private isAgentEnabled<TOutput extends z.ZodTypeAny>(
+--- a/packages/core/src/agents/local-executor.ts
++++ b/packages/core/src/agents/local-executor.ts
+@@ -19,6 +19,7 @@
+ import {
+   type AnyDeclarativeTool,
+   ToolConfirmationOutcome,
++  Kind,
+ } from '../tools/tools.js';
+ import {
+   DiscoveredMCPTool,
+@@ -180,17 +181,11 @@
+     }
+ 
+     const parentToolRegistry = context.toolRegistry;
+-    const allAgentNames = new Set(
+-      context.config.getAgentRegistry().getAllAgentNames(),
+-    );
+ 
+     const registerToolInstance = (tool: AnyDeclarativeTool) => {
+-      // Check if the tool is a subagent to prevent recursion.
++      // Check if the tool is an agent tool to prevent recursion.
+       // We do not allow agents to call other agents.
+-      if (allAgentNames.has(tool.name)) {
+-        debugLogger.warn(
+-          `[LocalAgentExecutor] Skipping subagent tool '${tool.name}' for agent '${definition.name}' to prevent recursion.`,
+-        );
++      if (tool.kind === Kind.Agent) {
+         return;
+       }
+ 
+--- a/packages/core/src/prompts/snippets.legacy.ts
++++ b/packages/core/src/prompts/snippets.legacy.ts
+@@ -25,6 +25,7 @@
+   TOPIC_PARAM_SUMMARY,
+   WRITE_FILE_TOOL_NAME,
+   WRITE_TODOS_TOOL_NAME,
++  AGENT_TOOL_NAME,
+ } from '../tools/tool-names.js';
+ 
+ // --- Options Structs ---
+@@ -202,9 +203,9 @@
+ # Available Sub-Agents
+ Sub-agents are specialized expert agents that you can use to assist you in the completion of all or part of a task.
+ 
+-Each sub-agent is available as a tool of the same name. You MUST always delegate tasks to the sub-agent with the relevant expertise, if one is available.
++You can invoke sub-agents using the \`${AGENT_TOOL_NAME}\` tool by passing their name to the \`agent_name\` parameter. You MUST always delegate tasks to the sub-agent with the relevant expertise, if one is available.
+ 
+-The following tools can be used to start sub-agents:
++The following sub-agents are available:
+ 
+ ${subAgentsList}
+ 
+@@ -559,7 +560,7 @@
+ 
+ function workflowStepUnderstand(options: PrimaryWorkflowsOptions): string {
+   if (options.enableCodebaseInvestigator) {
+-    return `1. **Understand & Strategize:** Think about the user's request and the relevant codebase context. When the task involves **complex refactoring, codebase exploration or system-wide analysis**, your **first and primary action** must be to delegate to the 'codebase_investigator' agent using the 'codebase_investigator' tool. Use it to build a comprehensive understanding of the code, its structure, and dependencies. For **simple, targeted searches** (like finding a specific function name, file path, or variable declaration), you should use '${GREP_TOOL_NAME}' or '${GLOB_TOOL_NAME}' directly.`;
++    return `1. **Understand & Strategize:** Think about the user's request and the relevant codebase context. When the task involves **complex refactoring, codebase exploration or system-wide analysis**, your **first and primary action** must be to delegate to the 'codebase_investigator' agent using the \`${AGENT_TOOL_NAME}\` tool. Use it to build a comprehensive understanding of the code, its structure, and dependencies. For **simple, targeted searches** (like finding a specific function name, file path, or variable declaration), you should use '${GREP_TOOL_NAME}' or '${GLOB_TOOL_NAME}' directly.`;
+   }
+   return `1. **Understand:** Think about the user's request and the relevant codebase context. Use '${GREP_TOOL_NAME}' and '${GLOB_TOOL_NAME}' search tools extensively (in parallel if independent) to understand file structures, existing code patterns, and conventions.
+ Use '${READ_FILE_TOOL_NAME}' to understand context and validate any assumptions you may have. If you need to read multiple files, you should make multiple parallel calls to '${READ_FILE_TOOL_NAME}'.`;
+@@ -698,7 +699,7 @@
+ ): string {
+   if (options.memoryManagerEnabled) {
+     return `
+-- **Memory Tool:** You MUST use the '${MEMORY_TOOL_NAME}' tool to proactively record facts, preferences, and workflows that apply across all sessions. Whenever the user explicitly tells you to "remember" something, or when they state a preference or workflow (like "always lint after editing"), you MUST immediately call the save_memory subagent. Never save transient session state. Do not use memory to store summaries of code changes, bug fixes, or findings discovered during a task; this tool is strictly for persistent general knowledge.`;
++- **Memory Tool:** You MUST use the '${AGENT_TOOL_NAME}' tool with the 'save_memory' agent to proactively record facts, preferences, and workflows that apply across all sessions. Whenever the user explicitly tells you to "remember" something, or when they state a preference or workflow (like "always lint after editing"), you MUST immediately call the save_memory subagent. Never save transient session state. Do not use memory to store summaries of code changes, bug fixes, or findings discovered during a task; this tool is strictly for persistent general knowledge.`;
+   }
+   const base = `
+ - **Remembering Facts:** Use the '${MEMORY_TOOL_NAME}' tool to remember specific, *user-related* facts or preferences when the user explicitly asks, or when they state a clear, concise piece of information that would help personalize or streamline *your future interactions with them* (e.g., preferred coding style, common project paths they use, personal tool aliases, or a workflow like "always lint after editing"). This tool is for user-specific information that should persist across sessions. Do *not* use it for general project context or information.`;
+--- a/packages/core/src/prompts/snippets.ts
++++ b/packages/core/src/prompts/snippets.ts
+@@ -33,6 +33,7 @@
+   TRACKER_CREATE_TASK_TOOL_NAME,
+   TRACKER_LIST_TASKS_TOOL_NAME,
+   TRACKER_UPDATE_TASK_TOOL_NAME,
++  AGENT_TOOL_NAME,
+ } from '../tools/tool-names.js';
+ import type { HierarchicalMemory } from '../config/memory.js';
+ import { DEFAULT_CONTEXT_FILENAME } from '../tools/memoryTool.js';
+@@ -262,7 +263,7 @@
+   return `
+ # Available Sub-Agents
+ 
+-Sub-agents are specialized expert agents. Each sub-agent is available as a tool of the same name. You MUST delegate tasks to the sub-agent with the most relevant expertise.
++Sub-agents are specialized expert agents. You can invoke them using the ${formatToolName(AGENT_TOOL_NAME)} tool by passing their name to the \`agent_name\` parameter. You MUST delegate tasks to the sub-agent with the most relevant expertise.
+ 
+ ### Strategic Orchestration & Delegation
+ Operate as a **strategic orchestrator**. Your own context window is your most precious resource. Every turn you take adds to the permanent session history. To keep the session fast and efficient, use sub-agents to "compress" complex or repetitive work.
+@@ -805,7 +806,7 @@
+ ): string {
+   if (options.memoryManagerEnabled) {
+     return `
+-- **Memory Tool:** You MUST use ${formatToolName(MEMORY_TOOL_NAME)} to proactively record facts, preferences, and workflows that apply across all sessions. Whenever the user explicitly tells you to "remember" something, or when they state a preference or workflow (like "always lint after editing"), you MUST immediately call the save_memory subagent. Never save transient session state. Do not use memory to store summaries of code changes, bug fixes, or findings discovered during a task; this tool is strictly for persistent general knowledge.`;
++- **Memory Tool:** You MUST use the '${AGENT_TOOL_NAME}' tool with the 'save_memory' agent to proactively record facts, preferences, and workflows that apply across all sessions. Whenever the user explicitly tells you to "remember" something, or when they state a preference or workflow (like "always lint after editing"), you MUST immediately call the save_memory subagent. Never save transient session state. Do not use memory to store summaries of code changes, bug fixes, or findings discovered during a task; this tool is strictly for persistent general knowledge.`;
+   }
+   const base = `
+ - **Memory Tool:** Use ${formatToolName(MEMORY_TOOL_NAME)} to persist facts across sessions. It supports two scopes via the \`scope\` parameter:
+--- a/packages/core/src/prompts/promptProvider.ts
++++ b/packages/core/src/prompts/promptProvider.ts
+@@ -26,6 +26,7 @@
+   ENTER_PLAN_MODE_TOOL_NAME,
+   GLOB_TOOL_NAME,
+   GREP_TOOL_NAME,
++  AGENT_TOOL_NAME,
+ } from '../tools/tool-names.js';
+ import { resolveModel, supportsModernFeatures } from '../config/models.js';
+ import { DiscoveredMCPTool } from '../tools/mcp-tool.js';
+@@ -140,14 +141,17 @@
+           contextFilenames,
+           topicUpdateNarration: context.config.isTopicUpdateNarrationEnabled(),
+         })),
+-        subAgents: this.withSection('agentContexts', () =>
+-          context.config
+-            .getAgentRegistry()
+-            .getAllDefinitions()
+-            .map((d) => ({
+-              name: d.name,
+-              description: d.description,
+-            })),
++        subAgents: this.withSection(
++          'agentContexts',
++          () =>
++            context.config
++              .getAgentRegistry()
++              .getAllDefinitions()
++              .map((d) => ({
++                name: d.name,
++                description: d.description,
++              })),
++          enabledToolNames.has(AGENT_TOOL_NAME),
+         ),
+         agentSkills: this.withSection(
+           'agentSkills',
+@@ -163,24 +167,27 @@
+         hookContext: isSectionEnabled('hookContext') || undefined,
+         primaryWorkflows: this.withSection(
+           'primaryWorkflows',
+-          () => ({
+-            interactive: interactiveMode,
+-            enableCodebaseInvestigator: enabledToolNames.has(
+-              CodebaseInvestigatorAgent.name,
+-            ),
+-            enableWriteTodosTool: enabledToolNames.has(WRITE_TODOS_TOOL_NAME),
+-            enableEnterPlanModeTool: enabledToolNames.has(
+-              ENTER_PLAN_MODE_TOOL_NAME,
+-            ),
+-            enableGrep: enabledToolNames.has(GREP_TOOL_NAME),
+-            enableGlob: enabledToolNames.has(GLOB_TOOL_NAME),
+-            approvedPlan: approvedPlanPath
+-              ? { path: approvedPlanPath }
+-              : undefined,
+-            taskTracker: trackerDir,
+-            topicUpdateNarration:
+-              context.config.isTopicUpdateNarrationEnabled(),
+-          }),
++          () => {
++            const agentRegistry = context.config.getAgentRegistry();
++            return {
++              interactive: interactiveMode,
++              enableCodebaseInvestigator:
++                agentRegistry.getDefinition(CodebaseInvestigatorAgent.name) !==
++                undefined,
++              enableWriteTodosTool: enabledToolNames.has(WRITE_TODOS_TOOL_NAME),
++              enableEnterPlanModeTool: enabledToolNames.has(
++                ENTER_PLAN_MODE_TOOL_NAME,
++              ),
++              enableGrep: enabledToolNames.has(GREP_TOOL_NAME),
++              enableGlob: enabledToolNames.has(GLOB_TOOL_NAME),
++              approvedPlan: approvedPlanPath
++                ? { path: approvedPlanPath }
++                : undefined,
++              taskTracker: trackerDir,
++              topicUpdateNarration:
++                context.config.isTopicUpdateNarrationEnabled(),
++            };
++          },
+           !isPlanMode,
+         ),
+         planningWorkflow: this.withSection(
+--- a/packages/core/src/policy/policies/plan.toml
++++ b/packages/core/src/policy/policies/plan.toml
+@@ -98,7 +98,17 @@
+ modes = ["plan"]
+ interactive = false
+ 
++# Allow specific subagents in Plan mode.
++# We use argsPattern to match the agent_name argument for invoke_agent.
+ [[rule]]
++name = "Allow specific subagents in Plan mode"
++toolName = "invoke_agent"
++argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++decision = "allow"
++priority = 50
++modes = ["plan"]
++
++[[rule]]
+ toolName = ["ask_user", "save_memory", "web_fetch", "activate_skill"]
+ decision = "ask_user"
+ priority = 50
+--- a/packages/core/src/policy/policies/agents.toml
++++ b/packages/core/src/policy/policies/agents.toml
+@@ -0,0 +1,10 @@
++# Default policy for subagent invocation.
++# Subagents are trusted to handle their own confirmations for destructive actions.
++# Therefore, invoking them is allowed by default.
++
++[[rule]]
++name = "Allow invoke_agent"
++toolName = "invoke_agent"
++decision = "allow"
++priority = 50
++modes = ["default", "autoEdit", "yolo"]
+--- a/packages/core/src/policy/policy-engine.ts
++++ b/packages/core/src/policy/policy-engine.ts
+@@ -26,9 +26,10 @@
+ } from './types.js';
+ import { stableStringify } from './stable-stringify.js';
+ import { debugLogger } from '../utils/debugLogger.js';
++import { isRecord } from '../utils/markdownUtils.js';
+ import type { CheckerRunner } from '../safety/checker-runner.js';
+ import { SafetyCheckDecision } from '../safety/protocol.js';
+-import { getToolAliases } from '../tools/tool-names.js';
++import { getToolAliases, AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ import { PARAM_ADDITIONAL_PERMISSIONS } from '../tools/definitions/base-declarations.js';
+ import {
+   MCP_TOOL_PREFIX,
+@@ -546,6 +547,16 @@
+     // We also want to check legacy aliases for the tool name.
+     const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+ 
++    if (toolCall.name === AGENT_TOOL_NAME) {
++      if (isRecord(toolCall.args)) {
++        const subagentName = toolCall.args['agent_name'];
++        if (typeof subagentName === 'string') {
++          // Inject the subagent name as a virtual tool alias for transparent rule matching
++          toolNamesToTry.push(subagentName);
++        }
++      }
++    }
++
+     const toolCallsToTry: FunctionCall[] = [];
+     for (const name of toolNamesToTry) {
+       toolCallsToTry.push({ ...toolCall, name });
+--- a/packages/cli/src/ui/hooks/useToolScheduler.ts
++++ b/packages/cli/src/ui/hooks/useToolScheduler.ts
+@@ -17,6 +17,7 @@
+   CoreToolCallStatus,
+   type SubagentActivityItem,
+   type SubagentActivityMessage,
++  AGENT_TOOL_NAME,
+ } from '@google/gemini-cli-core';
+ import { useCallback, useState, useMemo, useEffect, useRef } from 'react';
+ 
+@@ -253,7 +254,7 @@
+     const flattened = Object.values(toolCallsMap).flat();
+     return flattened.map((tc) => {
+       let subagentName = tc.request.name;
+-      if (tc.request.name === 'invoke_subagent') {
++      if (tc.request.name === AGENT_TOOL_NAME) {
+         const argsObj = tc.request.args;
+         let parsedArgs: unknown = argsObj;
+ 
+@@ -267,7 +268,7 @@
+ 
+         if (typeof parsedArgs === 'object' && parsedArgs !== null) {
+           for (const [key, value] of Object.entries(parsedArgs)) {
+-            if (key === 'subagent_name' && typeof value === 'string') {
++            if (key === 'agent_name' && typeof value === 'string') {
+               subagentName = value;
+               break;
+             }
