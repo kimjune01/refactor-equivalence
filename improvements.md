@@ -138,6 +138,32 @@ Threshold N to be calibrated — pilot data shows opus and codex were byte-ident
 
 **Possible fix:** retain hunt-code only as a final pre-PR-creation safety net checking exported-symbol stability, gofmt/lint compliance, and out-of-scope edits — not behavior reverification (already done by S2). Slim its prompt.
 
+### S6. Reviewer-in-the-loop after merge *(medium effort, high value — addresses primary outcome alignment)*
+
+**Problem observed:** the forge ships C_llm based on its own gates (tests, complexity). Whether reviewers would actually approve it for merge — the experiment's P3 — is only measured downstream. Forge has no signal of "this would get rejected in review" until after it ships.
+
+**Fix:** add a reviewer loop between hunt-code and the final ship step. Mirrors how review bots (CodeRabbit, Sourcery) function in real PR pipelines:
+
+```
+volley → hunt-spec → reconcile → blind-blind-merge →
+  COMPLEXITY GATE → hunt-code (mechanical) →
+  REVIEWER LOOP:
+    Gemini 3.1 reviews the merged C_llm vs the goal +
+    artifact context → comments
+    IF approve: ship C_llm
+    IF comments: implementer (opus) addresses → re-review →
+       repeat up to N rounds
+    IF still not approved after N rounds: fall back to C_test (no-op)
+```
+
+**Reviewer model: Gemini 3.1 throughout** — in-pipeline and Phase 7. The pre-approval bias (Phase 7 reviewer has seen and signed off on C_llm at gate-time) is acceptable for two reasons:
+1. The experiment's primary purpose is to ship better artifacts. Iteration with a reviewer model produces a better artifact, not just a better-measured one. Quality-on-model-agreement only goes up.
+2. The slop-slope failure mode is still detected through the no-op path: a C_llm that the in-pipeline reviewer rejects after N rounds becomes a no-op, which scores as "reviewer prefers C_test" in P3 intent-to-treat. The cases the experiment most wants to find still surface.
+
+What we lose: Phase 7's "independent judgment" of C_llm becomes pre-biased. Acknowledged trade.
+
+**Iteration cap N: TBD** — see open Q2 below.
+
 ## Selection criteria changes
 
 ### C1. Pre-selection feasibility check *(small effort, high impact on n)*
@@ -280,7 +306,7 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 **Q1 [LOCKED]: complexity gate threshold = δ = 0.05** (same as trajectory boundary). One number, two uses.
 
-**Q2: Should reviewer Phase 7 be folded into the forge as an inline gate?** The Phase 1 forced choice between C_test and C_llm could itself be a gate: if reviewers prefer C_test, fall back to C_test as no-op. Pros: aligns forge success with the experiment's primary outcome. Cons: makes Phase 7 part of the pipeline rather than a separate evaluation, contaminating the design.
+**Q2 [LOCKED]: Reviewer-in-the-loop after merge** (S6). Same model (Gemini 3.1) used in-pipeline and Phase 7. Pre-approval bias acknowledged; outcome quality > measurement purity. Iteration cap N still open.
 
 **Q3: Single-agent default for small PRs?** S4 makes blind-blind precondition explicit. What's the right default for sub-threshold PRs — single opus, single codex, or rotate?
 
