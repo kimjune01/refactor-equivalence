@@ -158,6 +158,22 @@ This raises eligibility rate from ~75% to ~95% by rejecting bad candidates upfro
 
 **Fix:** condition 5 requires non-trivial revision in **the measurement scope** (allowed edit set ∩ non-test files), not just any file.
 
+### C3. Raise the size floor: small PRs are uninformative *(tiny effort, high signal-per-trial)*
+
+**Problem observed:** the pilot included PRs as small as 270 LOC (fastapi 14962), 302 LOC (cli/cli 12846), 374 LOC (cli/cli 12811). Outcomes on those PRs are uninformative — they're either trivial wins for forge or trivial no-ops. Neither moves the experiment's prior.
+
+The interesting case — and the case the prereg already gestures at — is large PRs where:
+- Forge has more room to mess up (more places for bad refactors to land)
+- Reviewer additive bias has more surface to manifest (C_final more likely to diverge from C_test)
+- Complexity deltas are large enough to interpret (above metric noise)
+- Single-pass refactoring is harder, blind-blind earns its precondition (S4)
+
+**Fix:** raise the minimum to 500 source lines (C_base → C_test, post-exclusion). Make "prefer larger" strict, not preferential — when expanding a sample, pick from the top of the size-sorted candidate pool.
+
+**Maximum bound:** the registered 2000 was a reviewer-fatigue ceiling for Phase 7 single-session review. With multi-reviewer support and chunkable diffs, raise to 5000 source lines. PR cli/cli 24489 (3099 LOC) was excluded post-extraction under the 2000 cap but is exactly the kind of trial worth running.
+
+**Pool effect (estimated from pilot):** the 89 gemini-cli candidates filtered to 100-2000 LOC would shrink to ~30-40 at ≥500 LOC. Still ample for the registered 15-PR primary sample. Secondary repos may need to expand their initial pull radius (e.g., wider date range) to hit 3 eligible candidates above the floor.
+
 ## Estimand registration changes
 
 ### R1. Register parity null alongside improvement threshold *(tiny effort, huge value)*
