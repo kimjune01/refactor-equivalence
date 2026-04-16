@@ -99,6 +99,8 @@ volley → hunt-spec → reconcile → blind-blind-merge →
 hunt-code → volley-clean
 ```
 
+**Threshold locked to δ = 0.05** (same as trajectory boundary, locked in PILOT_DECISIONS.md item 5). One number, two uses. Simple to reason about.
+
 This is the simplest possible fix for the "scalar-up but tests-pass" failure mode. It explicitly aligns the forge's success condition with the experiment's primary scalar.
 
 ### S2. Build in hunt-code, not just typecheck *(tiny effort, high value)*
@@ -276,12 +278,12 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 ## Open questions for v2
 
-**Q1: How conservative should the complexity gate be?** δ=0.05 was the boundary threshold for trajectory classification. Same threshold for the gate? Or stricter (δ=0.0, any complexity increase rejects)? Stricter rejects more refactors as no-ops; looser lets through marginal regressions.
+**Q1 [LOCKED]: complexity gate threshold = δ = 0.05** (same as trajectory boundary). One number, two uses.
 
-**Q2: Should the gate include max-complexity, or only mean?** Pilot showed max complexity is sticky (refactors don't touch the worst functions). A gate on mean alone might miss regressions in heavyweight functions. A gate on max would be more aggressive.
+**Q2: Should reviewer Phase 7 be folded into the forge as an inline gate?** The Phase 1 forced choice between C_test and C_llm could itself be a gate: if reviewers prefer C_test, fall back to C_test as no-op. Pros: aligns forge success with the experiment's primary outcome. Cons: makes Phase 7 part of the pipeline rather than a separate evaluation, contaminating the design.
 
-**Q3: Should reviewer Phase 7 be folded into the forge as an inline gate?** The Phase 1 forced choice between C_test and C_llm could itself be a gate: if reviewers prefer C_test, fall back to C_test as no-op. Pros: aligns forge success with the experiment's primary outcome. Cons: makes Phase 7 part of the pipeline rather than a separate evaluation, contaminating the design.
+**Q3: Single-agent default for small PRs?** S4 makes blind-blind precondition explicit. What's the right default for sub-threshold PRs — single opus, single codex, or rotate?
 
-**Q4: Single-agent default for small PRs?** S4 makes blind-blind precondition explicit. What's the right default for sub-threshold PRs — single opus, single codex, or rotate?
+**Q4: Should v2 register a parity null on P3 too?** Currently P3 has only an improvement threshold (≥65%). Same R8 logic applies: under parity what would we expect? If LLM and reviewer judgments are equally noisy, a 50/50 split is the parity null and 65% is meaningful improvement. Worth making explicit.
 
-**Q5: Should v2 register a parity null on P3 too?** Currently P3 has only an improvement threshold (≥65%). Same R8 logic applies: under parity what would we expect? If LLM and reviewer judgments are equally noisy, a 50/50 split is the parity null and 65% is meaningful improvement. Worth making explicit.
+**Q5: Hunt-code's role after S1+S2.** Slim, drop, or keep broad?
