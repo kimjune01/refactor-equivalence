@@ -124,7 +124,7 @@ One primary repo goes deep. Four secondary repos go shallow. If results on the p
 
 **Python repos dropped from v2 scope.** v1 pilot showed Python (fastapi) required ~90 minutes of dependency-iteration before tests would run, and the volley descriptive-vs-prescriptive failure mode was first observed there. v2 keeps "does forge work on Python repos?" as an open question for v3 (see v3_questions.md). Dropping Python avoids burying the primary question (does forge work on TS/Go) under Python-specific scaffolding cost.
 
-If a remaining repo becomes infeasible, it may be replaced by a repo of equal caliber and the swap is recorded before extraction of the replacement begins. Selection criteria: language diversity, strict enforced review, ≥10 contributors, active post-cutoff, reconstructable build/test commands.
+If a remaining repo becomes infeasible (dev-env timebox hit, or feasibility checks fail post-extraction), it is **dropped and the next eligible repo is substituted** — no debugging-the-infrastructure iteration. Replacements meet the same selection criteria (language diversity, strict review, ≥10 contributors, active post-cutoff, reconstructable build/test) and are recorded before extraction begins.
 
 **Build-time bias:** All selected repos have fast build/test cycles by ecosystem standards. This excludes heavyweight C++ projects and large compiler codebases where build times make per-trial iteration impractical. The experiment's results may not generalize to codebases where the build itself is the bottleneck.
 
@@ -136,7 +136,7 @@ The following defaults are committed before extraction. If a repo's CI reveals a
 - `cli/cli`: Go from `go.mod`, `go build ./...`, `go test ./...`, complexity via `gocognit` + `gocyclo`, formatting via `gofmt`.
 - `astral-sh/ruff`: Rust from `rust-toolchain`, `cargo build`, `cargo test`, formatting via `cargo fmt`, complexity via `rust-code-analysis-cli`.
 
-Per-repo setup time is logged. If a repo's setup exceeds 2 hours wall-clock to first passing build, the trial is paused and the cost is recorded — repeated cost-overruns motivate dropping the repo. (v2 change: locked R4)
+**Per-repo dev-env timebox: 2 hours wall-clock to first passing build at `C_final`.** If a repo exceeds this on initial setup, it is dropped from v2 (recorded as feasibility-excluded) and the next eligible secondary repo is substituted. v1 pilot's fastapi setup took ~90 minutes; the 2-hour cap leaves modest headroom for new repos but commits us to moving on rather than fighting infrastructure. Repos dropped this way join the v3 open-questions backlog. (v2 change: locked R4)
 
 ### Training-contamination restriction
 
