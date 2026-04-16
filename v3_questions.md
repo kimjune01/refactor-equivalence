@@ -81,18 +81,20 @@ Format per entry:
 
 **Trigger**: v2's design is benchmark-shaped — fixed PR set, reproducible pipeline, pre-registered scoring, multi-language, real merged PRs as ground truth.
 
-**Important constraint**: forge is explicitly multi-model (opus + codex + gemini per stage). A score reflects all three roles working together, not any one model. So a "refactor-bench" derived from v2 is a **pipeline-evaluation bench**, not a model-evaluation bench. Audience is practitioners building agent pipelines, not model developers training new models.
+**Important constraint**: forge is itself a harness — a multi-model orchestration (opus + codex + gemini per stage). A v2 score reflects all three roles working together inside one specific harness implementation, not any one model. So a "refactor-bench" derived from v2 is a **harness-evaluation bench**, not a model-evaluation bench. v2's reported numbers ARE forge's score on the bench; other harness developers can compare their own harness's score against forge's reference number on the same PRs.
+
+Audience: **harness developers** — people building agent orchestration frameworks (forge, Aider, OpenHands, SWE-agent, Cursor's harness, HumanLayer) — not model trainers.
 
 **v2 evidence (so far)**: not yet observable. Will know after v2 ships whether the pipeline is reproducible enough by external practitioners (cost, complexity, scaffolding).
 
-**v3 hypothesis**: a "refactor-bench" version positioned explicitly as a *pipeline* evaluation benchmark, with:
+**v3 hypothesis**: a "refactor-bench" version positioned explicitly as a *harness* evaluation benchmark, with:
 - Versioned snapshots (v2.0 frozen, v2.1 adds N PRs every 6 months to fight contamination)
-- External pipeline leaderboard (e.g., "forge-X scored Y% on refactor-bench-2.0")
-- Pipeline substitution: practitioners swap their orchestration (different stages, different models per stage, single-shot vs multi-stage) into the generator/reviewer slots
+- External harness leaderboard (e.g., "forge-X scored Y% on refactor-bench-2.0")
+- Harness substitution: harness developers swap their orchestration (different stages, different models per stage, single-shot vs multi-stage) into the generator/reviewer slots
 - Composite score from P1/P2/P3 rates, plus per-stage diagnostics (hunt-spec defect-find rate, reviewer-loop convergence, complexity-gate trip rate)
 
 Risks: contamination (pipelines train against the bench's PR set), Goodhart targets, single-composite score loses nuance, expensive per-trial.
 
 Mitigations baked into v2 design: pipeline wrapping makes single-shot training harder to game, reviewer-loop iteration measures address-quality not just first-shot, survivorship + size restriction limits scope of claims, multi-language coverage prevents single-language overfit.
 
-**Provisional priority**: medium if v2's pipeline turns out reproducible by external practitioners. Smaller audience than "model leaderboard" but a real one — pipeline orchestration is its own emerging category (forge, agentic frameworks, code-rewriting agents).
+**Provisional priority**: medium if v2's pipeline turns out reproducible by external harness developers. Smaller audience than "model leaderboard" but a real and growing one — agent harness development is an emerging category (forge, Aider, OpenHands, SWE-agent, HumanLayer-style orchestration). A bench that distinguishes good harnesses from sloppy ones serves an unmet need.
