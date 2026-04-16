@@ -124,13 +124,11 @@ This is the same convergence mechanic as bug-hunt, applied at the spec stage.
 
 ### S4. Blind-blind precondition: large PRs only *(zero effort, clarification)*
 
-**Clarification (not a change):** blind-blind was always meant for large PRs. The skill itself can carry a precondition that gates it on diff size. Below threshold, single-agent (e.g., opus alone) is the path.
+**Clarification (not a change):** blind-blind was always meant for large PRs. The skill itself carries a precondition that gates it on diff size.
 
-**Fix:** make the precondition explicit in the skill:
+**Locked threshold: 500 source lines.** Same number as the C3 size floor — they unify. PRs not worthy of blind-blind are not worthy of the experiment. The corollary: there is no "single-agent path" for sub-threshold PRs because sub-threshold PRs are not eligible.
 
-> Skip blind-blind merge IF total source-file diff < N lines. Use single-agent generation for small refactors.
-
-Threshold N to be calibrated — pilot data shows opus and codex were byte-identical on PR 24437 (5 files, ~30 lines) and ≤4 files / ≤13 lines diverged on the 4 larger PRs (1000+ LOC). N=200 source lines is a reasonable starting threshold.
+Justification for 500: pilot data shows opus and codex were byte-identical on PR 24437 (5 files, ~30 lines source) and diverged on 2-4 files in PRs above 600 LOC. Crossover sits around several hundred LOC; 500 puts us on the divergent side with margin, and aligns with the "down-induction implies small" argument from C3.
 
 ### S5. Hunt-code is mostly redundant with prior gates *(observation, possible removal)*
 
@@ -311,7 +309,7 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 **Q2 [LOCKED]: Reviewer-in-the-loop after merge** (S6). Same model (Gemini 3.1) used in-pipeline and Phase 7. Pre-approval bias acknowledged; outcome quality > measurement purity. Iteration: convergence on zero comments OR impasse on shrinking comments, N=10 as rare-case safety bound.
 
-**Q3: Single-agent default for small PRs?** S4 makes blind-blind precondition explicit. What's the right default for sub-threshold PRs — single opus, single codex, or rotate?
+**Q3 [LOCKED by exclusion]: No single-agent path.** Sub-blind-blind PRs are not eligible (S4 unified with C3). Every accepted PR runs blind-blind.
 
 **Q4: Should v2 register a parity null on P3 too?** Currently P3 has only an improvement threshold (≥65%). Same R8 logic applies: under parity what would we expect? If LLM and reviewer judgments are equally noisy, a 50/50 split is the parity null and 65% is meaningful improvement. Worth making explicit.
 
