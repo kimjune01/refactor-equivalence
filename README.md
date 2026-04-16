@@ -34,4 +34,4 @@ Samples in `samples/dev/` are used to iterate the refactoring prompt. Samples in
 
 ## Source repos
 
-- `google/gemini-cli` — TypeScript monorepo, active review culture, 20+ contributors
+- `google-gemini/gemini-cli` — TypeScript monorepo, active review culture, 20+ contributors

@@ -19,7 +19,7 @@ All decisions, attempts, exclusions, and dead ends. Published alongside results.
 - The interesting failure is the slop-slope: passing tests while making things worse
 
 **Repo selection:**
-- Primary: google/gemini-cli (TypeScript) — 15 PRs
+- Primary: google-gemini/gemini-cli (TypeScript) — 15 PRs
 - Secondary candidates: kubernetes/kubernetes (Go), rust-lang/rust (Rust), llvm/llvm-project (C++), django/django (Python) — 3 PRs each, expandable to 10
 - Repos are candidates, not locked. Caliber bar is locked. May swap for faster build/test pipelines of equal quality
 - Queen's-table argument: if it works on the strictest repos, down-induction to simpler ones

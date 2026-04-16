@@ -20,7 +20,7 @@ Test-passing is a precondition, not a variable. Agent either produces a member o
 
 ### 20:25 — Repo selection
 
-Primary: google/gemini-cli (15 PRs). Secondary candidates: kubernetes (Go), rust-lang/rust (Rust), llvm (C++), django (Python) — 3 PRs each, expandable to 10. Caliber bar locked, specific repos not locked. Queen's-table argument: if it works on the strictest repos, down-induction to simpler ones is plausible.
+Primary: google-gemini/gemini-cli (15 PRs). Secondary candidates: kubernetes (Go), rust-lang/rust (Rust), llvm (C++), django (Python) — 3 PRs each, expandable to 10. Caliber bar locked, specific repos not locked. Queen's-table argument: if it works on the strictest repos, down-induction to simpler ones is plausible.
 
 ### 20:30 — C_test definition fix
 
@@ -113,3 +113,92 @@ Ran the 20-question prereg checklist against our own prereg. Five gaps fixed: Q3
 Agent audience made explicit. Questions 3/5/12/18 sharpened for agents. Closing rewrites: "registering a story" / "filtered final narrative." Codex reviewed, sharpen pass converged in one round.
 
 **Status:** Prereg converged. All three agents verified. Gemini CLI configured. Ready to pull dev-set PRs from gemini-cli and start the pilot.
+
+## 2026-04-15
+
+### Session 2 start — dev-set extraction
+
+Correct repo path is `google-gemini/gemini-cli`, not `google/gemini-cli`. Fixed across PREREG, BOOTSTRAP, README, worklog. Old name was GraphQL-unresolvable.
+
+### Dev-set candidate pool
+
+89 PRs in `samples/candidates-gemini-cli.json`, merged after 2025-09-01, 100–2000 LOC, APPROVED. Filter applied via `gh pr list --search "merged:>2025-09-01"` then jq size filter. All post-GPT-5.4 cutoff (2025-08-31).
+
+### Pilot dev set locked: 5 PRs
+
+`samples/dev/PILOT.md`: PRs 24483, 25101, 24489, 24437, 24623. All touch `packages/core`. All have ≥4 reviews and ≥2 commits. Diversity across feat/refactor/fix. Remaining 84 candidates reserved for test set — no overlap permitted until prompt freeze.
+
+### Working clone at /tmp/refactor-eq-workdir/gemini-cli
+
+Node 22, npm 10. `npm ci` clean (1296 packages, 17 known audit issues — acceptable for reproducibility). Monorepo with 7 workspaces. Core workspace test: `npm run test --workspace @google/gemini-cli-core` → `vitest run`.
+
+### Extraction scaffolding
+
+`scripts/find_c_test.sh`: walks PR commits oldest→newest, overlays C_final test files, runs locked test command, records earliest passing commit. Pilot PR is 24437 (8 files, 4 commits, smallest of the five — best feasibility canary).
+
+PR 24437 snapshots: C_base=7d1848d, C_final=e169c700. Test files from C_final: `local-executor.test.ts`, `complete-task.test.ts`. Running core tests at C_final now to verify baseline passes in clean clone.
+
+### Test-command lock for gemini-cli
+
+Two pilot findings on the correctness gate:
+
+1. **Pre-test build required.** `packages/core` self-imports `@google/gemini-cli-core`, and 5 test files fail resolution unless the package is built first. `posttest: build` in `package.json` is not adequate — we need `npm run build --workspace @google/gemini-cli-core` BEFORE `vitest run`.
+2. **One environment-dependent test excluded.** `sandboxManager.integration.test.ts` asserts that sandboxed writes fail — but on a clean developer Mac without an enforced sandbox binary, the write succeeds and the test fails. Excluded from the locked test command. No pilot PR touches sandboxManager, so no analytic impact.
+
+Locked test command (recorded in `prompts/repos/gemini-cli.md`): build core, then `cd packages/core && npx vitest run --exclude '**/sandboxManager.integration.test.ts'`. 338 files / 6574 tests pass at C_final (e169c700).
+
+### Running find_c_test on PR 24437
+
+`scripts/find_c_test.sh` walks PR commits oldest→newest, overlays C_final test files, runs the locked test command, records the earliest passing commit as C_test. Running now for PR 24437 across its 4 commits.
+
+### PR 24437: C_test = ffd11f5f, 2 post-test commits of substantive revision
+
+find_c_test walked 4 commits. Commit 1 (`9a47b201`) fails — first commit doesn't yet implement complete_task trimming. Commit 2 (`ffd11f5f`, "trim 'result' parameter in complete_task validation") is the earliest passing commit → C_test. Commits 3–4 are post-tests-pass revision (`066ee62b` "explicitly verify tool name", `e169c700` "use helper for tool argument parsing"). The C_test→C_final delta touches one source file (`local-executor.ts`, 71 lines) — substantive and within scope.
+
+Allowed edit set at C_test: 6 source files, 436 LOC of churn from C_base.
+
+### Clean-room pitfall: relative workspace symlinks
+
+First clean-room build symlinked `node_modules` wholesale from the source clone. The workspace self-links (`node_modules/@google/gemini-cli-core -> ../../packages/core`) are relative, so they resolved to the SOURCE clone's packages, not the clean-room's — breaking isolation (tests would run source-clone code regardless of what we put in the clean-room).
+
+Fix: run `npm ci --prefer-offline` inside the clean-room (~20s warm). `build_cleanroom.sh` updated. Re-verified: 338 test files / 6574 tests pass at C_test inside the clean-room, matching C_final counts.
+
+### Forge pipeline complete for PR 24437 — C_llm produced
+
+Full forge pipeline: Volley (sharpen) → Hunt-spec → Blind-blind-merge → Hunt-code → Volley-clean. All steps converged.
+
+**Volley (sharpen).** Round 1: codex produced 6 claims. Round 2: I rejected one (Claim 2 — removing missing-arg checks would break 4 test assertions). 5 claims accepted, spec stable.
+
+**Hunt-spec.** Round 1: codex found 2 warnings — (1) import convention rationale was overbroad (narrowed to consumers *outside* tools/), (2) RESULT_PARAM replacement targets imprecise (made all 4 edits explicit). Fixed spec. Round 2: zero findings.
+
+**Blind-blind-merge.** Opus subagent + codex subprocess, same spec, separate /tmp dirs. Both produced *byte-identical* output. Convergent blind implementation — merge trivial.
+
+**Hunt-code.** Gemini 3.1 Pro adversarial review. Zero findings.
+
+**Volley-clean.** One round: 15 insertions / 15 deletions, no dead code, naming consistent. Converged immediately.
+
+**C_llm diff from C_test.** 2 files, 30 lines changed:
+- `local-executor.ts`: import rerouted to tool-names.js, `catch (_)` → `catch`
+- `complete-task.ts`: `RESULT_PARAM` constant, `formatSubmittedOutput` helper, `${COMPLETE_TASK_TOOL_NAME}` in error text
+
+Tests: 338 files / 6574 tests / 28 skipped — **identical to C_test baseline**.
+
+Artifact: `/tmp/refactor-eq-workdir/forge/24437/c_llm_diff.patch` (93 lines).
+
+### C_random spec drafted
+
+`prompts/meta/c-random.md` — TypeScript-specific transformation family: local renames, independent statement reordering, redundant parenthesization. Validated against both correctness (tests pass) and non-simplification (reject seeds that reduce complexity by more than δ). Edit budget to be calibrated after pilot observes `C_llm` magnitudes. Secondary-repo language families deferred to post-pilot.
+
+### 18:18 — PR 24437 forge pipeline complete
+
+PR 24437 forge pipeline complete. C_llm produced: 5/5 claims, opus+codex identical, gemini zero findings. Tests green (6574/6574). First pilot trial end-to-end feasibility confirmed.
+
+### 18:25 — PR 24437 complexity measurement: C_llm is "past C_final"
+
+Measured with `scripts/measure_complexity.mjs` (typescript-estree AST walker — cyclomatic, cognitive, nesting, LOC).
+
+C_llm's mean cognitive complexity across touched functions: **10.27** (C_test: 10.84, C_final: 10.39). C_llm is past C_final on both primary scalar measures. Max-function complexity unchanged (processFunctionCalls stays at 43 CC / 77 cognitive across all snapshots). Zero LOC growth in C_llm vs +41 in C_final.
+
+Full metrics in `samples/dev/24437-metrics.md`. This is n=1 pilot data. Scalar trajectory class agrees with "past C_final" — awaits reviewer classification for headline label.
+
+**Pilot PR 24437 status:** Forge pipeline ✓, measurements ✓, trajectory scalar ✓. Remaining: blind review (deferred until all 5 PRs have C_llm), C_random (deferred post-pilot).

@@ -48,7 +48,7 @@ If LLMs cannot improve axis 3 without reviewer feedback, that suggests the revie
 
 One primary repo goes deep. Four secondary repos go shallow. If results on the primary repo are clear but secondary repos show ambiguity, expand n on the ambiguous secondaries.
 
-- **Primary:** `google/gemini-cli` (TypeScript monorepo, 20+ contributors, active review culture). 15 PRs.
+- **Primary:** `google-gemini/gemini-cli` (TypeScript monorepo, 20+ contributors, active review culture). 15 PRs.
 - **Secondary (3 PRs each, expandable to 10):**
   - `cli/cli` (Go) — GitHub's own CLI, strict review, fast `go test`, ~50 merged PRs/month
   - `astral-sh/ruff` (Rust) — Python linter, strict review, builds in seconds, comprehensive test suite

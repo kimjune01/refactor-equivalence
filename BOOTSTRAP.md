@@ -10,4 +10,4 @@ Read PREREG.md and worklog/WORK_LOG.md to get up to speed. Use /worklog after ev
 
 Three agents, three roles: opus + codex forge the refactoring (blind-blind-merge), gemini 3.1 pro reviews it. No model reviews its own output.
 
-The prereg is converged. Next step is pulling dev-set PRs from google/gemini-cli (post August 2025 cutoff, 100-2000 LOC, prefer larger, ≥2 review rounds). Then iterate the refactoring prompt on the dev set before freezing it for the test set.
+The prereg is converged. Next step is pulling dev-set PRs from google-gemini/gemini-cli (post August 2025 cutoff, 100-2000 LOC, prefer larger, ≥2 review rounds). Then iterate the refactoring prompt on the dev set before freezing it for the test set.
