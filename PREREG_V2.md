@@ -178,6 +178,8 @@ This is group sequential in spirit: look after each batch, expand if uncertain. 
 
 **Hard caps (per codex hostile-review Q20 PARTIAL):** primary repo capped at 25 PRs total; each secondary repo capped at 10 PRs total. v1's "no fixed maximum" was unbounded adaptive expansion; v2 caps it. The stopping rule is confidence, not a number — but bounded. Each expansion decision and its rationale are recorded in the work log before the next batch begins.
 
+**Path to more power: add repos, don't expand any one.** If the registered sample (15 + 4×3 = 27 minimum, 25 + 4×10 = 65 maximum) is underpowered, the expansion path is to add ANOTHER secondary repo at 3 PRs (and expand it to 10 if its trigger fires), not to lift the per-repo cap. This trades scaffolding cost for sample size while preserving language/culture diversity. New secondary repos must meet the original criteria (language diversity, strict review, ≥10 contributors, active post-cutoff, reconstructable build/test) and be registered before extraction begins.
+
 ## Snapshot Definitions
 
 For each sampled PR, define the following commits or working-tree states.
