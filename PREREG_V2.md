@@ -17,7 +17,46 @@ This v2 preregistration keeps the v1 estimand and within-PR comparison structure
 
 All pilot-derived changes from improvements.md are now incorporated as **locked** in v2: V3 implementation evidence, V4 per-language spec templates (kept short), C1 pre-selection feasibility checks, C2 source-only revision-in-scope refinement, R2 single reviewer is sufficient, R3 precise no-op classes, R4 per-language scaffolding cost (logged, not formalized), O1 serialized test runs across PRs, O2 per-PR Python venv manifests, and O3 raw measurement JSON saved per snapshot.
 
-Design heuristic: this prereg favors **simpler over rigorous**. The goal is to provide evidence either way for v2's hypotheses, not to produce paper-grade statistics. Formal tests (paired Wilcoxon, mixed-effects) are reported only if rates are close to threshold.
+Design heuristic: this prereg favors **simpler over rigorous**. The goal is to provide evidence either way for v2's hypotheses, not to produce paper-grade statistics.
+
+**Intended audience: practitioners running agent workflows in production**, with Dexter Horthy (who coined "slop-slope") as the canonical reader. The writeup needs enough rigor to be credible — concrete numbers, specific failure-mode examples, operational characterization (cost, time, where it breaks), honest scope — but not so much statistical machinery that the actual finding gets buried in caveats. The reader cares about "does this work, how often, what fails, what does it cost?" more than "is the p-value below 0.05?"
+
+**Analysis is descriptive-only.** Report rates, deltas, distributions, and per-trial outcomes. Compare observed values to the registered thresholds and parity envelopes. Do NOT run formal hypothesis tests (Wilcoxon, sign test, mixed-effects logistic, t-test, χ², bootstrap CIs, etc.). At n=27 these tests are underpowered, and conditioning their inclusion on observed values is a flexibility-of-analysis problem (post-hoc test selection inflates false-positive rates even when not full p-hacking). If a v3 wants formal inference, it pre-registers specific tests with specific cutoffs *before* extraction begins.
+
+**Tone for claims:** practitioner-confident, not academic-cautious. "Forge preferred at 78%, parity is 50% — clear margin" rather than "we observed 78%, but this is descriptive only and cannot be generalized without further study." The reader knows it's n=27; over-hedging is its own dishonesty.
+
+This is enforceable: the analysis report template is registered before extraction (see Trail Commitment). The template has slots for descriptive stats only — no test-result fields. To add formal tests post-hoc requires editing the template, which leaves an audit trail in git.
+
+### Claimable result space at n=27 descriptive-only
+
+What v2 CAN say:
+- **Existence + magnitude:** "Forge produced past-C_final trajectories in K of 27 trials, at rate X%."
+- **Threshold comparison (registered):** "Observed rate X% is above (or below) the registered improvement threshold of Y%."
+- **Parity comparison:** "Observed distribution falls inside / outside the registered parity envelope."
+- **Failure-mode catalog:** "K of 27 trials hit failure mode X (anticipated); K novel failure modes observed and documented for v3."
+- **Operational characterization:** "Average forge cost: X tokens / Y minutes per trial. Hunt-spec converged in 1 round on Z% of trials. Reviewer-loop hit cap on K trials."
+- **Mechanism observations (case-by-case):** "Wrong-direction trials shared characteristic Z. Examples: PR A, B, C."
+
+What v2 CANNOT say:
+- "Forge is statistically significantly better than no forge at p<.05" (no test)
+- "Effect size is X ± Y" (no CIs)
+- "Forge improves merge-readiness in general" (sample is restricted; estimand is "large drafts of merged brownfield PRs")
+- "Lightweight refactor passes work" (intervention is the full forge bundle)
+
+### Recommendation criterion (pre-registered, not post-hoc)
+
+The writeup's practitioner recommendation is conditional on observed rates relative to registered thresholds. v2 commits to these recommendations BEFORE seeing data:
+
+| Observed P3 prefer-C_llm rate | Recommendation to practitioners |
+|-------------------------------|----------------------------------|
+| ≥ 65% (improvement threshold cleared) | "Forge-wrapped refactor pass is worth running on large brownfield PRs in your workflow." |
+| 60-65% (above parity, below improvement) | "Forge-wrapped refactor pass shows preference but doesn't beat the improvement bar by enough to recommend over the cost. Run it if cost is low; skip if cost is high." |
+| 40-60% (parity envelope) | **"Do not recommend."** Forge-wrapped refactor doesn't meaningfully beat the no-refactor baseline at the registered sample. |
+| < 40% (worse than parity) | "Actively counter-indicated. Forge-wrapped refactor degrades reviewer-judged merge-readiness." |
+
+Same logic for P2 trajectory and P1 simplification, with their own registered thresholds.
+
+Pre-committing to "do not recommend" if results are coin-flip removes the temptation to soften a null result into "the trend is encouraging" or "with a larger sample, perhaps." If observed rates fall inside the parity envelope, the writeup says so without hedging. Practitioner readers get a usable yes/no, not a hedged "maybe."
 
 ## Hypothesis
 
@@ -612,7 +651,7 @@ Primary comparison:
 complexity(C_llm) - complexity(C_test)
 ```
 
-Report the per-trial deltas and the rate above the threshold. Formal paired tests (Wilcoxon, sign test) are reported only if the rate is close to threshold and statistical inference would change the read. Goal: evidence either way, not paper-grade rigor.
+Report the per-trial deltas, the rate of trials with delta < 0, and the distribution of deltas. Compare to the P1 ≥70% threshold descriptively. **No formal hypothesis tests** (see top-of-doc analysis heuristic).
 
 No-op trials contribute zero complexity delta. The denominator is all trials.
 
@@ -654,7 +693,7 @@ The primary analysis uses the pairwise forced-choice answer to:
 Assuming tests pass, which version would you approve for merge?
 ```
 
-Analyze reviewer preferences using a mixed-effects logistic model with random effects for PR and reviewer where reviewer count supports it. A simpler paired sign-test analysis may also be reported for interpretability.
+Report descriptive prefer-C_llm rate (intent-to-treat and observed-only). Compare to registered P3 threshold (≥65%) and parity envelope ([40%, 60%]). **No formal hypothesis tests** (see top-of-doc analysis heuristic).
 
 Semantic-concern flags are analyzed separately from merge-readiness preference.
 
