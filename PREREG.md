@@ -755,6 +755,27 @@ Operational finding: across 5 pilot PRs, codex's initial volley produced zero re
 
 Implication: **hunt-spec is not optional.** It is the step that makes the generator honest. In a shorter pipeline that skipped it, many of the defects it caught would have landed as unimplementable or test-breaking claims. This is likely architectural in current models, not prompt-fixable.
 
+### R8 — P2 threshold compared against improvement only, not parity
+
+Post-pilot-review observation. P2 is registered as "past C_final ≥ 50% of active trials; wrong direction < 20%." That's an **improvement threshold** — it asks for evidence the LLM beats the reviewer. It does not register what **parity** would look like.
+
+If LLMs and reviewers are drawing from roughly the same distribution of acceptable simplifications, parity would produce something like:
+- ~30–40% past C_final (LLM goes further than reviewer occasionally)
+- ~40–50% short of C_final (LLM misses improvements the reviewer found)
+- ~10–20% wrong direction (LLM takes a turn the reviewer wouldn't)
+
+The pilot observed 20/60/20. That's inside the envelope of plausible parity — the "short" rate is higher than parity would predict, and "wrong" is at parity's upper edge. The 20% "past" result is notably below parity expectations but within n=5 sampling noise.
+
+"Did P2 pass?" is ambiguous as written because the prereg specifies an improvement threshold without a null baseline. A cleaner formulation would have been two thresholds:
+- **Parity null**: distribution expected under equivalence (e.g., past ∈ [25%, 45%])
+- **Improvement threshold**: distribution if the LLM is strictly better (past ≥ 50%)
+
+Under that formulation, the pilot's 20% past rejects the improvement threshold but also sits below the parity null's lower bound. That's still interpretable — "LLM underperforms reviewer parity on past-landing at n=5" — and interpretable in a way the current registration isn't.
+
+**Post-hoc interpretation hazard noted.** Adding an after-the-data analysis framing to the prereg is precisely the move preregs are supposed to prevent. Registering this as a retro analytical decision rather than an amendment preserves that discipline: it informs v2 design without rescuing the current result.
+
+**Recommendation for v2**: require threshold registration to include both a null baseline (what parity would look like) and an improvement threshold. "Does X help?" without a parity null is an incomplete question.
+
 ### Using this section
 
 Read alongside the main prereg, not in place of it. The registered protocol is what gets executed. The retrospective is where we put lessons that would have changed the prereg if we had known them — documented now so they can shape v2 or a follow-up study, instead of silently shaping interpretation of the current one.
