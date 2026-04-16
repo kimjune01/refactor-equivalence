@@ -76,3 +76,21 @@ Format per entry:
 **v3 hypothesis**: substituting weaker models (Sonnet 4.5, GPT-4-class, Gemini 1.5) at one or more forge stages would degrade the rate. Open question is the SHAPE of the degradation: linear with model size, threshold at some capability level, or stage-specific (e.g., reviewer is robust but generator collapses).
 
 **Provisional priority**: low — practitioner prior already says "weaker → worse." A formal trial may not move the posterior much beyond confirming the prior. But useful if v2 results need to be hedged for less-capable model deployments.
+
+### Pre-seed 6 — refactor-bench positioning
+
+**Trigger**: v2's design is benchmark-shaped — fixed PR set, reproducible pipeline, pre-registered scoring, multi-language, real merged PRs as ground truth. Practitioners could swap their model into the generator slot and get a comparable score.
+
+**v2 evidence (so far)**: not yet observable. Will know after v2 ships whether the pipeline is reproducible enough by external practitioners (cost, complexity, scaffolding).
+
+**v3 hypothesis**: a "refactor-bench" version positioned explicitly as a model evaluation benchmark, with:
+- Versioned snapshots (v2.0 frozen, v2.1 adds N PRs every 6 months to fight contamination)
+- External model leaderboard
+- Model substitution at any forge stage (generator, reviewer, all of forge)
+- Composite score from P1/P2/P3 rates, plus per-stage scores
+
+Risks: contamination (models train on the bench), Goodhart targets, single-composite score loses nuance, expensive per-trial.
+
+Mitigations baked into v2 design that help: forge wrapper makes single-shot training harder to game, reviewer-loop iteration measures address-quality not just first-shot, survivorship + size restriction limits scope of claims.
+
+**Provisional priority**: medium-high if v2's pipeline turns out reproducible by external practitioners. Real research output potential. Different audience (model evaluators in addition to practitioners).
