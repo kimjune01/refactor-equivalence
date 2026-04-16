@@ -15,7 +15,9 @@ This v2 preregistration keeps the v1 estimand and within-PR comparison structure
 9. **P2 and P3 use both parity nulls and improvement thresholds.** P2 parity null: past in `[25%, 45%]`, short in `[40%, 55%]`, wrong in `[10%, 20%]`; improvement threshold: past at least 50%. P3 parity null: prefer-`C_llm` rate in `[40%, 60%]`; improvement threshold: at least 65%. (v2 change: locked R1)
 10. **Survivorship bias is explicit.** The estimand is restricted to drafts of merged brownfield PRs. This makes positive results on P1, P2, and P3 conservative, but understates real-world slop-slope prevalence for P4. (v2 change: locked R5)
 
-The following pilot-derived changes are incorporated but flagged as **proposed, not locked**: V3 implementation evidence, V4 per-language spec templates, C1 pre-selection feasibility checks, C2 source-only revision-in-scope refinement, R2 dropping the hard 3-reviewer requirement, R3 precise no-op classes, R4 per-language scaffolding cost registration, O1 serialized test runs across PRs, and O2 per-PR Python venv manifests.
+All pilot-derived changes from improvements.md are now incorporated as **locked** in v2: V3 implementation evidence, V4 per-language spec templates (kept short), C1 pre-selection feasibility checks, C2 source-only revision-in-scope refinement, R2 single reviewer is sufficient, R3 precise no-op classes, R4 per-language scaffolding cost (logged, not formalized), O1 serialized test runs across PRs, O2 per-PR Python venv manifests, and O3 raw measurement JSON saved per snapshot.
+
+Design heuristic: this prereg favors **simpler over rigorous**. The goal is to provide evidence either way for v2's hypotheses, not to produce paper-grade statistics. Formal tests (paired Wilcoxon, mixed-effects) are reported only if rates are close to threshold.
 
 ## Hypothesis
 
@@ -497,7 +499,7 @@ This extends v1's trail commitment which was prompt + diff + final-snapshot only
 
    The LLM may not edit tests. It may only edit source files changed from `C_base` to `C_test`. This is mechanically enforced after generation. (v2 change: clean-pass step removed; cleanup happens organically in 4g and 4h iterations)
 
-   Exact prompts, model names and versions, decoding parameters, tool permissions, allowed file set, language-specific spec template, and number of volley/hunt/review rounds are recorded. Per-language spec templates are used for TypeScript, Go, Python, and Rust. TypeScript templates include `tsconfig` path conventions, `tsc`/build gates, and ESLint-scope notes. Go templates include `gofmt`, `go vet`, package-boundary caution, and idiomatic error handling. Python templates include PEP 8, local type-hint style, docstring style, and import-order conventions. Rust templates include `cargo fmt`, `cargo clippy`, ownership/borrowing caution, and no new `unwrap()` without an explicit local precedent. (v2 change: proposed V4)
+   Per-language spec template adds idiomatic notes for the target language (gofmt/go-vet for Go, PEP 8 for Python, cargo fmt/clippy for Rust, tsc gate for TypeScript) — kept short, not exhaustive style guides. Each repo's spec template is committed to the trail before its first PR runs. (v2 change: locked V4, simplified)
 
 5. **Verify correctness.**
    Run the predetermined full build and test command on `C_llm`.
@@ -594,10 +596,7 @@ Primary comparison:
 complexity(C_llm) - complexity(C_test)
 ```
 
-Analyze with paired tests across PRs:
-
-- Wilcoxon signed-rank test for continuous deltas
-- Sign test for direction of improvement
+Report the per-trial deltas and the rate above the threshold. Formal paired tests (Wilcoxon, sign test) are reported only if the rate is close to threshold and statistical inference would change the read. Goal: evidence either way, not paper-grade rigor.
 
 No-op trials contribute zero complexity delta. The denominator is all trials.
 
@@ -655,22 +654,14 @@ Improvement threshold:
 
 Reject the parity null if the observed rate falls outside the parity envelope. Accept improvement if the prefer-`C_llm` rate is at least 65%. If parity holds and improvement does not, report: "matches reviewer judgment on merge-readiness, does not exceed it."
 
-### Mixed-effects model
+### Reviewer preference reporting
 
-For reviewer preferences, use a mixed-effects logistic model where data support it.
+Report two summaries:
 
-Candidate model:
+1. **Intent-to-treat (primary for P3):** all trials, hard no-ops scored as "reviewer prefers C_test", trivial no-ops scored as tied. Plain prefer-rate.
+2. **Observed-only:** trials where C_llm passed build/tests and reviewers saw actual diffs. Same prefer-rate, smaller denominator.
 
-```text
-prefer_llm_over_test ~ PR_size + (1 | PR) + (1 | reviewer)
-```
-
-Two analyses are reported:
-
-1. **Intent-to-treat (primary for P3):** All trials. Hard no-ops scored as "reviewer prefers `C_test`." Trivial no-ops scored as tied or 0.5 in rate summaries. Out-of-scope no-ops are scored after reverting out-of-scope edits and assessing what remains. (v2 change: proposed R3)
-2. **Observed-only (primary for the mixed-effects model):** Only trials where `C_llm` passed build/tests and reviewers saw actual diffs. No synthetic judgments. This isolates refactoring quality from agent competence.
-
-For calibration tasks involving `C_random`, ordinal or logistic models may be used depending on the final coding.
+Mixed-effects models (e.g., logistic with PR + reviewer random effects) are reported only if the data support them and the rate is close to threshold. Single-reviewer pilot data does not warrant random-effect modeling. Goal: evidence either way, not paper-grade rigor.
 
 ### Inter-rater reliability
 
@@ -705,7 +696,7 @@ Repeat primary analyses on the subset where the agent produced a build- and test
 
 ### Scaffolding-cost analysis
 
-For each repo and language, report setup time, dependency pinning effort, number of extraction failures due to environment reconstruction, and whether the registered timebox was exceeded. (v2 change: proposed R4)
+For each repo, log setup time and any extraction failures due to environment reconstruction. Don't formalize beyond that — the cost data is for "should we even attempt this language" decisions, not for hypothesis testing. (v2 change: locked R4, simplified)
 
 ## Pilot
 
