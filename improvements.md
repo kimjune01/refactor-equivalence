@@ -130,11 +130,22 @@ This is the same convergence mechanic as bug-hunt, applied at the spec stage.
 
 Justification for 500: pilot data shows opus and codex were byte-identical on PR 24437 (5 files, ~30 lines source) and diverged on 2-4 files in PRs above 600 LOC. Crossover sits around several hundred LOC; 500 puts us on the divergent side with margin, and aligns with the "down-induction implies small" argument from C3.
 
-### S5. Hunt-code is mostly redundant with prior gates *(observation, possible removal)*
+### S5. Hunt-code stays broad, iterates to zero-findings convergence *(no change — restate intent)*
 
-**Observed:** hunt-code returned "No findings" on most cli/cli expansion PRs. Defects that landed in C_llm were typically caught by either hunt-spec (most useful), the complexity gate (S1), or the build step (S2). Hunt-code-as-currently-prompted is doing redundant work.
+**Observed:** hunt-code returned "No findings" on most cli/cli expansion PRs. Defects that landed in C_llm were typically caught by either hunt-spec, the complexity gate (S1), or the build step (S2). It looked redundant.
 
-**Possible fix:** retain hunt-code only as a final pre-PR-creation safety net checking exported-symbol stability, gofmt/lint compliance, and out-of-scope edits — not behavior reverification (already done by S2). Slim its prompt.
+**Decision: keep it broad, run it iteratively (zero-findings termination).** Per the existing /bug-hunt skill: hunt iterates until it returns zero findings, then terminates. Most cases converge on the first pass — cost is bounded by convergence. LLM budget is cheap relative to missing a bug that ships into a real PR.
+
+In v1 the experiment ran hunt-code as a single pass. v2 follows the skill's default iterative contract:
+
+```
+loop:
+  hunt-code → produces findings
+  IF zero findings: terminate, ship C_llm
+  ELSE: implementer addresses → re-hunt
+```
+
+This keeps the adversarial sanity check alive AND makes it cheap in the common case (one pass, zero findings, done).
 
 ### S6. Reviewer-in-the-loop after merge *(medium effort, high value — addresses primary outcome alignment)*
 
@@ -323,4 +334,4 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 **Q4 [LOCKED]: Parity null on P3** = prefer-C_llm rate ∈ [40%, 60%]. R1 covers both P2 and P3 with the dual-threshold framing.
 
-**Q5: Hunt-code's role after S1+S2.** Slim, drop, or keep broad?
+**Q5 [LOCKED]: Hunt-code stays broad, iterates to zero-findings convergence.** Per existing /bug-hunt skill default. Cheap in the common case (single pass, zero findings).
