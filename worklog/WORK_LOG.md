@@ -350,3 +350,26 @@ Key findings:
 No-op rate so far: 1/8 combined = 12.5%.
 
 Cross-repo pattern: gemini-cli 4/5 prefer C_llm + 1/5 past + 1/5 wrong; cli/cli 2/3 prefer C_llm + 0/3 past + 2/3 wrong. Wrong-direction rate jumps from 20% to 67% going from TS to Go (small n, noisy). Combined wrong rate 3/8 = 37.5% approaching parity-null upper bound. Secondary-repo expansion trigger not met (wrong ≥ 2/3 was the trigger, but 2/3 of a 3-PR batch is 67% which DOES hit the trigger under pilot decision 6 — should expand cli/cli to 10 PRs before interpreting).
+
+### 02:30 — cli/cli expanded to 10 per pilot decision #6
+
+Full cli/cli: 9 PRs eligible (4 exclusions from a 13-PR pick list), P3 7/9 = 78%, traj 1 past / 4 short / 2 wrong / 2 no-op. Summary in samples/dev/cli-expansion-results.md. Pipeline failure modes documented: reconcile-failure-to-reject, stale cross-package test fixtures, build-fail at C_final from squash-merge, C_test==C_final.
+
+### 03:45 — fastapi secondary 3-PR: 1 excluded, 1 no-op, 1 wrong
+
+Python tooling scaffolded: measure_complexity_py.sh (radon + cognitive_complexity), find_c_test_py.sh (overlay with untracked cleanup). Venv setup cost ~90min iterating on missing deps (pyjwt, pwdlib, orjson, typer, starlette, uvicorn, fastapi[standard], pytest plugins).
+
+Results:
+- 14978 EXCLUDED: C_test == C_final
+- 14962 NO-OP: volley produced *preservation* claims instead of *refactoring* claims; opus+codex both made 0 changes
+- 15022 WRONG: codex's refactor increased scalar complexity +0.06 over C_test. Clean slop-slope scalar datum.
+
+Observed new failure mode — "descriptive-vs-prescriptive volley": codex's sharpened claims described "what the diff does" instead of "how to simplify the diff further." Resulting implementations verify existing state rather than modifying it. Recommend v2 prompt change: phrase claims as verbs ("simplify X"), not preservations ("preserve behavior of X").
+
+### 04:00 — Cross-repo summary committed
+
+Consolidated pilot findings across gemini-cli (TS, 5 PRs), cli/cli (Go, 9 PRs), fastapi (Python, 2 eligible). Combined: n=16 eligible, 11 active trials. P3 79% (on repos where measured). P2 trajectory: 12.5% past, 43.75% short, 25% wrong. Under retro R8 parity envelope: past UNDER parity (LLM underperforms reviewer on simplification beyond C_final), short IN parity (roughly equivalent to reviewer), wrong AT parity upper bound.
+
+Secondary repos still pending: ruff (Rust, not attempted — cargo toolchain cost), django (Python, similar expected setup cost to fastapi). Follow-up can add them with 3-PR batches.
+
+Full summary: samples/dev/cross-repo-summary.md.
