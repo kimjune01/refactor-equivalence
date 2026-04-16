@@ -268,6 +268,26 @@ P3 evaluation (forced choice):
 - Trivial no-op: scored as "tied" (50/50 rather than auto-prefer-C_test)
 - Out-of-scope no-op: revert the out-of-scope edits, keep in-scope ones, classify by what remains
 
+### R5. Survivorship bias must be acknowledged *(tiny effort, integrity)*
+
+**Hidden assumption (uncorrected in v1):** the candidate pool is restricted to *merged* PRs. PRs that died in review — closed without merge, abandoned by the contributor, rejected outright, or stuck in CHANGES_REQUESTED forever — never enter the pool. So:
+
+- `C_final` is "what a contributor + reviewer pair were able to converge on," not "what reviewers would accept from any starting point."
+- The trajectory comparison `past / short / wrong` is *relative to a survivor*. PRs whose drafts were so far off that reviewers rejected them outright are filtered out — exactly the wild slop-slope cases the experiment most wants to see in nature.
+- Reviewer-additive bias (the R3 reframe in retro) is measured only on PRs whose contributors *could absorb* the additions. Contributors who pushed back too hard or gave up are absent from the data.
+- "Merge-readiness" in our P3 question means "merged-form-readiness from a draft that already survived," not "merge-readiness for any plausible draft."
+
+**Fix in v2 prereg:** add this explicitly to Threats to Validity. Phrase the estimand carefully:
+
+> The estimand is the effect of a forge-wrapped LLM refactoring pass on **drafts of merged brownfield PRs** — i.e., on the population of pre-review states that ultimately produced an accepted version. Drafts that were rejected without merging are not in scope. This is a survivorship-filtered population: contributors who could not converge with reviewers, or whose drafts reviewers found unsalvageable, do not contribute data.
+
+**Optional v2 design extension (not required to ship):** add a comparison arm sampling *closed-without-merge* PRs from the same period. Run forge against their `C_test` candidate states and compare:
+- Does forge produce test-passing C_llm at similar rates on rejected drafts?
+- When forge succeeds on a rejected draft, would reviewers prefer the C_llm over the C_test (despite reviewers having rejected the original)?
+- Does the LLM's refactor land in a more reviewer-acceptable shape than what the contributor produced?
+
+This would be a separate mini-study, expensive (rejected PRs often have C_test reconstruction issues since they never merged), but informative about whether forge can rescue PRs that humans gave up on. Worth considering as a v2.5 follow-up, not blocking the main v2 prereg.
+
 ### R4. Per-language scaffolding cost is part of registration *(tiny effort, sets expectations)*
 
 **Problem observed:** Python (fastapi) cost ~90 minutes of dep iteration before tests would run. This was discovered during extraction, not budgeted upfront.
