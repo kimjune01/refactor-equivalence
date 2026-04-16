@@ -1,0 +1,831 @@
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -6,6 +6,7 @@
+ 	"fmt"
+ 	"net/http"
+ 	"net/url"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+@@ -317,9 +318,25 @@
+ }
+ 
+ func (r RequestedReviewer) LoginOrSlug() string {
++	if r.TypeName == teamTypeName {
++		return fmt.Sprintf("%s/%s", r.Organization.Login, r.Slug)
++	}
++	return r.Login
++}
++
++// DisplayName returns a user-friendly name for the reviewer.
++// For Copilot bot, returns "Copilot (AI)". For teams, returns "org/slug".
++// For users, returns "login (Name)" if name is available, otherwise just login.
++func (r RequestedReviewer) DisplayName() string {
+ 	if r.TypeName == teamTypeName {
+ 		return fmt.Sprintf("%s/%s", r.Organization.Login, r.Slug)
+ 	}
++	if r.TypeName == "Bot" && r.Login == CopilotReviewerLogin {
++		return "Copilot (AI)"
++	}
++	if r.Name != "" {
++		return fmt.Sprintf("%s (%s)", r.Login, r.Name)
++	}
+ 	return r.Login
+ }
+ 
+@@ -333,6 +350,15 @@
+ 	return logins
+ }
+ 
++// DisplayNames returns user-friendly display names for all requested reviewers.
++func (r ReviewRequests) DisplayNames() []string {
++	names := make([]string, len(r.Nodes))
++	for i, r := range r.Nodes {
++		names[i] = r.RequestedReviewer.DisplayName()
++	}
++	return names
++}
++
+ func (pr PullRequest) HeadLabel() string {
+ 	if pr.IsCrossRepository {
+ 		return fmt.Sprintf("%s:%s", pr.HeadRepositoryOwner.Login, pr.HeadRefName)
+@@ -632,6 +658,7 @@
+ }
+ 
+ // AddPullRequestReviews adds the given user and team reviewers to a pull request using the REST API.
++// Team identifiers can be in "org/slug" format.
+ func AddPullRequestReviews(client *Client, repo ghrepo.Interface, prNumber int, users, teams []string) error {
+ 	if len(users) == 0 && len(teams) == 0 {
+ 		return nil
+@@ -641,8 +668,15 @@
+ 	if users == nil {
+ 		users = []string{}
+ 	}
+-	if teams == nil {
+-		teams = []string{}
++
++	// Extract just the slug from org/slug format
++	teamSlugs := make([]string, 0, len(teams))
++	for _, t := range teams {
++		if idx := strings.Index(t, "/"); idx >= 0 {
++			teamSlugs = append(teamSlugs, t[idx+1:])
++		} else if t != "" {
++			teamSlugs = append(teamSlugs, t)
++		}
+ 	}
+ 
+ 	path := fmt.Sprintf(
+@@ -656,7 +690,7 @@
+ 		TeamReviewers []string `json:"team_reviewers"`
+ 	}{
+ 		Reviewers:     users,
+-		TeamReviewers: teams,
++		TeamReviewers: teamSlugs,
+ 	}
+ 	buf := &bytes.Buffer{}
+ 	if err := json.NewEncoder(buf).Encode(body); err != nil {
+@@ -667,6 +701,7 @@
+ }
+ 
+ // RemovePullRequestReviews removes requested reviewers from a pull request using the REST API.
++// Team identifiers can be in "org/slug" format.
+ func RemovePullRequestReviews(client *Client, repo ghrepo.Interface, prNumber int, users, teams []string) error {
+ 	if len(users) == 0 && len(teams) == 0 {
+ 		return nil
+@@ -676,8 +711,15 @@
+ 	if users == nil {
+ 		users = []string{}
+ 	}
+-	if teams == nil {
+-		teams = []string{}
++
++	// Extract just the slug from org/slug format
++	teamSlugs := make([]string, 0, len(teams))
++	for _, t := range teams {
++		if idx := strings.Index(t, "/"); idx >= 0 {
++			teamSlugs = append(teamSlugs, t[idx+1:])
++		} else if t != "" {
++			teamSlugs = append(teamSlugs, t)
++		}
+ 	}
+ 
+ 	path := fmt.Sprintf(
+@@ -691,7 +733,7 @@
+ 		TeamReviewers []string `json:"team_reviewers"`
+ 	}{
+ 		Reviewers:     users,
+-		TeamReviewers: teams,
++		TeamReviewers: teamSlugs,
+ 	}
+ 	buf := &bytes.Buffer{}
+ 	if err := json.NewEncoder(buf).Encode(body); err != nil {
+@@ -699,6 +741,64 @@
+ 	}
+ 	// The endpoint responds with the updated pull request object; we don't need it here.
+ 	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
++}
++
++// RequestReviewsByLogin sets requested reviewers on a pull request using the GraphQL mutation.
++// This mutation replaces existing reviewers with the provided set unless union is true.
++// Only available on github.com, not GHES.
++// Bot logins should include the [bot] suffix (e.g., "copilot-pull-request-reviewer[bot]").
++// Team slugs should be in the format "org/team-slug".
++// When union is false (replace mode), passing empty slices will remove all reviewers.
++func RequestReviewsByLogin(client *Client, repo ghrepo.Interface, prID string, userLogins, botLogins, teamSlugs []string, union bool) error {
++	// In union mode (additive), nothing to do if all lists are empty.
++	// In replace mode, we may still need to call the mutation to clear reviewers.
++	if union && len(userLogins) == 0 && len(botLogins) == 0 && len(teamSlugs) == 0 {
++		return nil
++	}
++
++	var mutation struct {
++		RequestReviewsByLogin struct {
++			ClientMutationID string
++		} `graphql:"requestReviewsByLogin(input: $input)"`
++	}
++
++	type RequestReviewsByLoginInput struct {
++		PullRequestID githubv4.ID        `json:"pullRequestId"`
++		UserLogins    *[]githubv4.String `json:"userLogins,omitempty"`
++		BotLogins     *[]githubv4.String `json:"botLogins,omitempty"`
++		TeamSlugs     *[]githubv4.String `json:"teamSlugs,omitempty"`
++		Union         githubv4.Boolean   `json:"union"`
++	}
++
++	input := RequestReviewsByLoginInput{
++		PullRequestID: githubv4.ID(prID),
++		Union:         githubv4.Boolean(union),
++	}
++
++	userLoginValues := make([]githubv4.String, len(userLogins))
++	for i, l := range userLogins {
++		userLoginValues[i] = githubv4.String(l)
++	}
++	input.UserLogins = &userLoginValues
++
++	botLoginValues := make([]githubv4.String, len(botLogins))
++	for i, l := range botLogins {
++		// Bot logins require the [bot] suffix for the mutation
++		botLoginValues[i] = githubv4.String(l + "[bot]")
++	}
++	input.BotLogins = &botLoginValues
++
++	teamSlugValues := make([]githubv4.String, len(teamSlugs))
++	for i, s := range teamSlugs {
++		teamSlugValues[i] = githubv4.String(s)
++	}
++	input.TeamSlugs = &teamSlugValues
++
++	variables := map[string]interface{}{
++		"input": input,
++	}
++
++	return client.Mutate(repo.RepoHost(), "RequestReviewsByLogin", &mutation, variables)
+ }
+ 
+ // SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
+@@ -791,8 +891,224 @@
+ 	}
+ 
+ 	return actors, availableAssigneesCount, nil
++}
++
++// ReviewerCandidate represents a potential reviewer for a pull request.
++// This can be a User, Bot, or Team.
++type ReviewerCandidate interface {
++	DisplayName() string
++	Login() string
++
++	sealedReviewerCandidate()
++}
++
++// ReviewerUser is a user who can review a pull request.
++type ReviewerUser struct {
++	AssignableUser
++}
++
++func NewReviewerUser(login, name string) ReviewerUser {
++	return ReviewerUser{
++		AssignableUser: NewAssignableUser("", login, name),
++	}
++}
++
++func (r ReviewerUser) sealedReviewerCandidate() {}
++
++// ReviewerBot is a bot who can review a pull request.
++type ReviewerBot struct {
++	AssignableBot
++}
++
++func NewReviewerBot(login string) ReviewerBot {
++	return ReviewerBot{
++		AssignableBot: NewAssignableBot("", login),
++	}
++}
++
++func (b ReviewerBot) DisplayName() string {
++	if b.login == CopilotReviewerLogin {
++		return fmt.Sprintf("%s (AI)", CopilotActorName)
++	}
++	return b.Login()
++}
++
++func (r ReviewerBot) sealedReviewerCandidate() {}
++
++// ReviewerTeam is a team that can review a pull request.
++type ReviewerTeam struct {
++	org      string
++	teamSlug string
++}
++
++// NewReviewerTeam creates a new ReviewerTeam.
++func NewReviewerTeam(orgName, teamSlug string) ReviewerTeam {
++	return ReviewerTeam{org: orgName, teamSlug: teamSlug}
+ }
+ 
++func (r ReviewerTeam) DisplayName() string {
++	return fmt.Sprintf("%s/%s", r.org, r.teamSlug)
++}
++
++func (r ReviewerTeam) Login() string {
++	return fmt.Sprintf("%s/%s", r.org, r.teamSlug)
++}
++
++func (r ReviewerTeam) Slug() string {
++	return r.teamSlug
++}
++
++func (r ReviewerTeam) sealedReviewerCandidate() {}
++
++// SuggestedReviewerActors fetches suggested reviewers for a pull request.
++// It combines results from three sources using a cascading quota system:
++// - suggestedReviewerActors - suggested based on PR activity (base quota: 5)
++// - repository collaborators - all collaborators (base quota: 5 + unfilled from suggestions)
++// - organization teams - all teams for org repos (base quota: 5 + unfilled from collaborators)
++//
++// This ensures we show up to 15 total candidates, with each source filling any
++// unfilled quota from the previous source. Results are deduplicated.
++// Returns the candidates, a MoreResults count, and an error.
++func SuggestedReviewerActors(client *Client, repo ghrepo.Interface, prID string, query string) ([]ReviewerCandidate, int, error) {
++	// Fetch 10 from each source to allow cascading quota to fill from available results.
++	// Use a single query that includes organization.teams - if the owner is not an org,
++	// we'll get a "Could not resolve to an Organization" error which we handle gracefully.
++	// We also fetch unfiltered total counts via aliases for the "X more" display.
++	type responseData struct {
++		Node struct {
++			PullRequest struct {
++				SuggestedActors struct {
++					Nodes []struct {
++						IsAuthor    bool
++						IsCommenter bool
++						Reviewer    struct {
++							TypeName string `graphql:"__typename"`
++							User     struct {
++								Login string
++								Name  string
++							} `graphql:"... on User"`
++							Bot struct {
++								Login string
++							} `graphql:"... on Bot"`
++						}
++					}
++				} `graphql:"suggestedReviewerActors(first: 10, query: $query)"`
++			} `graphql:"... on PullRequest"`
++		} `graphql:"node(id: $id)"`
++		Repository struct {
++			Collaborators struct {
++				Nodes []struct {
++					Login string
++					Name  string
++				}
++			} `graphql:"collaborators(first: 10, query: $query)"`
++			CollaboratorsTotalCount struct {
++				TotalCount int
++			} `graphql:"collaboratorsTotalCount: collaborators(first: 0)"`
++		} `graphql:"repository(owner: $owner, name: $name)"`
++		Organization struct {
++			Teams struct {
++				Nodes []struct {
++					Slug string
++				}
++			} `graphql:"teams(first: 10, query: $query)"`
++			TeamsTotalCount struct {
++				TotalCount int
++			} `graphql:"teamsTotalCount: teams(first: 0)"`
++		} `graphql:"organization(login: $owner)"`
++	}
++
++	variables := map[string]interface{}{
++		"id":    githubv4.ID(prID),
++		"query": githubv4.String(query),
++		"owner": githubv4.String(repo.RepoOwner()),
++		"name":  githubv4.String(repo.RepoName()),
++	}
++
++	var result responseData
++	err := client.Query(repo.RepoHost(), "SuggestedReviewerActors", &result, variables)
++	// Handle the case where the owner is not an organization - the query still returns
++	// partial data (repository, node), so we can continue processing.
++	if err != nil && !strings.Contains(err.Error(), errorResolvingOrganization) {
++		return nil, 0, err
++	}
++
++	// Build candidates using cascading quota logic:
++	// Each source has a base quota of 5, plus any unfilled quota from previous sources.
++	// This ensures we show up to 15 total candidates, filling gaps when earlier sources have fewer.
++	seen := make(map[string]bool)
++	var candidates []ReviewerCandidate
++	const baseQuota = 5
++
++	// Suggested reviewers (excluding author)
++	suggestionsAdded := 0
++	for _, n := range result.Node.PullRequest.SuggestedActors.Nodes {
++		if suggestionsAdded >= baseQuota {
++			break
++		}
++		if n.IsAuthor {
++			continue
++		}
++		var candidate ReviewerCandidate
++		var login string
++		if n.Reviewer.TypeName == "User" && n.Reviewer.User.Login != "" {
++			login = n.Reviewer.User.Login
++			candidate = NewReviewerUser(login, n.Reviewer.User.Name)
++		} else if n.Reviewer.TypeName == "Bot" && n.Reviewer.Bot.Login != "" {
++			login = n.Reviewer.Bot.Login
++			candidate = NewReviewerBot(login)
++		} else {
++			continue
++		}
++		if !seen[login] {
++			seen[login] = true
++			candidates = append(candidates, candidate)
++			suggestionsAdded++
++		}
++	}
++
++	// Collaborators: quota = base + unfilled from suggestions
++	collaboratorsQuota := baseQuota + (baseQuota - suggestionsAdded)
++	collaboratorsAdded := 0
++	for _, c := range result.Repository.Collaborators.Nodes {
++		if collaboratorsAdded >= collaboratorsQuota {
++			break
++		}
++		if c.Login == "" {
++			continue
++		}
++		if !seen[c.Login] {
++			seen[c.Login] = true
++			candidates = append(candidates, NewReviewerUser(c.Login, c.Name))
++			collaboratorsAdded++
++		}
++	}
++
++	// Teams: quota = base + unfilled from collaborators
++	teamsQuota := baseQuota + (collaboratorsQuota - collaboratorsAdded)
++	teamsAdded := 0
++	ownerName := repo.RepoOwner()
++	for _, t := range result.Organization.Teams.Nodes {
++		if teamsAdded >= teamsQuota {
++			break
++		}
++		if t.Slug == "" {
++			continue
++		}
++		teamLogin := fmt.Sprintf("%s/%s", ownerName, t.Slug)
++		if !seen[teamLogin] {
++			seen[teamLogin] = true
++			candidates = append(candidates, NewReviewerTeam(ownerName, t.Slug))
++			teamsAdded++
++		}
++	}
++
++	// MoreResults uses unfiltered total counts (teams will be 0 for personal repos)
++	moreResults := result.Repository.CollaboratorsTotalCount.TotalCount + result.Organization.TeamsTotalCount.TotalCount
++
++	return candidates, moreResults, nil
++}
++
+ func UpdatePullRequestBranch(client *Client, repo ghrepo.Interface, params githubv4.UpdatePullRequestBranchInput) error {
+ 	var mutation struct {
+ 		UpdatePullRequestBranch struct {
+--- a/api/query_builder.go
++++ b/api/query_builder.go
+@@ -94,12 +94,16 @@
+ 	}
+ `)
+ 
++// prReviewRequests includes ...on Bot to support Copilot as a reviewer on github.com.
++// On GHES, Bot is not part of the RequestedReviewer union, but the fragment is
++// silently ignored (verified on GHES 3.19).
+ var prReviewRequests = shortenQuery(`
+ 	reviewRequests(first: 100) {
+ 		nodes {
+ 			requestedReviewer {
+ 				__typename,
+-				...on User{login},
++				...on User{login,name},
++				...on Bot{login},
+ 				...on Team{
+ 					organization{login}
+ 					name,
+--- a/api/queries_repo.go
++++ b/api/queries_repo.go
+@@ -1082,8 +1082,10 @@
+ 
+ // Expected login for Copilot when retrieved as an Actor
+ // This is returned from assignable actors and issue/pr assigned actors.
+-// We use this to check if the actor is Copilot.
+-const CopilotActorLogin = "copilot-swe-agent"
++const CopilotAssigneeLogin = "copilot-swe-agent"
++
++// Expected login for Copilot when retrieved as a Pull Request Reviewer.
++const CopilotReviewerLogin = "copilot-pull-request-reviewer"
+ const CopilotActorName = "Copilot"
+ 
+ type AssignableActor interface {
+@@ -1144,7 +1146,7 @@
+ }
+ 
+ func (b AssignableBot) DisplayName() string {
+-	if b.login == CopilotActorLogin {
++	if b.login == CopilotAssigneeLogin {
+ 		return fmt.Sprintf("%s (AI)", CopilotActorName)
+ 	}
+ 	return b.Login()
+--- a/pkg/cmd/pr/shared/params.go
++++ b/pkg/cmd/pr/shared/params.go
+@@ -295,20 +295,33 @@
+ // Login is generally needed for API calls; name is used when launching web browser.
+ type CopilotReplacer struct {
+ 	returnLogin bool
++	// copilotLogin is the login to use when replacing @copilot.
++	// Different Copilot features use different bot logins.
++	copilotLogin string
+ }
+ 
++// NewCopilotReplacer creates a replacer for assignee @copilot references.
+ func NewCopilotReplacer(returnLogin bool) *CopilotReplacer {
+ 	return &CopilotReplacer{
+-		returnLogin: returnLogin,
++		returnLogin:  returnLogin,
++		copilotLogin: api.CopilotAssigneeLogin,
+ 	}
+ }
+ 
++// NewCopilotReviewerReplacer creates a replacer for reviewer @copilot references.
++func NewCopilotReviewerReplacer() *CopilotReplacer {
++	return &CopilotReplacer{
++		returnLogin:  true,
++		copilotLogin: api.CopilotReviewerLogin,
++	}
++}
++
+ func (r *CopilotReplacer) replace(handle string) string {
+ 	if !strings.EqualFold(handle, "@copilot") {
+ 		return handle
+ 	}
+ 	if r.returnLogin {
+-		return api.CopilotActorLogin
++		return r.copilotLogin
+ 	}
+ 	return api.CopilotActorName
+ }
+--- a/pkg/cmd/pr/shared/editable.go
++++ b/pkg/cmd/pr/shared/editable.go
+@@ -14,8 +14,8 @@
+ 	Title              EditableString
+ 	Body               EditableString
+ 	Base               EditableString
+-	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
++	Reviewers          EditableReviewers
++	ReviewerSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+@@ -49,6 +49,13 @@
+ 	DefaultLogins  []string // For disambiguating actors from display names
+ }
+ 
++// EditableReviewers is a special case of EditableSlice.
++// It tracks both display names (for UI) and logins (for API mutations).
++type EditableReviewers struct {
++	EditableSlice
++	DefaultLogins []string // Logins for computing add/remove sets
++}
++
+ // ProjectsV2 mutations require a mapping of an item ID to a project ID.
+ // Keep that map along with standard EditableSlice data.
+ type EditableProjects struct {
+@@ -268,6 +275,13 @@
+ 	}
+ }
+ 
++func (er *EditableReviewers) clone() EditableReviewers {
++	return EditableReviewers{
++		EditableSlice: er.EditableSlice.clone(),
++		DefaultLogins: er.DefaultLogins,
++	}
++}
++
+ func (ep *EditableProjects) clone() EditableProjects {
+ 	return EditableProjects{
+ 		EditableSlice: ep.EditableSlice.clone(),
+@@ -299,10 +313,24 @@
+ 		}
+ 	}
+ 	if editable.Reviewers.Edited {
+-		editable.Reviewers.Value, err = multiSelectSurvey(
+-			p, "Reviewers", editable.Reviewers.Default, editable.Reviewers.Options)
+-		if err != nil {
+-			return err
++		if editable.ReviewerSearchFunc != nil {
++			editable.Reviewers.Options = []string{}
++			editable.Reviewers.Value, err = p.MultiSelectWithSearch(
++				"Reviewers",
++				"Search reviewers",
++				editable.Reviewers.Default,
++				// No persistent options - teams are included in search results
++				[]string{},
++				editable.ReviewerSearchFunc)
++			if err != nil {
++				return err
++			}
++		} else {
++			editable.Reviewers.Value, err = multiSelectSurvey(
++				p, "Reviewers", editable.Reviewers.Default, editable.Reviewers.Options)
++			if err != nil {
++				return err
++			}
+ 		}
+ 	}
+ 	if editable.Assignees.Edited {
+@@ -415,16 +443,24 @@
+ }
+ 
+ func FetchOptions(client *api.Client, repo ghrepo.Interface, editable *Editable, projectV1Support gh.ProjectsV1Support) error {
+-	// Determine whether to fetch organization teams.
++	// Determine whether to fetch organization teams and reviewers.
+ 	// Interactive reviewer editing (Edited true, but no Add/Remove slices) still needs
+-	// team data for selection UI. For non-interactive flows, we never need to fetch teams.
++	// team data for selection UI. For non-interactive flows, we never need to fetch teams
++	// as the REST API accepts team slugs directly.
++	// If we have a search func, we don't need to fetch teams/reviewers since we
++	// assume that will be done dynamically in the prompting flow.
+ 	teamReviewers := false
++	fetchReviewers := false
+ 	if editable.Reviewers.Edited {
+ 		// This is likely an interactive flow since edited is set but no mutations to
+-		// Add/Remove slices, so we need to load the teams.
+-		if len(editable.Reviewers.Add) == 0 && len(editable.Reviewers.Remove) == 0 {
++		// Add/Remove slices, so we need to load the teams and reviewers.
++		// However, if we have a search func, skip fetching as it will be done dynamically.
++		if len(editable.Reviewers.Add) == 0 && len(editable.Reviewers.Remove) == 0 && editable.ReviewerSearchFunc == nil {
+ 			teamReviewers = true
++			fetchReviewers = true
+ 		}
++		// Note: Non-interactive flows (with Add/Remove) don't need to fetch reviewers/teams
++		// because the REST API accepts logins and team slugs directly.
+ 	}
+ 
+ 	fetchAssignees := false
+@@ -444,7 +480,7 @@
+ 	}
+ 
+ 	input := api.RepoMetadataInput{
+-		Reviewers:      editable.Reviewers.Edited,
++		Reviewers:      fetchReviewers,
+ 		TeamReviewers:  teamReviewers,
+ 		Assignees:      fetchAssignees,
+ 		ActorAssignees: editable.Assignees.ActorAssignees,
+--- a/pkg/cmd/pr/edit/edit.go
++++ b/pkg/cmd/pr/edit/edit.go
+@@ -69,13 +69,15 @@
+ 			- %[1]s@me%[1]s: assign or unassign yourself
+ 			- %[1]s@copilot%[1]s: assign or unassign Copilot (not supported on GitHub Enterprise Server)
+ 
+-			The %[1]s--add-reviewer%[1]s and %[1]s--remove-reviewer%[1]s flags do not support
+-			these special values.
++			The %[1]s--add-reviewer%[1]s and %[1]s--remove-reviewer%[1]s flags support
++			the following special value:
++			- %[1]s@copilot%[1]s: request or remove review from Copilot (not supported on GitHub Enterprise Server)
+ 		`, "`"),
+ 		Example: heredoc.Doc(`
+ 			$ gh pr edit 23 --title "I found a bug" --body "Nothing works"
+ 			$ gh pr edit 23 --add-label "bug,help wanted" --remove-label "core"
+ 			$ gh pr edit 23 --add-reviewer monalisa,hubot  --remove-reviewer myorg/team-name
++			$ gh pr edit 23 --add-reviewer "@copilot"
+ 			$ gh pr edit 23 --add-assignee "@me" --remove-assignee monalisa,hubot
+ 			$ gh pr edit 23 --add-assignee "@copilot"
+ 			$ gh pr edit 23 --add-project "Roadmap" --remove-project v1,v2
+@@ -188,8 +190,8 @@
+ 	cmd.Flags().StringVarP(&opts.Editable.Body.Value, "body", "b", "", "Set the new body.")
+ 	cmd.Flags().StringVarP(&bodyFile, "body-file", "F", "", "Read body text from `file` (use \"-\" to read from standard input)")
+ 	cmd.Flags().StringVarP(&opts.Editable.Base.Value, "base", "B", "", "Change the base `branch` for this pull request")
+-	cmd.Flags().StringSliceVar(&opts.Editable.Reviewers.Add, "add-reviewer", nil, "Add reviewers by their `login`.")
+-	cmd.Flags().StringSliceVar(&opts.Editable.Reviewers.Remove, "remove-reviewer", nil, "Remove reviewers by their `login`.")
++	cmd.Flags().StringSliceVar(&opts.Editable.Reviewers.Add, "add-reviewer", nil, "Add reviewers by their `login`. Use \"@copilot\" to request review from Copilot.")
++	cmd.Flags().StringSliceVar(&opts.Editable.Reviewers.Remove, "remove-reviewer", nil, "Remove reviewers by their `login`. Use \"@copilot\" to remove review request from Copilot.")
+ 	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Add, "add-assignee", nil, "Add assigned users by their `login`. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.")
+ 	cmd.Flags().StringSliceVar(&opts.Editable.Assignees.Remove, "remove-assignee", nil, "Remove assigned users by their `login`. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.")
+ 	cmd.Flags().StringSliceVar(&opts.Editable.Labels.Add, "add-label", nil, "Add labels by `name`")
+@@ -265,7 +267,8 @@
+ 	editable.Title.Default = pr.Title
+ 	editable.Body.Default = pr.Body
+ 	editable.Base.Default = pr.BaseRefName
+-	editable.Reviewers.Default = pr.ReviewRequests.Logins()
++	editable.Reviewers.Default = pr.ReviewRequests.DisplayNames()
++	editable.Reviewers.DefaultLogins = pr.ReviewRequests.Logins()
+ 	if issueFeatures.ActorIsAssignable {
+ 		editable.Assignees.ActorAssignees = true
+ 		editable.Assignees.Default = pr.AssignedActors.DisplayNames()
+@@ -294,9 +297,10 @@
+ 	apiClient := api.NewClientFromHTTP(httpClient)
+ 
+ 	// Wire up search functions for assignees and reviewers.
+-	// TODO KW: Wire up reviewer search func if/when it exists.
++	// Only enabled on github.com.
+ 	if issueFeatures.ActorIsAssignable {
+ 		editable.AssigneeSearchFunc = assigneeSearchFunc(apiClient, repo, &editable, pr.ID)
++		editable.ReviewerSearchFunc = reviewerSearchFunc(apiClient, repo, &editable, pr.ID)
+ 	}
+ 
+ 	opts.IO.StartProgressIndicator()
+@@ -383,6 +387,51 @@
+ 			Keys:        logins,
+ 			Labels:      displayNames,
+ 			MoreResults: availableAssigneesCount,
++			Err:         nil,
++		}
++	}
++	return searchFunc
++}
++
++// reviewerSearchFunc is intended to be an arg for MultiSelectWithSearch
++// to return potential reviewer candidates (users, bots, and teams).
++// It also updates the editable's metadata for later ID resolution.
++func reviewerSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, prID string) func(string) prompter.MultiSelectSearchResult {
++	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++		candidates, moreResults, err := api.SuggestedReviewerActors(
++			apiClient,
++			repo,
++			prID,
++			input)
++		if err != nil {
++			return prompter.MultiSelectSearchResult{
++				Keys:        nil,
++				Labels:      nil,
++				MoreResults: 0,
++				Err:         err,
++			}
++		}
++
++		keys := make([]string, 0, len(candidates))
++		labels := make([]string, 0, len(candidates))
++
++		for _, c := range candidates {
++			keys = append(keys, c.Login())
++			labels = append(labels, c.DisplayName())
++
++			// Update the teams metadata in the editable struct
++			// so that updating the PR later can resolve the team ID.
++			if team, ok := c.(api.ReviewerTeam); ok {
++				editable.Metadata.Teams = append(editable.Metadata.Teams, api.OrgTeam{
++					ID:   "", // ID not needed for REST API reviewer mutations
++					Slug: team.Slug(),
++				})
++			}
++		}
++		return prompter.MultiSelectSearchResult{
++			Keys:        keys,
++			Labels:      labels,
++			MoreResults: moreResults,
+ 			Err:         nil,
+ 		}
+ 	}
+@@ -396,44 +445,82 @@
+ 	})
+ 	if editable.Reviewers.Edited {
+ 		wg.Go(func() error {
+-			return updatePullRequestReviews(httpClient, repo, number, editable)
++			return updatePullRequestReviews(httpClient, repo, id, number, editable)
+ 		})
+ 	}
+ 	return wg.Wait()
+ }
+ 
+-func updatePullRequestReviews(httpClient *http.Client, repo ghrepo.Interface, number int, editable shared.Editable) error {
++func updatePullRequestReviews(httpClient *http.Client, repo ghrepo.Interface, prID string, number int, editable shared.Editable) error {
+ 	if !editable.Reviewers.Edited {
+ 		return nil
+ 	}
+ 
++	client := api.NewClientFromHTTP(httpClient)
++
+ 	// Rebuild the Value slice from non-interactive flag input.
+ 	if len(editable.Reviewers.Add) != 0 || len(editable.Reviewers.Remove) != 0 {
+-		s := set.NewStringSet()
+-		s.AddValues(editable.Reviewers.Add)
+-		s.AddValues(editable.Reviewers.Default)
+-		s.RemoveValues(editable.Reviewers.Remove)
++		add := editable.Reviewers.Add
++		remove := editable.Reviewers.Remove
++
++		// Replace @copilot with the Copilot reviewer login (only on github.com).
++		// Also use DefaultLogins (not Default display names) for computing the set.
++		var defaultLogins []string
++		if editable.Assignees.ActorAssignees {
++			copilotReplacer := shared.NewCopilotReviewerReplacer()
++			add = copilotReplacer.ReplaceSlice(add)
++			remove = copilotReplacer.ReplaceSlice(remove)
++			defaultLogins = editable.Reviewers.DefaultLogins
++		} else {
++			// On GHES, Default already contains logins (no display name distinction)
++			defaultLogins = editable.Reviewers.Default
++		}
++
++		s := set.NewStringSet()
++		s.AddValues(add)
++		s.AddValues(defaultLogins)
++		s.RemoveValues(remove)
+ 		editable.Reviewers.Value = s.ToSlice()
+ 	}
+ 
+-	addUsers, addTeams := partitionUsersAndTeams(editable.Reviewers.Value)
++	// On github.com, use the new GraphQL mutation which supports bots.
++	// On GHES, fall back to REST API.
++	if editable.Assignees.ActorAssignees {
++		return updatePullRequestReviewsGraphQL(client, repo, prID, editable)
++	}
++	return updatePullRequestReviewsREST(client, repo, number, editable)
++}
+ 
+-	// Reviewers in Default but not in the Value have been removed interactively.
++// updatePullRequestReviewsGraphQL uses the RequestReviewsByLogin mutation.
++// This mutation replaces the entire reviewer set (union: false).
++func updatePullRequestReviewsGraphQL(client *api.Client, repo ghrepo.Interface, prID string, editable shared.Editable) error {
++	users, bots, teams := partitionReviewersByType(editable.Reviewers.Value)
++	return api.RequestReviewsByLogin(client, repo, prID, users, bots, teams, false)
++}
++
++// updatePullRequestReviewsREST uses the REST API to add/remove reviewers.
++// This is the legacy path for GHES compatibility.
++func updatePullRequestReviewsREST(client *api.Client, repo ghrepo.Interface, number int, editable shared.Editable) error {
++	addUsers, addBots, addTeams := partitionReviewersByType(editable.Reviewers.Value)
++	// REST API doesn't distinguish bots from users, so we need to combine them.
++	allAddUsers := append(addUsers, addBots...)
++
++	// Reviewers in Default but not in Value have been removed interactively.
+ 	var toRemove []string
+ 	for _, r := range editable.Reviewers.Default {
+ 		if !slices.Contains(editable.Reviewers.Value, r) {
+ 			toRemove = append(toRemove, r)
+ 		}
+ 	}
+-	removeUsers, removeTeams := partitionUsersAndTeams(toRemove)
++	removeUsers, removeBots, removeTeams := partitionReviewersByType(toRemove)
++	allRemoveUsers := append(removeUsers, removeBots...)
+ 
+-	client := api.NewClientFromHTTP(httpClient)
+ 	wg := errgroup.Group{}
+ 	wg.Go(func() error {
+-		return api.AddPullRequestReviews(client, repo, number, addUsers, addTeams)
++		return api.AddPullRequestReviews(client, repo, number, allAddUsers, addTeams)
+ 	})
+ 	wg.Go(func() error {
+-		return api.RemovePullRequestReviews(client, repo, number, removeUsers, removeTeams)
++		return api.RemovePullRequestReviews(client, repo, number, allRemoveUsers, removeTeams)
+ 	})
+ 	return wg.Wait()
+ }
+@@ -477,16 +564,20 @@
+ 	return cmdutil.DetermineEditor(e.config)
+ }
+ 
+-// partitionUsersAndTeams splits reviewer identifiers into user logins and team slugs.
+-// Team identifiers are in the form "org/slug"; only the slug portion is returned for teams.
+-func partitionUsersAndTeams(values []string) (users []string, teams []string) {
++// partitionReviewersByType splits reviewer identifiers into users, bots, and teams.
++// Team identifiers are in the form "org/slug" and are returned as-is.
++// Bot logins (currently only Copilot) are identified and returned separately.
++func partitionReviewersByType(values []string) (users []string, bots []string, teams []string) {
+ 	for _, v := range values {
++		if v == "" {
++			continue
++		}
+ 		if strings.ContainsRune(v, '/') {
+-			parts := strings.SplitN(v, "/", 2)
+-			if len(parts) == 2 && parts[1] != "" {
+-				teams = append(teams, parts[1])
+-			}
+-		} else if v != "" {
++			// Team: org/slug format, pass as-is
++			teams = append(teams, v)
++		} else if v == api.CopilotReviewerLogin {
++			bots = append(bots, v)
++		} else {
+ 			users = append(users, v)
+ 		}
+ 	}

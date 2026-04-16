@@ -298,3 +298,55 @@ Scalar/reviewer disagreement: scalar said past-or-boundary-past on 5/5; reviewer
 Wrong direction documented on PR 25101: gemini flagged C_llm's out-of-scope logic rewrite in `complete-task.ts` — a move reviewers had actively reverted in the original PR's C_final. The LLM pipeline repeated a mistake reviewers already pushed back on. P4 (some refactors make things worse) has its first clean datum.
 
 Full breakdown in `samples/dev/phase7-results.md`. Pilot is now information-complete on the registered outcomes; next is locking pilot decisions per prereg §Pilot Decisions.
+
+### 23:55 — Retro R8: parity null vs improvement threshold
+
+P2 was registered as an improvement threshold (past ≥ 50%) without a parity null. Under parity (LLM ≈ reviewer in taste), past would be ~30-40%, short ~40-50%, wrong ~10-20% just from symmetry around the median. Pilot observed 20/60/20 — inside the parity envelope but below its "past" lower bound. "Did P2 pass?" is ambiguous because we registered "beats" without specifying "matches." Filed as post-hoc analytical observation, not an amendment, to preserve prereg discipline. V2 design note: register both parity null and improvement threshold.
+
+### 00:10 — Pilot decisions locked (PILOT_DECISIONS.md)
+
+All 7 prereg-mandated pilot decisions locked: complexity tool config, review presentation format, reviewer population, C_random specifics, δ = 0.05, secondary expansion trigger, PR size bounds (clarified to measure at C_test). Blinding failure and P2 parity null flagged as v2 concerns, not blockers.
+
+Notable: PR size is now explicitly measured at C_test, not C_final, with an exclusion list (tests, docs, schemas, lockfiles, snapshots). This clarifies a latent ambiguity that let PR 24489 (3099 C_test LOC) pass a selection filter based on C_final LOC (1268). 24489 stays in the pilot analysis per trail-commitment but wouldn't be eligible under the corrected bound.
+
+Locked reviewer pool for test set: Gemini 3.1 Pro + Sonnet 4.5 + GPT-5. Gives 3 non-conflicted reviewers per PR even under the strict no-self-review rule.
+
+### 00:25 — Secondary repo choice: cli/cli (Go)
+
+Picked cli/cli over primary-depth test-set expansion. Justification: biggest expected-surprise candidate. Go is less represented in LLM training than TS/Python; `gofmt` normalizes surface style so LLM's typical "DRY this up" signatures are either inapplicable or immediately rejected by convention; no ternary / metaprogramming = less room for LLM-idiomatic consolidation; GitHub's own team has exacting review culture. If the slop-slope has language-specific limits, Go is where they'd show first.
+
+Scaffolding needed: go complexity tool (gocyclo + gocognit), Go-specific C_random transformation family, test command lock (`go test ./...` TBC), candidate pool extraction.
+
+### 00:45 — cli/cli pilot (3 PRs) scaffolding + forge pipeline
+
+Candidate selection: 12567 (1050 LOC, gh pr edit Copilot reviewer), 12695 (634 LOC, workflow run dispatch details), 12846 (302 LOC, squash merge commit msg). 12846 excluded post-reconstruction: C_test == C_final, no post-tests-pass revision (inclusion condition 5 violated). Replaced with 12696 (779 LOC, project item-list --query flag). All C_test reconstructions passed.
+
+Go tooling: `scripts/measure_complexity_go.sh` wraps gocyclo + gocognit. `scripts/build_cleanroom_go.sh` does git archive + go mod download (shared module cache). Test command locked to `go test ./...`. Cleanroom takes ~20s with warm module cache.
+
+Forge pipeline ran parallel across 3 PRs: volley (8/5/8 claims), hunt-spec (real findings on all 3 including exact prediction of 12695's test failure), reconcile, blind-blind-merge (opus+codex each 8/4/8 claims applied), merge (2, 1, 2 files differ), verify.
+
+### 00:55 — cli/cli results: 1 clear past, 1 boundary, 1 no-op
+
+Verification:
+- **PR 12567**: tests pass. Hunt-code flagged blocker (CopilotActorLogin → CopilotAssigneeLogin rename broke public API — spec said to restore alias but implementation didn't). Test suite doesn't exercise this export; trial counts as in equivalence class.
+- **PR 12695**: **TESTS FAIL** → **no-op**. Exact prediction from hunt-spec: the `return_run_details: true` leaks into all dispatch requests, breaking TestRun (~8 subtests). Reconcile step failed to reject the problematic claim despite hunt-spec warning. Per prereg: C_llm = C_test for metrics, counts as wrong-direction in P2 and reviewer-prefers-C_test in P3.
+- **PR 12696**: clean, zero findings. Mean cognitive 2.08 → 1.97 (past C_final by 0.11) and **max cognitive 32 → 23** — first pilot case where C_llm touched the hottest function.
+
+Reconcile-failure-to-reject is a real pipeline gap. Hunt-spec caught it, reconcile didn't act on the warning. Recommendation for v2: reconcile must verify that every test-breaking hunt finding results in either claim rejection or a narrowing that changes the claim's net effect. Current reconcile reads the findings but isn't adversarial enough.
+
+No-op rate: 1/3 = 33% on cli/cli, 0/5 = 0% on gemini-cli. Combined pilot: 1/8 = 12.5%. Still below 40% futility threshold.
+
+LOC direction note: unlike gemini-cli where C_final consistently added LOC, cli/cli's C_final is close to C_test (+5, 0, -3 LOC on the 3 PRs). Go reviewers appear more surgical about scope than gemini-cli reviewers. "Reviewer additive bias" may be culture-specific, not universal.
+
+### 01:10 — cli/cli Phase 7 review: 2/3 prefer C_llm, 2/3 wrong-direction
+
+Full results in `samples/dev/cli-phase7-results.md`. Headline: **P3 preserved on Go** (2/3 = 67%, above 65% threshold) but **trajectory classification shifted unfavorable** (0/3 past, 1/3 short, 2/3 wrong).
+
+Key findings:
+1. **PR 12567**: tests pass but gemini flagged CopilotActorLogin → CopilotAssigneeLogin API break that the LLM refactor didn't restore despite spec direction. Classic slop-slope: test-passing code that regresses public API. Phase 1 preference contradicts phase 2 classification (gemini preferred C_llm for merge but said wrong-direction for trajectory).
+2. **PR 12696**: C_test ≡ C_final on measured scope (only post-test commit was a test file). Trajectory classification degenerate. Inclusion condition 5 is too permissive — should require revision on scope files, not just any file.
+3. **PR 12695**: no-op, hunt-spec had predicted it but reconcile didn't properly reject the claim. Reconcile step needs to be more adversarial toward hunt findings.
+
+No-op rate so far: 1/8 combined = 12.5%.
+
+Cross-repo pattern: gemini-cli 4/5 prefer C_llm + 1/5 past + 1/5 wrong; cli/cli 2/3 prefer C_llm + 0/3 past + 2/3 wrong. Wrong-direction rate jumps from 20% to 67% going from TS to Go (small n, noisy). Combined wrong rate 3/8 = 37.5% approaching parity-null upper bound. Secondary-repo expansion trigger not met (wrong ≥ 2/3 was the trigger, but 2/3 of a 3-PR batch is 67% which DOES hit the trigger under pilot decision 6 — should expand cli/cli to 10 PRs before interpreting).
