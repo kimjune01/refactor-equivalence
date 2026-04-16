@@ -458,3 +458,7 @@ Final scope locks:
 Doc tightened: "Changes from v1" was numbered prose; now a bullet list. Per-repo registered-tools dropped Python entries. Sample-size totals simpler. PREREG_V2.md now ~1030 lines (was ~895 before rounds 6-10 added codex-hostile-review responses + analysis stance + recommendation criterion; back to readable density).
 
 11 total v2-prep rounds. Next: register the prereg, then start v2 dev-set extraction on gemini-cli.
+
+### 17:30 — v2 round 12: dev-env timebox locked
+
+2-hour wall-clock to first passing build at C_final per repo. Timebox hit → drop the repo, substitute the next eligible secondary. No infrastructure-debugging iteration. Codifies the de facto v1 pilot behavior (fastapi dropped after ~90min). Protects the experiment from being held hostage by recalcitrant repo setup.
