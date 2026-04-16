@@ -1,0 +1,91 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24437/c_test/packages/core/src/agents/local-executor.ts /tmp/refactor-eq-workdir/snapshots/24437/c_llm/packages/core/src/agents/local-executor.ts
+--- /tmp/refactor-eq-workdir/snapshots/24437/c_test/packages/core/src/agents/local-executor.ts	2026-04-15 18:53:55
++++ /tmp/refactor-eq-workdir/snapshots/24437/c_llm/packages/core/src/agents/local-executor.ts	2026-04-15 18:51:18
+@@ -74,7 +74,7 @@
+ } from '../utils/fastAckHelper.js';
+ import type { InjectionSource } from '../config/injectionService.js';
+ import { CompleteTaskTool } from '../tools/complete-task.js';
+-import { COMPLETE_TASK_TOOL_NAME } from '../tools/definitions/base-declarations.js';
++import { COMPLETE_TASK_TOOL_NAME } from '../tools/tool-names.js';
+ 
+ /** A callback function to report on agent activity. */
+ export type ActivityCallback = (activity: SubagentActivityEvent) => void;
+@@ -1054,7 +1054,7 @@
+           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+             Object.assign(args, parsed);
+           }
+-        } catch (_) {
++        } catch {
+           debugLogger.warn(
+             `[LocalAgentExecutor] Failed to parse args for ${functionCall.name}: ${functionCall.args}`,
+           );
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24437/c_test/packages/core/src/tools/complete-task.ts /tmp/refactor-eq-workdir/snapshots/24437/c_llm/packages/core/src/tools/complete-task.ts
+--- /tmp/refactor-eq-workdir/snapshots/24437/c_test/packages/core/src/tools/complete-task.ts	2026-04-15 18:53:55
++++ /tmp/refactor-eq-workdir/snapshots/24437/c_llm/packages/core/src/tools/complete-task.ts	2026-04-15 18:51:18
+@@ -19,6 +19,12 @@
+ import { type MessageBus } from '../confirmation-bus/message-bus.js';
+ import { zodToJsonSchema } from 'zod-to-json-schema';
+ 
++const RESULT_PARAM = 'result';
++
++function formatSubmittedOutput(output: unknown): string {
++  return typeof output === 'string' ? output : JSON.stringify(output, null, 2);
++}
++
+ /**
+  * Tool for signaling task completion and optionally returning structured output.
+  * This tool is specifically designed for use in subagent loops.
+@@ -66,14 +72,14 @@
+     return {
+       type: 'object',
+       properties: {
+-        result: {
++        [RESULT_PARAM]: {
+           type: 'string',
+           description:
+             'Your final results or findings to return to the orchestrator. ' +
+             'Ensure this is comprehensive and follows any formatting requested in your instructions.',
+         },
+       },
+-      required: ['result'],
++      required: [RESULT_PARAM],
+     };
+   }
+ 
+@@ -93,13 +99,13 @@
+         return `Output validation failed: ${JSON.stringify(validationResult.error.flatten())}`;
+       }
+     } else {
+-      const resultArg = params['result'];
++      const resultArg = params[RESULT_PARAM];
+       if (
+         resultArg === undefined ||
+         resultArg === null ||
+         (typeof resultArg === 'string' && resultArg.trim() === '')
+       ) {
+-        return 'Missing required "result" argument. You must provide your findings when calling complete_task.';
++        return `Missing required "result" argument. You must provide your findings when calling ${COMPLETE_TASK_TOOL_NAME}.`;
+       }
+     }
+     return null;
+@@ -150,17 +156,11 @@
+         // We validated the params in validateToolParamValues, so safe to cast
+         submittedOutput = this.processOutput(outputValue as z.infer<TOutput>);
+       } else {
+-        submittedOutput =
+-          typeof outputValue === 'string'
+-            ? outputValue
+-            : JSON.stringify(outputValue, null, 2);
++        submittedOutput = formatSubmittedOutput(outputValue);
+       }
+     } else {
+-      outputValue = this.params['result'];
+-      submittedOutput =
+-        typeof outputValue === 'string'
+-          ? outputValue
+-          : JSON.stringify(outputValue, null, 2);
++      outputValue = this.params[RESULT_PARAM];
++      submittedOutput = formatSubmittedOutput(outputValue);
+     }
+ 
+     const returnDisplay = this.outputConfig

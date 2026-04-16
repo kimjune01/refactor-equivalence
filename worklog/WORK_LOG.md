@@ -202,3 +202,79 @@ C_llm's mean cognitive complexity across touched functions: **10.27** (C_test: 1
 Full metrics in `samples/dev/24437-metrics.md`. This is n=1 pilot data. Scalar trajectory class agrees with "past C_final" — awaits reviewer classification for headline label.
 
 **Pilot PR 24437 status:** Forge pipeline ✓, measurements ✓, trajectory scalar ✓. Remaining: blind review (deferred until all 5 PRs have C_llm), C_random (deferred post-pilot).
+
+### 20:45 — Scope expansion: cli tests and parallel FS contention
+
+Remaining pilot PRs (24483, 24489, 24623, 25101) touch both `packages/core` and `packages/cli`. Expanded the locked test command: build all workspaces, then run vitest in core (with sandboxManager exclusion) AND cli. Added ~100s per PR for cli tests.
+
+Parallel FS contention: first attempt ran all 4 worktrees' tests concurrently — 3 failed on `logger.test.ts` and `write-file.test.ts` which both use shared `~/.gemini` state. Sequential re-run: all 4 pass cleanly at C_final. Lesson: across-PR parallelism is safe for build + volley + hunt-spec (no test runs), but test-running phases (find_c_test, verification) must be sequential.
+
+Running find_c_test sequentially across all 4 remaining PRs. Worst case ~50 min, expected 20-30 min.
+
+### 21:30 — All 4 remaining PRs: C_test reconstructed
+
+| PR | C_test | Position | Post-test commits |
+|----|--------|----------|-------------------|
+| 24483 | `30d28fcb` | 1 of 2 | 1 |
+| 24489 | `eb0fc840` | 8 of 10 | 2 |
+| 24623 | `2357101a` | 1 of 3 | 2 |
+| 25101 | `4ab03f18` | 2 of 5 | 3 |
+
+100% reconstruction rate (5/5 including 24437). Futility condition #1 not triggered. PR 24489 had 7 failing earlier commits before first-pass — worth noting that the feature was iterated heavily during authoring.
+
+### 21:40 — Clean-rooms built in parallel, forge inputs prepared
+
+4 parallel cleanroom builds (git archive + npm ci): 24483 (18 files, 1123 LOC diff), 24489 (113 files, 6170 LOC diff), 24623 (48 files, 6679 LOC diff), 25101 (38 files, 1026 LOC diff). Allowed edit sets exclude tests, docs, schemas.
+
+### 21:50 — Volley: 60 claims across 4 PRs; hunt-spec found real defects
+
+Codex volley round 1 (parallel): 17/10/10/25 claims for 24483/24489/24623/25101. None had rejected items initially — codex defaults to additive when generating, only produces rejections when adversarially prompted. Consistent with training-data "good PRs are additive" bias.
+
+Codex hunt-spec (parallel): real defects found in 3/4 PRs. Notably 24483's Claim 1 and Claim 10 would have triggered `__proto__` prototype-pollution by switching from manual `obj[k] = v` loops to `Object.fromEntries(map)`. 25101 clean. Reconciliation (also codex) moved problematic claims to rejection lists.
+
+Final claim counts: 15/10/10/25 accepted, ~7-10 rejected each.
+
+### 22:10 — Blind-blind merge: 8 agents in parallel, 85-90% convergence
+
+4 opus subagents + 4 codex subprocesses executed the sharpened specs in parallel blind directories. All reported "Applied N/N claims."
+
+Convergence per PR:
+- 24483: 2/5 files differ between opus and codex outputs
+- 24489: 4/20 differ
+- 24623: 4/7 differ
+- 25101: 2/15 differ
+
+Merge strategy: smaller-churn wins per file (proxy for structural simplicity).
+
+### 22:20 — Verification: 3/4 passed cleanly; 24483 TypeScript bug, patched
+
+PR 24489, 24623, 25101: build + core tests + cli tests all pass at C_llm. Identical test counts to C_test. Behavior preserved.
+
+PR 24483: TypeScript build error at `contextCompressionService.ts:351`. A refactored early-return `if (record.level === 'FULL') return part;` narrowed the type union so the downstream `case 'FULL':` in the switch became unreachable. TypeScript correctly flagged it (error TS2678).
+
+**Important:** hunt-spec missed this. The build catch is exactly what phase 4 (hunt-code / bug-hunt) is supposed to surface. One-line patch applied; rebuild green. Noting as a forge pipeline limitation: if hunt-spec doesn't include a type-check step, dead-switch-case type errors only surface post-merge. For future runs, suggest wiring `tsc --noEmit` into the spec-hunt prompt context.
+
+### 22:30 — Model-role correction
+
+I used gemini for hunt-code on PR 24437 (zero findings). Per prereg and /bug-hunt skill: **codex** is the adversarial reviewer in the forge pipeline. Gemini is reserved for phase 7 blind merge-readiness review (primary reviewer, no-self-review rule applies *there*, not to forge-internal hunt-code).
+
+For consistency, re-running PR 24437's hunt-code with codex and running all 4 remaining PRs' hunt-code with codex.
+
+### 22:50 — Pilot complete: 5/5 PRs, all past or boundary-past C_final, zero slop-slope
+
+Full scoped measurements in `samples/dev/pilot-results.md`. Headline:
+
+**All 5 C_llm ≤ C_final on mean cognitive complexity.** 3/5 clearly past (Δ ≤ -0.04), 2/5 within boundary δ=0.05. Zero wrong-direction, zero no-op.
+
+**C_llm ≤ C_test on LOC in all 5 PRs.** C_final > C_test on LOC in all 5 (reviewers pushed additions, LLM pushed subtraction — the cleanest observable expression of the slop-slope hypothesis).
+
+Max-function complexity is sticky across the board — the refactor and the reviewers both left the heaviest functions alone.
+
+Pilot feasibility conditions all clear:
+- C_test reconstruction rate: 5/5 = 100% (futility 1: no trigger)
+- Reproducible tests: 5/5 pass sequentially at C_final (parallel collision issue noted, solvable)
+- No-op rate: 0/5 = 0% after manual patch on 24483; strictly, 1/5 = 20% if we count the pre-patch broken state as no-op (still below 40% futility trigger)
+- Metrics computable: 5/5
+- PR size bounds appropriate: yes (4/5 PRs > 1000 LOC of refactor scope)
+
+Next: reviewer-classified trajectory via phase 7 blind review (gemini primary, codex secondary where non-conflicted). That's the headline label per prereg.

@@ -1,0 +1,459 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/cli/src/config/config.ts /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/cli/src/config/config.ts
+--- /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/cli/src/config/config.ts	2026-04-15 21:59:32
++++ /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/cli/src/config/config.ts	2026-04-15 21:59:32
+@@ -884,10 +884,8 @@
+     }
+   }
+ 
+-  const useGeneralistProfile =
+-    settings.experimental?.generalistProfile ?? false;
+-  const useContextManagement =
+-    settings.experimental?.contextManagement ?? false;
++  const useGeneralistProfile = !!settings.experimental?.generalistProfile;
++  const useContextManagement = !!settings.experimental?.contextManagement;
+   const contextManagement = {
+     ...(useGeneralistProfile ? generalistProfile : {}),
+     ...(useContextManagement ? settings?.contextManagement : {}),
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/config/config.ts /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/config/config.ts
+--- /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/config/config.ts	2026-04-15 21:59:32
++++ /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/config/config.ts	2026-04-15 21:59:32
+@@ -1136,41 +1136,40 @@
+     this.experimentalJitContext = params.experimentalJitContext ?? false;
+     this.experimentalMemoryManager = params.experimentalMemoryManager ?? false;
+     this.memoryBoundaryMarkers = params.memoryBoundaryMarkers ?? ['.git'];
++    const contextManagement = params.contextManagement;
+     this.contextManagement = {
+-      enabled: params.contextManagement?.enabled ?? false,
++      enabled: contextManagement?.enabled ?? false,
+       historyWindow: {
+-        maxTokens: params.contextManagement?.historyWindow?.maxTokens ?? 150000,
++        maxTokens: contextManagement?.historyWindow?.maxTokens ?? 150000,
+         retainedTokens:
+-          params.contextManagement?.historyWindow?.retainedTokens ?? 40000,
++          contextManagement?.historyWindow?.retainedTokens ?? 40000,
+       },
+       messageLimits: {
+         normalMaxTokens:
+-          params.contextManagement?.messageLimits?.normalMaxTokens ?? 2500,
++          contextManagement?.messageLimits?.normalMaxTokens ?? 2500,
+         retainedMaxTokens:
+-          params.contextManagement?.messageLimits?.retainedMaxTokens ?? 12000,
++          contextManagement?.messageLimits?.retainedMaxTokens ?? 12000,
+         normalizationHeadRatio:
+-          params.contextManagement?.messageLimits?.normalizationHeadRatio ??
+-          0.25,
++          contextManagement?.messageLimits?.normalizationHeadRatio ?? 0.25,
+       },
+       tools: {
+         distillation: {
+           maxOutputTokens:
+-            params.contextManagement?.tools?.distillation?.maxOutputTokens ??
+-            10000,
++            contextManagement?.tools?.distillation?.maxOutputTokens ?? 10000,
+           summarizationThresholdTokens:
+-            params.contextManagement?.tools?.distillation
++            contextManagement?.tools?.distillation
+               ?.summarizationThresholdTokens ?? 20000,
+         },
+         outputMasking: {
+           protectionThresholdTokens:
+-            params.contextManagement?.tools?.outputMasking
++            contextManagement?.tools?.outputMasking
+               ?.protectionThresholdTokens ?? DEFAULT_TOOL_PROTECTION_THRESHOLD,
+           minPrunableThresholdTokens:
+-            params.contextManagement?.tools?.outputMasking
++            contextManagement?.tools?.outputMasking
+               ?.minPrunableThresholdTokens ??
+             DEFAULT_MIN_PRUNABLE_TOKENS_THRESHOLD,
+           protectLatestTurn:
+-            params.contextManagement?.tools?.outputMasking?.protectLatestTurn ??
++            contextManagement?.tools?.outputMasking?.protectLatestTurn ??
+             DEFAULT_PROTECT_LATEST_TURN,
+         },
+       },
+@@ -2391,14 +2390,13 @@
+   }
+ 
+   get agentHistoryProviderConfig(): AgentHistoryProviderConfig {
++    const { historyWindow, messageLimits } = this.contextManagement;
+     return {
+-      maxTokens: this.contextManagement.historyWindow.maxTokens,
+-      retainedTokens: this.contextManagement.historyWindow.retainedTokens,
+-      normalMessageTokens: this.contextManagement.messageLimits.normalMaxTokens,
+-      maximumMessageTokens:
+-        this.contextManagement.messageLimits.retainedMaxTokens,
+-      normalizationHeadRatio:
+-        this.contextManagement.messageLimits.normalizationHeadRatio,
++      maxTokens: historyWindow.maxTokens,
++      retainedTokens: historyWindow.retainedTokens,
++      normalMessageTokens: messageLimits.normalMaxTokens,
++      maximumMessageTokens: messageLimits.retainedMaxTokens,
++      normalizationHeadRatio: messageLimits.normalizationHeadRatio,
+     };
+   }
+ 
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/context/contextCompressionService.ts /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/context/contextCompressionService.ts
+--- /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/context/contextCompressionService.ts	2026-04-15 21:59:32
++++ /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/context/contextCompressionService.ts	2026-04-15 21:59:32
+@@ -36,9 +36,9 @@
+ }
+ 
+ export class ContextCompressionService {
+-  private config: Config;
++  private readonly config: Config;
+   private state: Map<string, FileRecord> = new Map();
+-  private stateFilePath: string;
++  private readonly stateFilePath: string;
+ 
+   constructor(config: Config) {
+     this.config = config;
+@@ -71,10 +71,7 @@
+   }
+ 
+   setState(stateData: Record<string, FileRecord>) {
+-    this.state.clear();
+-    for (const [k, v] of Object.entries(stateData)) {
+-      this.state.set(k, v);
+-    }
++    this.state = new Map(Object.entries(stateData));
+   }
+ 
+   async saveState() {
+@@ -116,21 +113,17 @@
+           (part.functionCall.name === 'read_file' ||
+             part.functionCall.name === 'read_many_files')
+         ) {
++          if (i < cutoff) continue;
+           const args = part.functionCall.args;
+           if (args) {
+             if (Array.isArray(args['paths'])) {
+-              if (i >= cutoff) {
+-                for (const path of args['paths']) {
+-                  protectedFiles.add(path);
+-                }
++              for (const path of args['paths']) {
++                protectedFiles.add(path);
+               }
+             }
+             const filepath = args['filepath'];
+             if (filepath && typeof filepath === 'string') {
+-              // If this read happened within the protected window, it's protected.
+-              if (i >= cutoff) {
+-                protectedFiles.add(filepath);
+-              }
++              protectedFiles.add(filepath);
+             }
+           }
+         }
+@@ -141,10 +134,9 @@
+     type PendingFile = {
+       filepath: string;
+       rawContent: string;
+-      contentToProcess: string;
+-      lines: string[];
+       preview: string;
+       lineCount: number;
++      contentHash: string;
+     };
+     const pendingFiles: PendingFile[] = [];
+     const pendingFilesSet = new Set<string>(); // deduplicate by filepath
+@@ -154,25 +146,11 @@
+       if (i >= cutoff || turn.role !== 'user' || !turn.parts) continue;
+ 
+       for (const part of turn.parts) {
+-        const resp = part.functionResponse;
+-        if (!resp) continue;
+-        if (resp.name !== 'read_file' && resp.name !== 'read_many_files')
+-          continue;
++        const readOutput = this.getReadToolOutput(part);
++        if (!readOutput) continue;
+ 
+-        const output = resp.response?.['output'];
+-        if (!output || typeof output !== 'string') continue;
+-
+-        const match = output.match(/--- (.+?) ---\n/);
+-        let filepath = '';
+-        if (match) {
+-          filepath = match[1];
+-        } else {
+-          const lines = output.split('\n');
+-          if (lines[0] && lines[0].includes('---')) {
+-            filepath = lines[0].replace(/---/g, '').trim();
+-          }
+-        }
+-
++        const { output } = readOutput;
++        const filepath = this.parseFilepathFromOutput(output);
+         if (!filepath || protectedFiles.has(filepath)) continue;
+ 
+         const hash = crypto
+@@ -192,22 +170,15 @@
+         if (pendingFilesSet.has(filepath)) continue; // already queued
+         pendingFilesSet.add(filepath);
+ 
+-        let contentToProcess = output;
+-        if (contentToProcess.startsWith('--- ')) {
+-          const firstNewline = contentToProcess.indexOf('\n');
+-          if (firstNewline !== -1) {
+-            contentToProcess = contentToProcess.substring(firstNewline + 1);
+-          }
+-        }
++        const contentToProcess = this.stripFileHeader(output);
+         const lines = contentToProcess.split('\n');
+ 
+         pendingFiles.push({
+           filepath,
+           rawContent: output,
+-          contentToProcess,
+-          lines,
+           preview: lines.slice(0, 30).join('\n'),
+           lineCount: lines.length,
++          contentHash: hash,
+         });
+       }
+     }
+@@ -231,11 +202,7 @@
+       const record = this.state.get(f.filepath) ?? {
+         level: 'FULL' as FileLevel,
+       };
+-      const hash = crypto
+-        .createHash('sha256')
+-        .update(f.rawContent)
+-        .digest('hex')
+-        .slice(0, 12);
++      const hash = f.contentHash;
+       if (record.contentHash && record.contentHash !== hash) {
+         record.cachedSummary = undefined;
+       }
+@@ -331,72 +298,58 @@
+     userPrompt: string,
+     abortSignal?: AbortSignal,
+   ): Promise<Part> {
+-    const resp = part.functionResponse;
+-    if (!resp) return part;
+-    if (resp.name !== 'read_file' && resp.name !== 'read_many_files')
+-      return part;
++    const readOutput = this.getReadToolOutput(part);
++    if (!readOutput) return part;
+ 
+-    const output = resp.response?.['output'];
+-    if (!output || typeof output !== 'string') return part;
++    const { response, output } = readOutput;
++    const filepath = this.parseFilepathFromOutput(output);
++    if (!filepath) return part;
+ 
+-    const match = output.match(/--- (.+?) ---\n/);
+-    let filepath = '';
+-    if (match) {
+-      filepath = match[1];
+-    } else {
+-      const lines = output.split('\n');
+-      if (lines[0] && lines[0].includes('---')) {
+-        filepath = lines[0].replace(/---/g, '').trim();
+-      } else {
+-        return part;
+-      }
+-    }
+-
+     if (protectedFiles.has(filepath)) return part;
+ 
+     const record = this.state.get(filepath);
+     if (!record || record.level === 'FULL') return part;
+ 
+-    let contentToProcess = output;
+-    if (contentToProcess.startsWith('--- ')) {
+-      const firstNewline = contentToProcess.indexOf('\n');
+-      if (firstNewline !== -1) {
+-        contentToProcess = contentToProcess.substring(firstNewline + 1);
+-      }
+-    }
++    const contentToProcess = this.stripFileHeader(output);
+     const lines = contentToProcess.split('\n');
+ 
+     let compressed: string;
+ 
+-    if (record.level === 'PARTIAL' && record.startLine && record.endLine) {
+-      const start = Math.max(0, record.startLine - 1);
+-      const end = Math.min(lines.length, record.endLine);
+-      const snippet = lines
+-        .slice(start, end)
+-        .map((l, i) => `${start + i + 1} | ${l}`)
+-        .join('\n');
+-      compressed =
+-        `[Showing lines ${record.startLine}–${record.endLine} of ${lines.length} ` +
+-        `in ${path.basename(filepath)}. Full file available via read_file.]\n\n${snippet}`;
+-    } else if (record.level === 'SUMMARY') {
+-      if (!record.cachedSummary) {
+-        record.cachedSummary = await this.generateSummary(
+-          filepath,
+-          contentToProcess,
+-          abortSignal,
+-        );
+-        this.state.set(filepath, record);
+-        await this.saveState();
++    switch (record.level) {
++      case 'PARTIAL': {
++        if (!record.startLine || !record.endLine) return part;
++        const start = Math.max(0, record.startLine - 1);
++        const end = Math.min(lines.length, record.endLine);
++        const snippet = lines
++          .slice(start, end)
++          .map((l, i) => `${start + i + 1} | ${l}`)
++          .join('\n');
++        compressed =
++          `[Showing lines ${record.startLine}–${record.endLine} of ${lines.length} ` +
++          `in ${path.basename(filepath)}. Full file available via read_file.]\n\n${snippet}`;
++        break;
+       }
+-      compressed =
+-        `[Summary of ${path.basename(filepath)} (${lines.length} lines). ` +
+-        `Full file available via read_file.]\n\n${record.cachedSummary}`;
+-    } else if (record.level === 'EXCLUDED') {
+-      compressed =
+-        `[${path.basename(filepath)} omitted as not relevant to current query. ` +
+-        `Request via read_file if needed.]`;
+-    } else {
+-      return part;
++      case 'SUMMARY':
++        if (!record.cachedSummary) {
++          record.cachedSummary = await this.generateSummary(
++            filepath,
++            contentToProcess,
++            abortSignal,
++          );
++          this.state.set(filepath, record);
++          await this.saveState();
++        }
++        compressed =
++          `[Summary of ${path.basename(filepath)} (${lines.length} lines). ` +
++          `Full file available via read_file.]\n\n${record.cachedSummary}`;
++        break;
++      case 'EXCLUDED':
++        compressed =
++          `[${path.basename(filepath)} omitted as not relevant to current query. ` +
++          `Request via read_file if needed.]`;
++        break;
++      default:
++        return part;
+     }
+ 
+     if (compressed === output) return part;
+@@ -405,8 +358,8 @@
+       functionResponse: {
+         // `FunctionResponse` should be safe to spread
+         // eslint-disable-next-line @typescript-eslint/no-misused-spread
+-        ...resp,
+-        response: { ...resp.response, output: compressed },
++        ...response,
++        response: { ...response.response, output: compressed },
+       },
+     };
+   }
+@@ -481,8 +434,7 @@
+         const decision = responseJson[f.filepath] as
+           | CompressionRecordJSON
+           | undefined;
+-        if (typeof decision !== 'object') continue;
+-        if (typeof decision === 'object' && decision && decision.level) {
++        if (decision && typeof decision === 'object' && decision.level) {
+           results.set(f.filepath, {
+             level: decision.level ?? 'FULL',
+             startLine: decision.start_line ?? undefined,
+@@ -496,6 +448,41 @@
+       );
+     }
+     return results;
++  }
++
++  private getReadToolOutput(
++    part: Part,
++  ):
++    | { response: NonNullable<Part['functionResponse']>; output: string }
++    | undefined {
++    const response = part.functionResponse;
++    if (!response) return undefined;
++    if (response.name !== 'read_file' && response.name !== 'read_many_files') {
++      return undefined;
++    }
++
++    const output = response.response?.['output'];
++    if (!output || typeof output !== 'string') return undefined;
++    return { response, output };
++  }
++
++  private parseFilepathFromOutput(output: string): string | undefined {
++    const match = output.match(/--- (.+?) ---\n/);
++    if (match) return match[1];
++
++    const lines = output.split('\n');
++    if (lines[0] && lines[0].includes('---')) {
++      return lines[0].replace(/---/g, '').trim();
++    }
++    return undefined;
++  }
++
++  private stripFileHeader(output: string): string {
++    if (!output.startsWith('--- ')) return output;
++
++    const firstNewline = output.indexOf('\n');
++    if (firstNewline === -1) return output;
++    return output.substring(firstNewline + 1);
+   }
+ 
+   private async generateSummary(
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/tools/web-fetch.ts /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/tools/web-fetch.ts
+--- /tmp/refactor-eq-workdir/snapshots/24483/c_test/packages/core/src/tools/web-fetch.ts	2026-04-15 21:59:32
++++ /tmp/refactor-eq-workdir/snapshots/24483/c_llm/packages/core/src/tools/web-fetch.ts	2026-04-15 21:59:32
+@@ -412,8 +412,10 @@
+       };
+     }
+ 
++    const contextManagementEnabled =
++      this.context.config.isContextManagementEnabled();
+     const finalContentsByUrl = new Map<string, string>();
+-    if (this.context.config.isContextManagementEnabled()) {
++    if (contextManagementEnabled) {
+       successes.forEach((success) =>
+         finalContentsByUrl.set(success.url, success.content),
+       );
+@@ -656,10 +658,12 @@
+         response,
+         MAX_EXPERIMENTAL_FETCH_SIZE,
+       );
++      const contextManagementEnabled =
++        this.context.config.isContextManagementEnabled();
+ 
+       if (status >= 400) {
+         let rawResponseText = bodyBuffer.toString('utf8');
+-        if (!this.context.config.isContextManagementEnabled()) {
++        if (!contextManagementEnabled) {
+           rawResponseText = truncateString(
+             rawResponseText,
+             10000,
+@@ -689,7 +693,7 @@
+         lowContentType.includes('application/json')
+       ) {
+         let text = bodyBuffer.toString('utf8');
+-        if (!this.context.config.isContextManagementEnabled()) {
++        if (!contextManagementEnabled) {
+           text = truncateString(text, MAX_CONTENT_LENGTH, TRUNCATION_WARNING);
+         }
+         return {
+@@ -706,7 +710,7 @@
+             { selector: 'a', options: { ignoreHref: false, baseUrl: url } },
+           ],
+         });
+-        if (!this.context.config.isContextManagementEnabled()) {
++        if (!contextManagementEnabled) {
+           textContent = truncateString(
+             textContent,
+             MAX_CONTENT_LENGTH,
+@@ -738,7 +742,7 @@
+ 
+       // Fallback for unknown types - try as text
+       let text = bodyBuffer.toString('utf8');
+-      if (!this.context.config.isContextManagementEnabled()) {
++      if (!contextManagementEnabled) {
+         text = truncateString(text, MAX_CONTENT_LENGTH, TRUNCATION_WARNING);
+       }
+       return {

@@ -1,0 +1,320 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/evals/automated-tool-use.eval.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/evals/automated-tool-use.eval.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/evals/automated-tool-use.eval.ts	2026-04-15 21:59:33
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/evals/automated-tool-use.eval.ts	2026-04-15 21:59:33
+@@ -8,6 +8,18 @@
+ import { evalTest } from './test-helper.js';
+ 
+ describe('Automated tool use', () => {
++  const getCommand = (call: any): string | undefined => {
++    let args = call.toolRequest.args;
++    if (typeof args === 'string') {
++      try {
++        args = JSON.parse(args);
++      } catch (e) {
++        return undefined;
++      }
++    }
++    return (args as any)?.['command'];
++  };
++
+   /**
+    * Tests that the agent always utilizes --fix when calling eslint.
+    * We provide a 'lint' script in the package.json, which helps elicit
+@@ -74,15 +86,7 @@
+       );
+ 
+       const hasFixCommand = shellCommands.some((call) => {
+-        let args = call.toolRequest.args;
+-        if (typeof args === 'string') {
+-          try {
+-            args = JSON.parse(args);
+-          } catch (e) {
+-            return false;
+-          }
+-        }
+-        const cmd = (args as any)['command'];
++        const cmd = getCommand(call);
+         return (
+           cmd &&
+           (cmd.includes('eslint') || cmd.includes('npm run lint')) &&
+@@ -145,15 +149,7 @@
+       );
+ 
+       const hasFixCommand = shellCommands.some((call) => {
+-        let args = call.toolRequest.args;
+-        if (typeof args === 'string') {
+-          try {
+-            args = JSON.parse(args);
+-          } catch (e) {
+-            return false;
+-          }
+-        }
+-        const cmd = (args as any)['command'];
++        const cmd = getCommand(call);
+         return (
+           cmd &&
+           cmd.includes('prettier') &&
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/evals/frugalSearch.eval.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/evals/frugalSearch.eval.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/evals/frugalSearch.eval.ts	2026-04-15 21:59:33
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/evals/frugalSearch.eval.ts	2026-04-15 21:59:33
+@@ -50,22 +50,11 @@
+     },
+     assert: async (rig) => {
+       const toolCalls = rig.readToolLogs();
+-      const getParams = (call: any) => {
+-        let args = call.toolRequest.args;
+-        if (typeof args === 'string') {
+-          try {
+-            args = JSON.parse(args);
+-          } catch (e) {
+-            // Ignore parse errors
+-          }
+-        }
+-        return args;
+-      };
+ 
+       // Check for wasteful full file reads
+       const fullReads = toolCalls.filter((call) => {
+         if (call.toolRequest.name !== 'read_file') return false;
+-        const args = getParams(call);
++        const args = getGrepParams(call);
+         return (
+           args.file_path === 'src/legacy_processor.ts' &&
+           (args.end_line === undefined || args.end_line === null)
+@@ -79,7 +68,7 @@
+ 
+       // Check that it actually tried to find it using appropriate tools
+       const validAttempts = toolCalls.filter((call) => {
+-        const args = getParams(call);
++        const args = getGrepParams(call);
+         if (call.toolRequest.name === 'grep_search') {
+           return true;
+         }
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/agent-tool.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/agent-tool.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/agent-tool.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/agent-tool.ts	2026-04-15 21:59:33
+@@ -104,21 +104,35 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
++    const singleKey = getSingleSchemaPropertyKey(schema);
++    if (singleKey !== undefined) {
++      return { [singleKey]: prompt };
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+     return { prompt };
+   }
+ }
+ 
++/**
++ * Returns the sole property key of an object input schema if and only if
++ * `schema.properties` is a record with exactly one key. Returns `undefined`
++ * otherwise (non-record schema, missing or non-record `properties`, or not
++ * exactly one property).
++ */
++function getSingleSchemaPropertyKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++  const keys = Object.keys(properties);
++  if (keys.length !== 1) {
++    return undefined;
++  }
++  return keys[0];
++}
++
+ class DelegateInvocation extends BaseToolInvocation<
+   { agent_name: string; prompt: string },
+   ToolResult
+@@ -167,21 +181,25 @@
+         agentArgs,
+         this.messageBus,
+       );
+-    } else {
+-      return new LocalSubagentInvocation(
+-        this.definition,
+-        this.context,
+-        agentArgs,
+-        this.messageBus,
+-      );
+     }
++
++    return new LocalSubagentInvocation(
++      this.definition,
++      this.context,
++      agentArgs,
++      this.messageBus,
++    );
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +207,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -231,8 +248,8 @@
+     }
+     const properties = schemaObj['properties'];
+     if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
++      const singleKey = getSingleSchemaPropertyKey(schemaObj);
++      const primaryKey = singleKey ?? 'prompt';
+ 
+       const value = agentArgs[primaryKey];
+       if (typeof value !== 'string' || value.trim().length === 0) {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/local-executor.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/local-executor.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/local-executor.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/local-executor.ts	2026-04-15 21:59:33
+@@ -1438,14 +1438,13 @@
+     args: Record<string, unknown>;
+     error?: string;
+   } {
+-    const args: Record<string, unknown> = {};
+     if (typeof functionCall.args === 'string') {
+       try {
+         const parsed: unknown = JSON.parse(functionCall.args);
+         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+-          Object.assign(args, parsed);
++          return { args: parsed as Record<string, unknown> };
+         }
+-        return { args };
++        return { args: {} };
+       } catch {
+         return {
+           args: {},
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/registry.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/registry.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/agents/registry.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/agents/registry.ts	2026-04-15 21:59:33
+@@ -380,6 +380,11 @@
+       return;
+     }
+ 
++    // Only add override for remote agents. Local agents are handled by blanket allow.
++    if (definition.kind !== 'remote') {
++      return;
++    }
++
+     // If the user has explicitly defined a policy for this tool, respect it.
+     // ignoreDynamic=true means we only check for rules NOT added by this registry.
+     if (policyEngine.hasRuleForTool(definition.name, true)) {
+@@ -391,16 +396,13 @@
+       return;
+     }
+ 
+-    // Only add override for remote agents. Local agents are handled by blanket allow.
+-    if (definition.kind === 'remote') {
+-      policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
+-        decision: PolicyDecision.ASK_USER,
+-        priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+-        source: DYNAMIC_RULE_SOURCE,
+-      });
+-    }
++    policyEngine.addRule({
++      toolName: AgentTool.Name,
++      argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++      decision: PolicyDecision.ASK_USER,
++      priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
++      source: DYNAMIC_RULE_SOURCE,
++    });
+   }
+ 
+   private isAgentEnabled<TOutput extends z.ZodTypeAny>(
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/policy/policy-engine.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/policy/policy-engine.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/policy/policy-engine.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/policy/policy-engine.ts	2026-04-15 21:59:33
+@@ -547,14 +547,13 @@
+     // We also want to check legacy aliases for the tool name.
+     const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+ 
+-    if (toolCall.name === AGENT_TOOL_NAME) {
+-      if (isRecord(toolCall.args)) {
+-        const subagentName = toolCall.args['agent_name'];
+-        if (typeof subagentName === 'string') {
+-          // Inject the subagent name as a virtual tool alias for transparent rule matching
+-          toolNamesToTry.push(subagentName);
+-        }
+-      }
++    const subagentName =
++      toolCall.name === AGENT_TOOL_NAME && isRecord(toolCall.args)
++        ? toolCall.args['agent_name']
++        : undefined;
++    if (typeof subagentName === 'string') {
++      // Inject the subagent name as a virtual tool alias for transparent rule matching
++      toolNamesToTry.push(subagentName);
+     }
+ 
+     const toolCallsToTry: FunctionCall[] = [];
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/services/sandboxManager.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/services/sandboxManager.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/services/sandboxManager.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/services/sandboxManager.ts	2026-04-15 21:59:33
+@@ -342,13 +342,13 @@
+   const workspaceIdentity = getPathIdentity(options.workspace);
+   const forbiddenIdentities = new Set(forbidden.map(getPathIdentity));
+ 
+-  const filteredAllowed = allowed.filter((p) => {
+-    const identity = getPathIdentity(p);
+-    return identity !== workspaceIdentity && !forbiddenIdentities.has(identity);
+-  });
+-
+   return {
+-    allowed: filteredAllowed,
++    allowed: allowed.filter((p) => {
++      const identity = getPathIdentity(p);
++      return (
++        identity !== workspaceIdentity && !forbiddenIdentities.has(identity)
++      );
++    }),
+     forbidden,
+   };
+ }
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/telemetry/trace.ts /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/telemetry/trace.ts
+--- /tmp/refactor-eq-workdir/snapshots/24489/c_test/packages/core/src/telemetry/trace.ts	2026-04-15 21:59:34
++++ /tmp/refactor-eq-workdir/snapshots/24489/c_llm/packages/core/src/telemetry/trace.ts	2026-04-15 21:59:33
+@@ -99,10 +99,10 @@
+   opts: SpanOptions & { operation: GeminiCliOperation; logPrompts?: boolean },
+   fn: ({ metadata }: { metadata: SpanMetadata }) => Promise<R>,
+ ): Promise<R> {
+-  const { operation, logPrompts, ...restOfSpanOpts } = opts;
++  const { operation, logPrompts, ...spanOptions } = opts;
+ 
+   const tracer = trace.getTracer(TRACER_NAME, TRACER_VERSION);
+-  return tracer.startActiveSpan(operation, restOfSpanOpts, async (span) => {
++  return tracer.startActiveSpan(operation, spanOptions, async (span) => {
+     const meta: SpanMetadata = {
+       name: operation,
+       attributes: {
