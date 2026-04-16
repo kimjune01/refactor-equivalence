@@ -32,7 +32,7 @@ If both confirm, a refactoring pass is worth adding to agent workflows. If the L
 
 ## Estimand
 
-The target estimand is the effect of a forge-wrapped autonomous post-tests-pass LLM refactoring pass on **drafts of merged brownfield PRs with substantive post-tests-pass source revision**. (v2 change: R5 locked survivorship-bias wording)
+The target estimand is the effect of a forge-wrapped autonomous post-tests-pass LLM refactoring pass on **large drafts of merged brownfield PRs with substantive post-tests-pass source revision**. "Large" means ≥500 source lines changed from `C_base` to `C_test` (post-exclusion); see Sampling for rationale (down-induction). (v2 change: R5 locked survivorship-bias wording; size-restriction inline per codex hostile-review concern #4 — avoids estimand-vs-sample mismatch by restating estimand to match the actual sample rather than widening the sample)
 
 The study does not estimate effects for:
 
@@ -222,24 +222,13 @@ The LLM may edit source files changed in the PR diff from `C_base` to `C_test`. 
 
 `C_final` may touch additional files beyond `C_test`. The LLM is not given access to those files' identities, because knowing which files reviewers eventually changed is information leakage. If this restriction prevents valid simplifications, that biases against `C_llm`. It also means complexity comparisons to `C_final` are weakened when reviewers improved the PR by adding or moving code to files outside the `C_test` scope.
 
-### `C_random`
+### `C_random` — DROPPED in v2
 
-A semantics-preserving but non-simplifying control transformation produced from `C_test`. Tests whether complexity metrics reward *any* change or specifically reward *simplification*. v1 pilot did not generate `C_random` for any trial; v2 commits to running it for the primary repo at minimum and flags secondary-repo coverage as proposed (R4).
+v1 pilot defined a `C_random` mechanical-control snapshot but never generated one. v2 considered keeping it for the primary repo, then dropped it.
 
-**Per-language transformation families:**
+Reason: the proposed `C_random` transformations (local renames, redundant parentheses, statement reordering) don't approximate what the LLM actually does (multi-file structural reshaping). So even if `C_random` runs cleanly, it measures noise, not the alternative-intervention shape. The intended inference — "metrics reward simplification specifically vs. any change" — isn't supported by this control.
 
-- **TypeScript** (`gemini-cli`): local `let`/`const` renaming to `_a`/`_b`/...; independent statement reordering within basic blocks; redundant parenthesization on already-parenthesizable sub-expressions. Tool: `ts-morph` AST walker (registered before extraction).
-- **Go** (`cli/cli`): local var renaming via `gorename`-style identifier swap; reorder independent `var` declarations in a block. Cannot reorder statements freely (Go's stricter scope rules); skip that transformation. Tool: `go/ast` walker.
-- **Rust** (`ruff`): local binding renames; redundant parentheses on expressions. Statement reordering disabled (borrow-checker fragility). Tool: `syn` AST walker.
-- **Python** (`django`, `fastapi`): local variable renames; reorder independent assignments in a block. No expression-level transforms (Python's expression grammar is too tight to wrap meaningfully without breaking tests). Tool: `ast` module + `astor`.
-
-**Per-PR scaffolding:**
-- Edit budget: 50% of `|C_llm - C_test|` LOC delta, rounded up to 10 lines, floor 10
-- Random seed: `sha256(PR_number || "random" || attempt_N)` first 8 hex digits → decimal
-- Validation: locked test command must pass; scoped mean cognitive complexity must not decrease by more than `δ=0.05`
-- Invalid-control handling: regenerate with next seed up to 5 attempts; record invalid if all fail
-
-**Decision on coverage:** v2 locks `C_random` for the primary repo (gemini-cli). For each secondary repo, `C_random` generation is conditional on the per-language transformation family compiling and producing valid controls within a 1-day timebox per repo. If timebox exceeded, `C_random` analyses for that repo are dropped from the v2 primary outcomes; this is reported in Trail Commitment.
+Trade-off: P1 can no longer claim "simplification-specific" reduction. It claims direction-of-change only. This is honest given the available control. (v2 change: dropped from v1)
 
 ## Variables
 
@@ -256,7 +245,6 @@ Measured between:
 - `C_test`
 - `C_llm`
 - `C_final` (directional proxy)
-- `C_random`, where available
 
 The primary complexity scope is the union of source files touched by `C_test` or `C_llm`.
 
@@ -303,7 +291,9 @@ Differences smaller than `delta = 0.05` are flagged as boundary cases rather tha
 
 Report the distribution across the three reviewer-classified categories. "Past `C_final`" is the strongest evidence; "wrong direction" is the most important finding.
 
-### 3. Human merge-readiness preference
+### 3. Model-reviewer merge-readiness preference
+
+This endpoint measures *Gemini-reviewer* preference, not human reviewer preference. The construct being studied is "would a Gemini reviewer approve this for merge?" — informative as an LLM-pipeline-internal metric and as a proxy for what model-judges find reviewable, but NOT identical to human reviewer judgment. Renamed from v1's "human merge-readiness" per codex hostile-review concern #1 — the v1 wording mismatched the actual measurement instrument.
 
 Independent reviewers evaluate unlabeled diffs from `C_base`.
 
@@ -326,7 +316,6 @@ Reviewers separately record whether either version raises a semantic concern.
 
 After the forced choice, reviewers are shown `C_final` labeled as "the version reviewers accepted" and asked to classify `C_llm`'s trajectory: past `C_final`, short of `C_final`, or wrong direction. This is the primary trajectory classification.
 
-`C_random`, where available, may be used in secondary or calibration comparisons.
 
 Reviewers receive:
 
@@ -349,7 +338,7 @@ After completing the forced-choice task, reviewers answer a blinding check askin
 
 ### 4. Lines of code delta
 
-Net LOC change from `C_test` to `C_llm` and `C_random`. LOC is descriptive, not a quality measure.
+Net LOC change from `C_test` to `C_llm`. LOC is descriptive, not a quality measure.
 
 ### 5. Correctness gate
 
@@ -409,15 +398,10 @@ samples/<set>/<repo>-<pr>/
   c_llm/
     diff.patch                   # final C_llm vs C_test
     files/                       # full files of C_llm in allowed edit set
-  c_random/                      # if generated
-    diff.patch
-    seed.txt
-    validation.json
   measurements/
     c_test.json                  # raw measure_complexity output
     c_llm.json
     c_final.json
-    c_random.json                # if available
   phase7/
     review-bundle.md             # what gemini saw
     review-assignment.json       # A/B order seed
@@ -519,21 +503,23 @@ The cost of this layer is small (per-trial notes + one cross-trial backlog file)
 
    **4c. Reconcile.** Any blocker finding from hunt-spec moves the parent claim to Rejected. The reconciler may narrow warnings and must justify each retained claim against the hunt findings. It may not narrow or qualify a blocker. (v2 change: locked V2)
 
-   **4d. Blind-blind-merge.** Two models, same reconciled spec, separate `/tmp` directories. Each produces a refactored version independently. Per-file merge rule: pick the candidate with fewer lines changed vs `C_test` (proxy for structural simplicity). On exact tie, pick alphabetically by model name (codex before opus). The result is the merged candidate. Blind-blind is mandatory for every eligible PR; there is no single-agent path. (v2 change: locked S4)
+   **4d. Blind-blind-merge.** Two models, same reconciled spec, separate `/tmp` directories. Each produces a refactored version independently. **Whole-model selection rule:** pick the model whose entire output has fewer total lines changed vs `C_test` across all allowed-edit files (sum-of-churn proxy for structural simplicity, in aggregate). On exact tie, pick alphabetically by model name (codex before opus). The losing model's output is discarded entirely. (v2 change: locked S4; whole-model rule replaces v2 round-2's per-file rule per codex hostile-review concern #3 — per-file picks created semantically incoherent Frankenstein candidates when one model's helper extractions weren't consistent across files)
+
+   Blind-blind is mandatory for every eligible PR; there is no single-agent path.
 
    Models: Claude Opus 4.6 via Claude Code and Codex GPT-5.4 via `codex exec -s danger-full-access`. Gemini 3.1 Pro Preview via Vertex AI serves as reviewer only; it does not participate in generation.
 
    **4e. Implementation evidence check.** The implementer must either modify at least one source file with an actual diff and report modified files, or explicitly declare no-op with reason. "Applied M/M, no changes made" is internally inconsistent and is flagged as trivial no-op. (v2 change: proposed V3)
 
-   **4f. Complexity gate.** Measure scoped mean cognitive complexity on the merged candidate and `C_test`. If `mean_cog(candidate) > mean_cog(C_test) + 0.05`, reject the candidate and fall back to `C_test` as no-op. (v2 change: locked S1)
+   **4f. Hunt-code (iterative).** Run broad adversarial review against the merged refactoring with the original spec as input. Hunt-code must run the repo's full build plus tests, not just typecheck. Failing the build or tests is a blocker. Iterate: hunt → implementer addresses findings → re-hunt, until zero findings. Hard cap: 10 rounds. If unconverged at cap, fall back to `C_test` as no-op. (v2 change: locked S2 and S5)
 
-   **4g. Hunt-code (iterative).** Run broad adversarial review against the merged refactoring with the original spec as input. Hunt-code must run the repo's full build plus tests, not just typecheck. Failing the build or tests is a blocker. Iterate: hunt → implementer addresses findings → re-hunt, until zero findings. Hard cap: 10 rounds. If unconverged at cap, fall back to `C_test` as no-op. (v2 change: locked S2 and S5)
-
-   **4h. Reviewer loop.** Gemini 3.1 Pro reviews the post-hunt-code `C_llm` against the goal and artifact context. If it returns zero comments, ship. If it returns comments, the implementer addresses them and Gemini re-reviews. Stop when comments reach zero or comment-count shrinkage stops. Hard cap: 10 review rounds. If remaining comments are blockers, fall back to `C_test`; otherwise ship with remaining comments recorded.
+   **4g. Reviewer loop.** Gemini 3.1 Pro reviews the post-hunt-code `C_llm` against the goal and artifact context. If it returns zero comments, proceed to ship-time gate. If it returns comments, the implementer addresses them and Gemini re-reviews. Stop when comments reach zero or comment-count shrinkage stops. Hard cap: 10 review rounds. If remaining comments are blockers, fall back to `C_test`; otherwise ship with remaining comments recorded.
 
    If the reviewer loop's implementer changes are non-trivial enough to warrant re-running hunt-code, hunt-code runs again with its own cap reset (does not accumulate against the prior round). The reviewer-loop cap also resets after each hunt-code re-entry. (v2 change: locked S6)
 
-   The LLM may not edit tests. It may only edit source files changed from `C_base` to `C_test`. This is mechanically enforced after generation. (v2 change: clean-pass step removed; cleanup happens organically in 4g and 4h iterations)
+   **4h. Ship-time complexity gate.** AFTER hunt-code and reviewer-loop converge, measure scoped mean cognitive complexity on the final `C_llm` candidate and `C_test`. If `mean_cog(C_llm) > mean_cog(C_test) + 0.05`, reject the candidate and fall back to `C_test` as no-op. (v2 change: locked S1, gate moved from post-merge to ship-time per codex hostile-review concern #2 — earlier placement let later 4f/4g edits reintroduce complexity without re-checking)
+
+   The LLM may not edit tests. It may only edit source files changed from `C_base` to `C_test`. This is mechanically enforced after generation. (v2 change: clean-pass step removed; cleanup happens organically in 4f and 4g iterations)
 
    Per-language spec template adds idiomatic notes for the target language (gofmt/go-vet for Go, PEP 8 for Python, cargo fmt/clippy for Rust, tsc gate for TypeScript) — kept short, not exhaustive style guides. Each repo's spec template is committed to the trail before its first PR runs. (v2 change: locked V4, simplified)
 
@@ -542,15 +528,10 @@ The cost of this layer is small (per-trial notes + one cross-trial backlog file)
 
    If either fails, the trial is a hard no-op: `C_llm = C_test` for all metrics. The agent failed to stay in the equivalence class.
 
-6. **Generate random control.**
-   Apply the predetermined random or mechanical transformation to `C_test`, producing `C_random`.
+6. **Measure.**
+   Compute complexity and LOC for `C_test`, `C_llm`, and `C_final`. Save raw JSON output per snapshot. (v2 change: locked O3)
 
-   Verify whether `C_random` passes the build and tests. If it fails, record failure and classify the control as invalid for that PR.
-
-7. **Measure.**
-   Compute complexity and LOC for `C_test`, `C_llm`, `C_final`, and `C_random`. Save raw JSON output per snapshot. (v2 change: proposed O3)
-
-8. **Blind review.**
+7. **Blind review.**
    Two phases per reviewer per PR:
 
    **Phase 1 - Forced choice.** Present unlabeled diffs from `C_base` to `C_test` and `C_llm`. Reviewer picks which to approve assuming tests pass. Record semantic concerns and rationale.
@@ -559,15 +540,14 @@ The cost of this layer is small (per-trial notes + one cross-trial backlog file)
 
    **Reviewer protocol (v2):**
    - **Single reviewer is sufficient for trial validity.** Primary reviewer = Gemini 3.1 Pro Preview throughout (in-pipeline + Phase 7), with the pre-approval bias acknowledged.
-   - Additional reviewers (Claude Sonnet 4.5, OpenAI GPT-5) are **optional** and run only for inter-rater reliability calibration on a pre-registered subset (e.g., the first batch of each repo). Not required per-trial.
-   - The v1 ≥3-reviewer requirement is dropped: pilot blinding failed 5/5, so adding more LLM reviewers averages over the same surface-pattern signal without breaking the bias.
+   - **No multi-reviewer panel.** Codex GPT-5.4 already acts as implicit adversarial reviewer at hunt-spec (4b) and hunt-code (4g). The pipeline architecture is already "codex critiques, Gemini ships-or-rejects." Adding Sonnet 4.5 + GPT-5 as a calibration subset would just average over the same LLM-stylistic-pattern surface (pilot blinding failed 5/5 with one model; n more models won't break the bias). Skipped to keep v2 simple.
    - The reviewer receives the same goal anchor as the volley: PR title + PR body + linked issue title/body (where available). This makes the reviewer's task structurally analogous to the volley's task — judge the artifact against the goal.
    (v2 change: locked R2 + V1 alignment)
 
-9. **Post-ranking blinding check.**
+8. **Post-ranking blinding check.**
    After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
 
-10. **Record all metadata.**
+9. **Record all metadata.**
     Record:
 
     - Repository
@@ -606,11 +586,9 @@ For Python repos, save `pip freeze` output per PR as `samples/<set>/<repo>-<pr>/
 
 This establishes the baseline state after tests first pass.
 
-### Random/mechanical control
+### Random/mechanical control — DROPPED
 
-`C_random`, a semantics-preserving but non-simplifying transformation.
-
-This tests whether metrics reward any change or specifically reward simplification.
+`C_random` was specified in v1 but never generated. v2 drops it (see Snapshot Definitions). Trade-off accepted: P1 measures direction-of-change only, not simplification-specificity.
 
 ### Directional proxy
 
@@ -658,7 +636,7 @@ Improvement threshold:
 
 Reject the parity null if the observed distribution falls outside the parity envelope in any direction. Accept improvement if the observed past rate is at least 50%. If parity holds and improvement does not, report: "matches reviewer judgment on trajectory, does not exceed it."
 
-### 3. Human merge-readiness
+### 3. Model-reviewer merge-readiness
 
 Question: Do blind reviewers prefer `C_llm` over `C_test` for merge-readiness?
 
@@ -765,7 +743,7 @@ The following v1 pilot decisions are inherited unless explicitly modified by v2.
 1. **Complexity tool and configuration.** TypeScript uses `scripts/measure_complexity.mjs`, an AST walker built on `@typescript-eslint/typescript-estree`, run from inside each cleanroom. Primary scalar is weighted mean cognitive complexity across scoped functions. Secondary scalars are weighted mean cyclomatic, max cyclomatic, max cognitive, max nesting, function count, and total LOC.
 2. **Review presentation format.** Per-PR markdown bundle with sibling diff patches. Unified diff with 3-line context. Neutral labels. Sequential presentation. Deterministic A/B assignment by hash. Reviewer-facing content includes PR title, PR body, neutral task description, and diffs.
 3. **Reviewer population criteria.** Primary reviewer is Gemini 3.1 Pro Preview. Secondary reviewers are Claude Sonnet 4.5 and OpenAI GPT-5 where non-conflicted and available. v2 modifies this by dropping the hard discard rule for trials with fewer than 3 reviewers and by acknowledging Gemini pre-approval bias from the reviewer loop. (v2 change: locked S6, proposed R2)
-4. **`C_random` generator specifics.** TypeScript random controls use local variable/parameter renames, independent statement reordering, and redundant parenthesization. Validation requires tests/build to pass and mean cognitive complexity not to decrease by more than `delta = 0.05`.
+4. **`C_random` generator specifics.** Dropped in v2. (v2 change: see Snapshot Definitions for rationale.)
 5. **Boundary threshold `delta`.** `delta = 0.05` on mean cognitive complexity. v2 also uses this threshold for the complexity gate. (v2 change: locked S1)
 6. **Secondary repo expansion trigger.** Expand a secondary repo from 3 to 10 PRs if forced-choice preference for `C_llm` drops below 50%, wrong-direction rate is at least 2/3, or there are zero "past" trials.
 7. **PR size bound adjustments.** v2 overrides v1's 100-2000 bound with 500-5000 source lines measured from `C_base` to `C_test` after exclusions. (v2 change: locked S4 + C3)
@@ -789,10 +767,7 @@ The study may be deemed infeasible, or redesigned before main-sample execution, 
 5. **Metrics are inapplicable.**
    Complexity or distance metrics cannot be computed for a large enough share of cases to support the planned primary analyses.
 
-6. **`C_random` cannot be generated reliably.**
-   The random/mechanical control cannot be generated without frequent behavioral breakage, accidental simplification, or invalid edits.
-
-7. **Reviewer-loop convergence fails systematically.**
+6. **Reviewer-loop convergence fails systematically.**
    More than 40% of active candidates hit the Gemini reviewer-loop cap or impasse with unresolved blockers. (v2 change: locked S6)
 
 These are feasibility and design-validity conditions, not efficacy stopping rules.
@@ -805,7 +780,7 @@ These are feasibility and design-validity conditions, not efficacy stopping rule
 
 The denominator is all trials. Hard no-op and trivial no-op trials count as zero complexity reduction.
 
-**Why P1 has no parity null:** P1's parity-equivalent question — "does the LLM reduce complexity at a rate above what arbitrary semantic-preserving change would?" — is answered by the `C_random` comparison, not by an alternative threshold on P1 itself. If `C_random` is not generated for a trial (per-repo timebox exceeded), P1 evaluation for that trial is incomplete — only the absolute reduction-rate is reported, not the simplification-specific signal. This was a v1 pilot gap (no `C_random` generated); v2 closes it for the primary repo.
+**Why P1 has no parity null:** the parity-equivalent for P1 would be a mechanical-control comparison (`C_random`). v2 drops `C_random` because the proposed transformations don't approximate the LLM's multi-file structural reshaping. Without that control, P1 measures direction-of-change only — "complexity went down" — not the stronger "simplification specifically vs noise." Honest given the available control. If a future v3 designs a meaningful structural-noise control, P1 can be re-strengthened.
 
 ### P2: Trajectory past `C_final`
 
@@ -827,7 +802,7 @@ past >= 50%
 
 The wrong-direction rate is expected to remain below 20% of active trials. A wrong-direction rate above 20% rejects the v1 optimistic slop-slope prediction even if P3 remains positive.
 
-### P3: Human merge-readiness
+### P3: Model-reviewer merge-readiness
 
 Blind reviewers will prefer `C_llm` over `C_test` in at least 65% of all reviewer-PR forced-choice judgments. (v2 change: locked R1)
 
@@ -976,9 +951,11 @@ Bias direction is mixed. Positive results on P1, P2, and P3 are conservative bec
 
 ### If confirmed
 
-LLMs can autonomously improve the complexity trajectory and merge-readiness of large merged brownfield contribution drafts after tests pass, within the scoped class of PRs studied.
+The forge-wrapped pipeline (goal-anchored volley + adversarial spec review + blind-blind merge + iterative bug-hunt + Gemini reviewer-loop + ship-time complexity gate) can autonomously improve the complexity trajectory and Gemini-judged merge-readiness of large merged brownfield contribution drafts after tests pass, within the scoped class of PRs studied.
 
-The practical implication is that coding agents should include a goal-anchored refactoring pass, full build/test validation, complexity gate, broad bug-hunt, and lightweight reviewer loop after achieving correctness and before requesting review. This could reduce review burden by pre-resolving some cleanup and maintainability feedback.
+**Important scope caveat (per codex hostile-review concern #10):** the conclusion supports *this specific assembly*, not "add a refactoring pass to your agent workflow." The intervention being evaluated is a multi-stage forge with two generators, three iterative loops, a complexity gate, and a model reviewer. The experiment does not isolate the marginal value of any individual stage. A practitioner reading "forge helps merged brownfield PRs" should NOT infer "any LLM refactor pass would help" or "the simpler subset of forge would help." Those are different claims requiring different studies (see also retro R1 in v1: single-shot ablation is a known-answer, not informative; but stage-ablation within forge would be informative — and is not in v2).
+
+The practical implication, narrowly: agent workflows that already use multi-stage adversarial pipelines benefit from the v2 forge-wrapped configuration. Lightweight refactor passes (single-pass, no review, no gate) are not validated by this design.
 
 ### If partially confirmed
 
