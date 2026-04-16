@@ -158,17 +158,21 @@ This raises eligibility rate from ~75% to ~95% by rejecting bad candidates upfro
 
 **Fix:** condition 5 requires non-trivial revision in **the measurement scope** (allowed edit set ∩ non-test files), not just any file.
 
-### C3. Raise the size floor: small PRs are uninformative *(tiny effort, high signal-per-trial)*
+### C3. Raise the size floor: size/complexity induces down *(tiny effort, high signal-per-trial)*
 
-**Problem observed:** the pilot included PRs as small as 270 LOC (fastapi 14962), 302 LOC (cli/cli 12846), 374 LOC (cli/cli 12811). Outcomes on those PRs are uninformative — they're either trivial wins for forge or trivial no-ops. Neither moves the experiment's prior.
+**Down-induction argument.** The prereg already uses this logic for repo selection ("if it works on the strictest repos, down-induction to simpler ones is plausible"). The same logic applies to PR size *within* a repo: if forge handles large and complex PRs well, the small/simple cases are implied. Testing small PRs is redundant work.
 
-The interesting case — and the case the prereg already gestures at — is large PRs where:
+This sharpens the framing: small PRs aren't "noisy" or "uninformative." They're *implied* by the large PR results. We shouldn't need to run them at all.
+
+**Problem observed:** the pilot included PRs as small as 270 LOC (fastapi 14962), 302 LOC (cli/cli 12846), 374 LOC (cli/cli 12811). The fact that forge handled some easily and choked on others tells us little — both outcomes are implied by what we'd see at the high end.
+
+The interesting case is large PRs where:
 - Forge has more room to mess up (more places for bad refactors to land)
 - Reviewer additive bias has more surface to manifest (C_final more likely to diverge from C_test)
 - Complexity deltas are large enough to interpret (above metric noise)
-- Single-pass refactoring is harder, blind-blind earns its precondition (S4)
+- Blind-blind earns its precondition (S4)
 
-**Fix:** raise the minimum to 500 source lines (C_base → C_test, post-exclusion). Make "prefer larger" strict, not preferential — when expanding a sample, pick from the top of the size-sorted candidate pool.
+**Fix:** raise the minimum to 500 source lines (C_base → C_test, post-exclusion). Make "prefer larger" strict — when expanding a sample, pick from the top of the size-sorted candidate pool. Surprise that holds at the top induces down to smaller cases.
 
 **Maximum bound:** the registered 2000 was a reviewer-fatigue ceiling for Phase 7 single-session review. With multi-reviewer support and chunkable diffs, raise to 5000 source lines. PR cli/cli 24489 (3099 LOC) was excluded post-extraction under the 2000 cap but is exactly the kind of trial worth running.
 
