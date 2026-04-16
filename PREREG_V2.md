@@ -176,7 +176,7 @@ Results are evaluated in batches. After each batch, decide: stop because the sig
 
 This is group sequential in spirit: look after each batch, expand if uncertain. Evidence compounds across batches. Post-expansion analyses from any repo are reported alongside pre-expansion results so the reader can see what changed.
 
-No maximum sample size is fixed beyond the batch structure. The stopping rule is confidence, not a number. Each expansion decision and its rationale are recorded in the work log before the next batch begins.
+**Hard caps (per codex hostile-review Q20 PARTIAL):** primary repo capped at 25 PRs total; each secondary repo capped at 10 PRs total. v1's "no fixed maximum" was unbounded adaptive expansion; v2 caps it. The stopping rule is confidence, not a number — but bounded. Each expansion decision and its rationale are recorded in the work log before the next batch begins.
 
 ## Snapshot Definitions
 
@@ -852,7 +852,7 @@ These scenarios will be discussed in interpretation regardless of whether the pr
 
 ## Checklist Audit
 
-This prereg was audited against the prereg checklist. Answers below.
+This prereg was audited against the [20-question prereg checklist](https://june.kim/blog/2026-04-14-prereg-audit/) twice — once during drafting (the answers below for Q3, Q8, Q12, Q16, Q20 inherited from v1) and once via codex hostile-review of the v2 draft. The codex-pass result: 8 PASS, 11 PARTIAL, 1 N/A. PARTIAL items are addressed inline below where cheaply fixable; otherwise they are accepted limitations consistent with the v2 design heuristic ("evidence not paper-grade rigor" plus "this prereg evaluates the forge bundle, not stage-isolated effects").
 
 **Q3 (Descartes) - Assumptions that would invalidate:**
 
@@ -864,11 +864,13 @@ This prereg was audited against the prereg checklist. Answers below.
 
 **Q8 (Chamberlin) - Competing explanations for a positive result:**
 
-- The prompt was tuned on dev-set PRs from the same repos, and the test-set PRs share enough structure that the prompt's effectiveness is overfitted rather than general.
-- The model has trained on similar public PRs and is reproducing patterns, not reasoning. Output quality remains the practical target, but this limits generalization.
-- The complexity reduction is real but reviewer preference is anchored by seeing `C_final` in Phase 2, not by independent judgment.
-- Larger PRs were preferentially selected, and refactoring has more room on larger PRs. v2 intentionally leans into this because large PR success plausibly down-induces to smaller cases.
-- The reviewer-in-the-loop made the artifact better by optimizing toward Gemini's taste specifically, not toward human reviewer taste generally.
+These are NAMED but NOT ADJUDICATED in v2 (no second arm). v3, if needed, would build adjudicating arms for any that turn out load-bearing.
+
+- The prompt was tuned on dev-set PRs from the same repos, and the test-set PRs share enough structure that the prompt's effectiveness is overfitted rather than general. *Adjudicate via:* held-out repo, never run during dev.
+- The model has trained on similar public PRs and is reproducing patterns, not reasoning. Output quality remains the practical target, but this limits generalization. *Adjudicate via:* private repos with no public training exposure.
+- The complexity reduction is real but reviewer preference is anchored by seeing `C_final` in Phase 2, not by independent judgment. *Adjudicate via:* counterbalanced design where C_final is shown to half of trials only.
+- Larger PRs were preferentially selected, and refactoring has more room on larger PRs. v2 intentionally leans into this because large PR success plausibly down-induces to smaller cases. *Down-induction is plausible, not proven.*
+- The reviewer-in-the-loop made the artifact better by optimizing toward Gemini's taste specifically, not toward human reviewer taste generally. *Adjudicate via:* secondary review by Sonnet/GPT-5 on a sample (deferred from v2 per simplicity decision; see R2).
 
 **Q12 (Kuhn) - Paradigm assumptions:**
 
@@ -877,11 +879,24 @@ This prereg was audited against the prereg checklist. Answers below.
 **Q16 (Ioannidis) - Positive predictive value:**
 
 - 27 trials, moderate flexibility, prompt tuned on dev set, metrics registered before extraction, and expansion rules logged. Prior remains friendly: LLMs are probably decent at refactoring. Under these conditions, a positive result on P1 or P3 is likely real within the scoped population. P2 is more fragile because the trajectory classification depends on reviewer judgment calibrated against a lossy oracle.
-- No formal power analysis. The pilot estimated variance and showed P2 past-trajectory is likely harder to move than P3 preference.
+
+- **Back-of-envelope power** (binomial, n=27, two-sided α=0.05):
+  - P3 (rate ≥ 65% vs null 50%): ~62% power. Detects an effect this large but borderline.
+  - P3 (rate ≥ 65% vs parity envelope 40-60%): adequate to reject parity if true rate is ≥75%, marginal otherwise.
+  - P2 past (rate ≥ 50% vs null 30% mid-parity): ~58% power.
+  - P2 wrong (<20% threshold): ~70% power if true rate ≤10%.
+
+  These are post-hoc, conservative, and assume independent trials (which they are not — within-PR design has correlation structure). v2 accepts that small-n results are descriptive, not inferential. If a result lands close to threshold, the prereg's "evidence not paper-grade rigor" heuristic applies: report the rate, don't pretend statistical certainty.
+
+- v2 secondary repos at n=3 are descriptive only — no claim of statistical power on small batches. Expansion (per pilot decision 6) brings them to n=10 if signal warrants.
 
 **Q20 (Ramdas) - Sequential validity:**
 
 - Batch expansion looks at results before deciding whether to continue. This is peeking by design. Evidence compounds across batches; the second batch does not invalidate the first. All expansion decisions and their rationale are logged before the next batch begins. Pre-expansion and post-expansion results are reported side by side.
+
+- **Hard cap added in v2 per codex hostile-review (Q20 PARTIAL): 25 PRs per repo (primary), 10 PRs per repo (secondary).** v1's "no fixed maximum" allowed adaptive expansion to drift; v2 caps it. Stop-when-confident still applies, but bounded.
+
+- v2 does not use anytime-valid sequential inference (mSPRT, alpha-spending). The reported rates are descriptive across batches; statistical claims are weakened by peeking and acknowledged as such. v3 could adopt anytime-valid methods if the design moves toward formal hypothesis testing.
 
 **Skipped:**
 
