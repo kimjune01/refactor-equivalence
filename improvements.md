@@ -213,16 +213,26 @@ The interesting case is large PRs where:
 
 **Problem observed (retro R8):** P2 was registered as "past ≥ 50%" — an improvement threshold. Without a parity null, "did P2 pass" is ambiguous when observed past is 12-20%: that could mean "the LLM is broken" or "the LLM is at parity, beating the bar would have been a bonus." We can't tell.
 
-**Fix:** register both thresholds explicitly:
+**Fix:** register both thresholds explicitly for both P2 and P3.
 
 ```
-P2 evaluation:
+P2 evaluation (trajectory):
   Parity null distribution: past ∈ [25%, 45%], short ∈ [40%, 55%], wrong ∈ [10%, 20%]
   Improvement threshold: past ≥ 50%
 
   Reject parity null IF observed distribution falls outside parity envelope (in any direction)
   Accept improvement IF past ≥ 50%
-  If parity holds AND improvement does not: report "matches reviewer judgment, does not exceed it"
+  If parity holds AND improvement does not: report "matches reviewer judgment on
+  trajectory, does not exceed it"
+
+P3 evaluation (forced choice):
+  Parity null: prefer-C_llm rate ∈ [40%, 60%] (50/50 ± noise)
+  Improvement threshold: prefer-C_llm rate ≥ 65%
+
+  Reject parity null IF observed rate falls outside the parity envelope
+  Accept improvement IF rate ≥ 65%
+  If parity holds AND improvement does not: report "matches reviewer judgment on
+  merge-readiness, does not exceed it"
 ```
 
 ### R2. Drop ≥3-reviewer requirement *(tiny effort, medium value)*
@@ -311,6 +321,6 @@ These are the highest-leverage prompt + structure fixes. Everything below is ref
 
 **Q3 [LOCKED by exclusion]: No single-agent path.** Sub-blind-blind PRs are not eligible (S4 unified with C3). Every accepted PR runs blind-blind.
 
-**Q4: Should v2 register a parity null on P3 too?** Currently P3 has only an improvement threshold (≥65%). Same R8 logic applies: under parity what would we expect? If LLM and reviewer judgments are equally noisy, a 50/50 split is the parity null and 65% is meaningful improvement. Worth making explicit.
+**Q4 [LOCKED]: Parity null on P3** = prefer-C_llm rate ∈ [40%, 60%]. R1 covers both P2 and P3 with the dual-threshold framing.
 
 **Q5: Hunt-code's role after S1+S2.** Slim, drop, or keep broad?
