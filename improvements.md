@@ -6,15 +6,47 @@ Categories below: **prompt fixes**, **forge structure**, **selection criteria**,
 
 ## Prompt-level fixes
 
-### V1. Prescriptive-anchored volley *(tiny effort, huge value)*
+### V1. Volley needs a goal anchor: PR description as goal, diff as artifact *(tiny effort, huge value)*
 
 **Problem observed (fastapi 14962):** codex's volley produced "ensure X behavior is preserved" claims. Opus interpreted them correctly as preservation-of-existing-state and made zero changes. Both candidates were no-ops.
 
-**Fix:** add a precondition to the volley skill prompt:
+**Root cause:** the experiment harness invoked volley naked. The volley prompt gave codex the diff and asked for "claims," with no anchor against which "good claim" could be evaluated. Without a goal, codex could only describe the artifact's existing properties.
 
-> Each claim is a CHANGE: "Replace X with Y", "Inline Z", "Extract H from F". Claims that begin with "ensure", "preserve", or "keep" describe existing state and are NOT refactor claims — reject them. If you cannot find changes worth proposing, output an empty Accepted Claims list (this is allowed).
+**Fix:** the volley invocation must pair **goal** with **artifact**. Per the user's standard manual usage:
+- **Goal** = PR title + PR body (what the contributor was trying to achieve)
+- **Artifact** = the diff from C_base to C_test (the realization of the goal so far)
 
-This is a precondition on the spec format, enforceable by the skill before downstream stages run. If the volley emits non-prescriptive claims, the spec fails preflight and is regenerated.
+Claims are then proposed *changes to the artifact that better serve the goal*. This naturally produces prescriptive claims because every claim is gap-relative.
+
+**Volley prompt template (v2):**
+
+```
+You are sharpening a refactor spec. Treat the PR description as the GOAL —
+what the contributor was trying to achieve. Treat the diff as the ARTIFACT —
+the realization so far.
+
+PR title: {title}
+PR body: {body}
+
+Allowed edit set: {file list}
+Diff to refactor (artifact): {diff}
+
+What changes to the artifact would better serve the goal? Each claim should:
+- Move the artifact closer to the goal's intent (cleaner, less coupling,
+  less indirection introduced by THIS diff)
+- Preserve the goal's behavior (tests stay green)
+- Be specific (file + function/block + change)
+- Be bounded (one independent change per claim)
+- Reject claims that "preserve behavior" or "ensure X" — those are
+  descriptions of the artifact, not refinements toward the goal
+
+If the artifact already serves the goal cleanly, output an empty Accepted
+Claims list. That is allowed and is itself a finding.
+```
+
+The skill can carry a precondition checking that PR title + body are non-empty before volley runs — naked-spec invocations fail preflight.
+
+**Reliability of the goal source:** the repos in this experiment (gemini-cli, cli/cli, fastapi, ruff, django) all enforce PR templates with structured goal sections — typically `## Description`, `## Why`, `## Motivation`, or `## What`. Contributors fill these in to get past PR-description CI. So at test-set scale the goal anchor is reliably present in `gh pr view --json body`. The precondition can be tightened from "body is non-empty" to "body matches expected template sections" per repo, with naked-template PRs (e.g., contributor left placeholders unedited) treated as feasibility exclusions at selection time.
 
 ### V2. Adversarial reconcile *(tiny effort, high value)*
 
