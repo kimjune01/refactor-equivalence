@@ -450,6 +450,42 @@ This extends v1's trail commitment which was prompt + diff + final-snapshot only
 
 **v2 change: extends V1 trail commitment** with full per-trial artifact capture. Pulls in O2 (Python venv manifest) and O3 (complexity JSON) as locked, plus pipeline-stage transcripts (volley rounds, hunt rounds, reviewer-loop iterations) which were not in v1.
 
+### v3-prep: live anomaly capture
+
+Secondary goal of v2: leave enough procedural evidence for a v3 prereg if v2's results motivate one. The trail commitment above captures *what happened*; this section captures *what surprised us about it*.
+
+**Per-trial: anomaly notes.** Each trial directory includes:
+
+```
+samples/<set>/<repo>-<pr>/
+  anomalies.md      # free-text observations during the trial: "reviewer
+                    # comment style was unusual", "implementer needed 8
+                    # rounds, all addressing the same misread", etc.
+  deviations.md     # cases where the pipeline did something the prereg
+                    # didn't explicitly cover; what we did and why
+```
+
+These are populated *during* the trial, not reconstructed from logs at the end. They cost nothing in the common case (empty file) and cost minutes when a real surprise happens.
+
+**Cross-trial: v3 questions backlog.** A single file at the experiment root:
+
+```
+v3_questions.md     # running list of "if v2 confirms / refutes X, then v3
+                    # should investigate Y" observations. Populated by the
+                    # experimenter as observations arise.
+```
+
+Examples of v3-question entries (illustrative):
+- "If hunt-spec consistently catches `__proto__`-style prototype-pollution-by-refactor (as in v1 pilot 24483), v3 should add a typed-language-aware adversarial check explicitly."
+- "If reviewer-loop converges in 1 round on >80% of trials, v3 can simplify by removing the loop-cap machinery."
+- "If trivial no-op rate drops below 5% with V1 prescriptive volley, v3 can remove the trivial-no-op classification."
+
+**Pipeline-deviation log.** When the experimenter has to manually intervene (apply a patch, work around a feasibility issue, exclude a candidate post-extraction), record the intervention. Pilot v1 had several of these (TS type error patch on PR 24483, dep iteration on fastapi); v2 logs them as part of the trail.
+
+**Failure-mode taxonomy aggregation.** At end of v2 main-sample, produce a `failure_modes_v2.md` that categorizes every no-op and exclusion observed, mapped to v2's anticipated failure modes (the 7 pilot-identified). Failures the v2 design didn't anticipate become v3 design inputs.
+
+The cost of this layer is small (per-trial notes + one cross-trial backlog file). The benefit is that v3, if needed, starts from concrete observed failures and not retrospective reconstruction.
+
 ### For each sampled PR:
 
 1. **Extract snapshots.**
