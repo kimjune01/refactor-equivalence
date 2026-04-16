@@ -62,3 +62,17 @@ Format per entry:
 ## v2 in-flight entries
 
 (populated during v2 execution)
+
+---
+
+## Pre-v2 seed entries (added during v2 prereg drafting)
+
+### Pre-seed 5 — model-strength curve
+
+**Trigger**: speculation during v2 design — older/weaker models likely worse at forging because each stage requires nontrivial instruction-following.
+
+**v2 evidence (so far)**: v2 fixes the model lineup at 2026-vintage SOTA (Opus 4.6, Codex GPT-5.4, Gemini 3.1 Pro). No model-strength variation tested.
+
+**v3 hypothesis**: substituting weaker models (Sonnet 4.5, GPT-4-class, Gemini 1.5) at one or more forge stages would degrade the rate. Open question is the SHAPE of the degradation: linear with model size, threshold at some capability level, or stage-specific (e.g., reviewer is robust but generator collapses).
+
+**Provisional priority**: low — practitioner prior already says "weaker → worse." A formal trial may not move the posterior much beyond confirming the prior. But useful if v2 results need to be hedged for less-capable model deployments.

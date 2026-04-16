@@ -981,6 +981,12 @@ The experiment tests this prompt, these models, and these PRs under a specific f
 
 Positive results on high-caliber repos suggest the refactoring pass may transfer to simpler codebases, but different code quality norms and PR shapes could change the effect. Down-induction is plausible, not guaranteed.
 
+### Model-version sensitivity
+
+v2's results are anchored to specific 2026-vintage models: Opus 4.6 + Codex GPT-5.4 (generators), Gemini 3.1 Pro Preview (reviewer). Older or weaker models likely behave differently — speculatively, worse, since each forge stage requires the model to follow nontrivial instructions (prescriptive volley, adversarial hunt, reviewer judgment, implementer addressing comments) that lean on instruction-following capability.
+
+Practitioner reading: "forge works" in v2 means "forge works with current SOTA models in late-2025/early-2026." A practitioner running an older model lineup should not infer the same result. v3, if needed, could test model-strength as a variable (Sonnet 4.5, GPT-4-class, Gemini 1.5 substitutions) to characterize the curve. Same retro R1 logic applies though: the practitioner prior is "weaker models do worse," so a formal trial may not be informative beyond that.
+
 ### Environment reconstruction
 
 Historical test environments may be hard to reproduce. PRs whose `C_test` status cannot be reconstructed reproducibly are excluded before assignment.
