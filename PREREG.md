@@ -694,3 +694,67 @@ Different outcome patterns imply different conclusions:
 The complexity axis may require contextual judgment that LLMs lack without reviewer feedback. Reviewers may not merely be asking for less complexity; they may be asking for project-specific tradeoffs that are difficult to infer from code alone.
 
 ## Registered: 2026-04-14
+
+## Retrospective
+
+Append-only section for design lessons noticed in flight. These are **not amendments** — the registered protocol stands as written. This section captures tradeoffs we made without fully naming and questions that arose during pilot execution, so a prereg v2 or a follow-up study can visit them deliberately instead of rediscovering them under pressure.
+
+### R1 — Estimand is narrower than its wording; single-shot is not a gap worth filling
+
+The prereg's estimand says "the effect of an autonomous post-tests-pass LLM refactoring pass." In the procedure, that pass is specifically the forge pipeline (Volley → Hunt-spec → Blind-blind-merge → Hunt-code → Volley-clean). The study cannot decompose:
+
+- Is the LLM taste-competent on brownfield refactoring?
+- Is the forge pipeline the load-bearing component?
+
+Those two are bundled as `C_llm`.
+
+**Not worth filling with a formal single-shot ablation.** The practitioner prior — single-shot agents produce substantially worse brownfield refactors than forge-wrapped agents — is already strong from day-to-day use. A small formal trial would not move the posterior, wouldn't reach significance at pilot scale anyway, and would spend trial capacity on a known quantity. The observation is just that when we write "LLM refactoring pass" in future preregs, we should say "this specific pipeline on this specific model pair" up front, and reserve "LLM refactoring" as an informal umbrella rather than a formal claim.
+
+### R2 — The comparator-in-practice should have been named
+
+The prereg states the null (`C_test`) and the mechanical control (`C_random`) explicitly. It does not name the *alternative-in-practice* — what a practitioner would actually use if they weren't running this pipeline. That's an omission in comparator specification.
+
+A prereg asking "does X help?" benefits from identifying three things, not two:
+- Null (no intervention)
+- Mechanical control (any-change vs. simplification-specific)
+- Alternative-in-practice (what they'd use otherwise)
+
+We have the first two. The third was left implicit. General lesson: treat the alternative-in-practice as a first-class comparator even when running it isn't worth the trial cost — at minimum, name it so the reader knows what the study is *not* answering.
+
+### R3 — Reviewer additive bias observed; slop-slope reframe is partial
+
+Pilot observation (n=5): in all 5 PRs, `C_final > C_test` on LOC (reviewers pushed for additions), while `C_llm ≤ C_test` on LOC (the pipeline held or subtracted). Opposite direction from the initial slop-slope framing, which positioned the LLM as the additive agent and the reviewer as the corrective agent.
+
+Honest reading: the forge pipeline is prompt-scoped *against* additions, so its LOC-flatness is enforced, not tasteful. The reviewer's additions are likely mostly real value (tests, documentation, edge cases) rather than slop. The data doesn't refute Dexter Horthy's slop-slope hypothesis — it suggests that under forge wrapping, the slop-slope is suppressed, and a different pattern becomes visible: **the reviewer is the scope expander**.
+
+Cannot be validated within the current prereg. Worth noting in the final write-up as a partial reframe observation.
+
+### R4 — Scalar complexity deltas are small; reviewer judgment will dominate
+
+Pilot observation: measured deltas between `C_test`, `C_llm`, and `C_final` on mean cognitive complexity are 0.01–0.12. Under δ=0.05 (a reasonable boundary given observed metric noise), 3/5 pilot PRs land in the boundary zone and only 2/5 are clearly past `C_final`.
+
+This matches the prereg's design that scalar calibrates and reviewer judgment decides — but the effect size is smaller than we implicitly planned against. If P1's 70% threshold is read off scalar direction (any positive delta), it will likely be met; if read off "clearly past" (Δ > δ), it may not.
+
+Worth clarifying in v2: when P1 asks for "lower measured complexity," does it mean Δ < 0 (any direction) or Δ < -δ (clearly lower)? The current prereg is compatible with either. Locking this in advance prevents post-hoc framing.
+
+### R5 — Parallelism across PRs is not free
+
+Operational finding: running test suites in parallel across PRs collides on shared filesystem state (`~/.gemini`, `/tmp` artifacts used by `logger.test.ts` and `write-file.test.ts`). Sequential test runs work; parallel does not.
+
+Repeatability footnote, not a design flaw. Operational rule for v2: **test-running phases must be serialized across PRs; generation and review phases can parallelize.**
+
+### R6 — Hunt-code missed a type error that build caught
+
+Operational finding on PR 24483: hunt-code (codex adversarial review of merged refactor) returned "No findings" while `npm run build` caught a TypeScript type error (dead case discriminant under a narrowed union). Two possibilities: (a) hunt-code ran out of order after the error was patched, (b) `tsc --noEmit` in hunt-code didn't exercise the same compilation path as `npm run build`.
+
+Recommendation for v2: **hunt-code runs the repo's actual build command (not just `tsc --noEmit`) as part of its checks, and must run before any manual intervention.**
+
+### R7 — Codex volleys were additively biased by default
+
+Operational finding: across 5 pilot PRs, codex's initial volley produced zero rejections. Rejections appeared only after hunt-spec fed defects back. Consistent with the training-data hypothesis that models trained on merged PRs lean toward adding claims rather than rejecting them.
+
+Implication: **hunt-spec is not optional.** It is the step that makes the generator honest. In a shorter pipeline that skipped it, many of the defects it caught would have landed as unimplementable or test-breaking claims. This is likely architectural in current models, not prompt-fixable.
+
+### Using this section
+
+Read alongside the main prereg, not in place of it. The registered protocol is what gets executed. The retrospective is where we put lessons that would have changed the prereg if we had known them — documented now so they can shape v2 or a follow-up study, instead of silently shaping interpretation of the current one.
