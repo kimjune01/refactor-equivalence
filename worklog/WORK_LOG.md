@@ -373,3 +373,35 @@ Consolidated pilot findings across gemini-cli (TS, 5 PRs), cli/cli (Go, 9 PRs), 
 Secondary repos still pending: ruff (Rust, not attempted — cargo toolchain cost), django (Python, similar expected setup cost to fastapi). Follow-up can add them with 3-PR batches.
 
 Full summary: samples/dev/cross-repo-summary.md.
+
+### 14:00 — v2 prereg prep: improvements.md authored, 9 items locked
+
+improvements.md authored with 18 ranked items across prompt fixes, structure changes, selection criteria, registration, ops. Locked through conversation:
+
+- V1: prescriptive volley with goal=issue(s)+PR-body, artifact=diff. Empty Accepted Claims list allowed.
+- V2: adversarial reconcile — blocker findings → mandatory reject parent claim.
+- S1: complexity gate δ=0.05 on scoped mean cognitive, fall back to C_test.
+- S2: hunt-code runs full build, not just typecheck.
+- S4+C3 unified: 500 LOC threshold = blind-blind precondition = experiment eligibility. No single-agent path. Cap raised to 5000.
+- S5: hunt-code stays broad, iterates to zero-findings (per /bug-hunt skill default).
+- S6: reviewer-in-the-loop after merge; Gemini 3.1 throughout (in-pipeline + Phase 7); convergence on zero comments OR impasse on shrinking, N=10 safety bound.
+- R1: parity null + improvement threshold for both P2 (past ∈ [25-45%], improvement ≥ 50%) and P3 (prefer-C_llm ∈ [40-60%], improvement ≥ 65%).
+- R5: survivorship bias acknowledgment. Estimand restricted to "drafts of merged brownfield PRs." Bias direction makes positive results conservative (helps P1/P2/P3 credibility) but understates real-world slop-slope (hurts P4 prevalence claim).
+
+Now launching codex to draft PREREG_V2.md from improvements.md + v1 + pilot decisions. Will critique codex's draft as next-round volley — push back hard on items that don't match locked decisions.
+
+### 14:30 — v2 round 2 applied: all agreed-on push-backs
+
+Codex drafted PREREG_V2.md (846 lines). Critique applied 10 fixes:
+- Removed 4i Clean pass (v1 holdover, cleanup organic in 4g+4h)
+- Blind-blind merge rule: smaller-churn vs C_test, alpha on tie
+- Hunt-spec now iterates (parallel to hunt-code), N=10 cap
+- Hunt-code N=10 cap explicit
+- Caps reset per re-entry (don't accumulate)
+- Training cutoff table: Opus/Codex/Gemini/Sonnet/GPT-5; binding 2025-09 → eligibility 2025-10-01+
+- Sample size: pre-select ceil(target/0.70) to absorb 30% exclusion rate
+- C_random per-language families locked (TS/Go/Rust/Python); committed for primary, timebox-gated for secondary
+- Consolidated exclusion glob table (tests/docs/schemas/lockfiles/generated/vendored)
+- P1 has no parity null because C_random plays that role; flagged v1 gap
+
+PREREG_V2.md now committed (895 lines). Still open: codex's draft has remaining items I didn't push back on (proposed V3/V4/C1/C2/R2/R3/R4/O1/O2/O3 are inherited as-is). Could lock or refine in another round if needed.
