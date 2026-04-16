@@ -77,20 +77,22 @@ Format per entry:
 
 **Provisional priority**: low — practitioner prior already says "weaker → worse." A formal trial may not move the posterior much beyond confirming the prior. But useful if v2 results need to be hedged for less-capable model deployments.
 
-### Pre-seed 6 — refactor-bench positioning
+### Pre-seed 6 — refactor-bench positioning (pipeline-bench, not model-bench)
 
-**Trigger**: v2's design is benchmark-shaped — fixed PR set, reproducible pipeline, pre-registered scoring, multi-language, real merged PRs as ground truth. Practitioners could swap their model into the generator slot and get a comparable score.
+**Trigger**: v2's design is benchmark-shaped — fixed PR set, reproducible pipeline, pre-registered scoring, multi-language, real merged PRs as ground truth.
+
+**Important constraint**: forge is explicitly multi-model (opus + codex + gemini per stage). A score reflects all three roles working together, not any one model. So a "refactor-bench" derived from v2 is a **pipeline-evaluation bench**, not a model-evaluation bench. Audience is practitioners building agent pipelines, not model developers training new models.
 
 **v2 evidence (so far)**: not yet observable. Will know after v2 ships whether the pipeline is reproducible enough by external practitioners (cost, complexity, scaffolding).
 
-**v3 hypothesis**: a "refactor-bench" version positioned explicitly as a model evaluation benchmark, with:
+**v3 hypothesis**: a "refactor-bench" version positioned explicitly as a *pipeline* evaluation benchmark, with:
 - Versioned snapshots (v2.0 frozen, v2.1 adds N PRs every 6 months to fight contamination)
-- External model leaderboard
-- Model substitution at any forge stage (generator, reviewer, all of forge)
-- Composite score from P1/P2/P3 rates, plus per-stage scores
+- External pipeline leaderboard (e.g., "forge-X scored Y% on refactor-bench-2.0")
+- Pipeline substitution: practitioners swap their orchestration (different stages, different models per stage, single-shot vs multi-stage) into the generator/reviewer slots
+- Composite score from P1/P2/P3 rates, plus per-stage diagnostics (hunt-spec defect-find rate, reviewer-loop convergence, complexity-gate trip rate)
 
-Risks: contamination (models train on the bench), Goodhart targets, single-composite score loses nuance, expensive per-trial.
+Risks: contamination (pipelines train against the bench's PR set), Goodhart targets, single-composite score loses nuance, expensive per-trial.
 
-Mitigations baked into v2 design that help: forge wrapper makes single-shot training harder to game, reviewer-loop iteration measures address-quality not just first-shot, survivorship + size restriction limits scope of claims.
+Mitigations baked into v2 design: pipeline wrapping makes single-shot training harder to game, reviewer-loop iteration measures address-quality not just first-shot, survivorship + size restriction limits scope of claims, multi-language coverage prevents single-language overfit.
 
-**Provisional priority**: medium-high if v2's pipeline turns out reproducible by external practitioners. Real research output potential. Different audience (model evaluators in addition to practitioners).
+**Provisional priority**: medium if v2's pipeline turns out reproducible by external practitioners. Smaller audience than "model leaderboard" but a real one — pipeline orchestration is its own emerging category (forge, agentic frameworks, code-rewriting agents).
