@@ -12,9 +12,17 @@ Categories below: **prompt fixes**, **forge structure**, **selection criteria**,
 
 **Root cause:** the experiment harness invoked volley naked. The volley prompt gave codex the diff and asked for "claims," with no anchor against which "good claim" could be evaluated. Without a goal, codex could only describe the artifact's existing properties.
 
-**Fix:** the volley invocation must pair **goal** with **artifact**. Per the user's standard manual usage:
-- **Goal** = PR title + PR body (what the contributor was trying to achieve)
+**Fix:** the volley invocation must pair **goal** with **artifact**:
+- **Goal** = the linked issue(s) + PR title + PR body (what the contributor was trying to achieve)
 - **Artifact** = the diff from C_base to C_test (the realization of the goal so far)
+
+Issues matter because the PR description often degrades to "this PR does X" — already half-artifact, framed by the implementer. The original goal lives upstream in the issue: "users can't do Y," "we keep getting reports of Z," "we need to support W." That's the gradient against which "good claim" is evaluated.
+
+Goal fetch order:
+1. Parse PR body for issue references (`#1234`, `fixes #1234`, `closes #1234`, `gh-1234`, repo URLs)
+2. Fetch those issues via `gh issue view --json title,body`
+3. Concatenate: issue(s) first (the "why"), then PR title + body (the contributor's framing of "how")
+4. If no issue references: fall back to PR title + body alone, log as "no upstream goal"
 
 Claims are then proposed *changes to the artifact that better serve the goal*. This naturally produces prescriptive claims because every claim is gap-relative.
 
