@@ -423,3 +423,24 @@ PREREG_V2.md final-ish at ~895 lines. Could send to codex for adversarial pass t
 ### 15:15 — v2 round 5: v3-prep layer
 
 Added explicit v3-prep layer to PREREG_V2.md and seeded v3_questions.md (4 questions inherited from v1 pilot). Per-trial: anomalies.md + deviations.md populated in-flight. Cross-trial: v3_questions.md (running backlog) + failure_modes_v2.md (auto-aggregated at v2 end). The trail captures not just what happened but what surprised us about it, so v3 — if needed — starts from concrete observed gaps rather than retrospective reconstruction.
+
+### 16:30 — v2 rounds 6-8: codex hostile-review applied + checklist audit + power-expansion path
+
+Round 6 batched all of codex's hostile-review fixes:
+- C_random dropped (control too weak to support inference)
+- Reviewer protocol simplified: codex already adversarial throughout (hunt-spec, hunt-code), so one final reviewer (Gemini) is enough; no Sonnet/GPT-5 calibration
+- Complexity gate moved to ship-time (after hunt-code + reviewer-loop converge)
+- Blind-blind merge: whole-model selection (not per-file) to avoid Frankenstein candidates
+- Estimand restated to "large drafts" to match the actual sample (down-induction implies small)
+- P3 renamed "human merge-readiness" → "model-reviewer merge-readiness" (construct-mismatch fix)
+- "What this would show" tightened: positive result supports forge bundle, not generic refactor pass
+
+Round 7: ran 20-question prereg-checklist audit via codex hostile-review. Result: 8 PASS, 11 PARTIAL, 1 N/A. Cheap fixes added:
+- Q20: hard cap (25 primary, 10 secondary) per repo; v1 was unbounded
+- Q16: back-of-envelope power statement (~62% P3, ~58% P2 past at n=27); calls out small-n descriptive vs inferential
+- Q8: each competing explanation annotated with v3 adjudication arm
+- Saved PREREG_V2_audit.md as trail artifact
+
+Round 8: power-expansion path locked. If sample is underpowered, add another secondary repo at 3 PRs rather than lift per-repo caps. Trades scaffolding cost for sample size; preserves language/culture diversity.
+
+PREREG_V2.md is registerable. 8 commits across v2 prep. Open work: register the prereg, decide ruff/django (or other) secondary additions, run dev set.
