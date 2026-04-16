@@ -462,3 +462,9 @@ Doc tightened: "Changes from v1" was numbered prose; now a bullet list. Per-repo
 ### 17:30 — v2 round 12: dev-env timebox locked
 
 2-hour wall-clock to first passing build at C_final per repo. Timebox hit → drop the repo, substitute the next eligible secondary. No infrastructure-debugging iteration. Codifies the de facto v1 pilot behavior (fastapi dropped after ~90min). Protects the experiment from being held hostage by recalcitrant repo setup.
+
+### 18:00 — BOOTSTRAP_V2.md authored
+
+Fresh-session prompt at BOOTSTRAP_V2.md. Summarizes v2 protocol in a paragraph, lists hard rules (descriptive analysis, practitioner audience, recommendation criterion, dev-env timebox, trail commitment, no-self-review), maps three agents to four roles, and outlines immediate next steps (dev-set extraction → freeze → test set).
+
+v2 prereg is registerable. 12 rounds of refinement. Ready to kick off.
