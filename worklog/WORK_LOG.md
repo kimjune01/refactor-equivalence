@@ -419,3 +419,7 @@ Simpler-over-rigorous heuristic applied to remaining open items:
 - All previously "proposed" items now marked locked: V3, V4, C1, C2, R2, R3, R4, O1, O2, O3
 
 PREREG_V2.md final-ish at ~895 lines. Could send to codex for adversarial pass to surface anything I missed.
+
+### 15:15 — v2 round 5: v3-prep layer
+
+Added explicit v3-prep layer to PREREG_V2.md and seeded v3_questions.md (4 questions inherited from v1 pilot). Per-trial: anomalies.md + deviations.md populated in-flight. Cross-trial: v3_questions.md (running backlog) + failure_modes_v2.md (auto-aggregated at v2 end). The trail captures not just what happened but what surprised us about it, so v3 — if needed — starts from concrete observed gaps rather than retrospective reconstruction.
