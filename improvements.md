@@ -281,6 +281,14 @@ P3 evaluation (forced choice):
 
 > The estimand is the effect of a forge-wrapped LLM refactoring pass on **drafts of merged brownfield PRs** — i.e., on the population of pre-review states that ultimately produced an accepted version. Drafts that were rejected without merging are not in scope. This is a survivorship-filtered population: contributors who could not converge with reviewers, or whose drafts reviewers found unsalvageable, do not contribute data.
 
+**Direction of the bias — helps or hurts our case?** Mixed:
+
+- **Helps** the positive results (P1, P2, P3): survivorship pre-filters for drafts that contributors+reviewers could converge on, which means the drafts are already pretty good. Less room for the LLM to simplify, less room to land past C_final, less room for reviewers to find the LLM version dramatically better. Clearing a threshold on this sample means clearing it on a sample biased *against* clearing it. Positive results are conservative, more credible.
+
+- **Hurts** the negative result (P4 / slop-slope prevalence): the contributors whose drafts reviewers couldn't fix never enter the pool. Those are the same contributors most likely to ship slop in the wild. The wrong-direction rate observed here understates the real-world prevalence among arbitrary-quality agent output. The 25% combined wrong-direction observed in the pilot is plausibly an undercount.
+
+For the v2 framing: lean into the conservative-positive reading where it applies. For slop-slope, explicitly note the bias direction — observed rate is a lower bound on the wild rate.
+
 **Optional v2 design extension (not required to ship):** add a comparison arm sampling *closed-without-merge* PRs from the same period. Run forge against their `C_test` candidate states and compare:
 - Does forge produce test-passing C_llm at similar rates on rejected drafts?
 - When forge succeeds on a rejected draft, would reviewers prefer the C_llm over the C_test (despite reviewers having rejected the original)?
