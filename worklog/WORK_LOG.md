@@ -405,3 +405,17 @@ Codex drafted PREREG_V2.md (846 lines). Critique applied 10 fixes:
 - P1 has no parity null because C_random plays that role; flagged v1 gap
 
 PREREG_V2.md now committed (895 lines). Still open: codex's draft has remaining items I didn't push back on (proposed V3/V4/C1/C2/R2/R3/R4/O1/O2/O3 are inherited as-is). Could lock or refine in another round if needed.
+
+### 14:55 — v2 round 3+4: R2 locked, trail commitment expanded, simpler-over-rigorous heuristic applied
+
+R2 locked: single reviewer (Gemini 3.1) sufficient; multi-reviewer optional for IRR calibration on a subset. Pilot blinding failed 5/5 — adding LLM reviewers averages over the same surface-pattern signal. Reviewer also gets goal anchor (issue + PR title + body), mirroring volley.
+
+Trail commitment expanded to capture every pipeline artifact per trial under samples/<set>/<repo>-<pr>/: goal text, inputs, volley round transcripts, hunt-spec rounds, blind-blind diffs, merge decisions, complexity gate JSON, hunt-code rounds, build/test logs, reviewer-loop transcripts (comments + addresses per round), final C_llm + C_random + measurements, Phase 7 review JSONs, Python venv manifests. Plus cross-trial summaries (candidate pool, exclusion log, scaffolding cost, reviewer-loop convergence stats). Posterior analysis can re-run statistics, swap reviewer models, or change metrics without re-running the pipeline.
+
+Simpler-over-rigorous heuristic applied to remaining open items:
+- Stat analyses: report rates + deltas; formal tests only if close to threshold
+- V4 per-language template: short idiom notes, not exhaustive style guides  
+- R4 scaffolding cost: log it, don't formalize
+- All previously "proposed" items now marked locked: V3, V4, C1, C2, R2, R3, R4, O1, O2, O3
+
+PREREG_V2.md final-ish at ~895 lines. Could send to codex for adversarial pass to surface anything I missed.
