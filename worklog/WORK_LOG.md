@@ -444,3 +444,17 @@ Round 7: ran 20-question prereg-checklist audit via codex hostile-review. Result
 Round 8: power-expansion path locked. If sample is underpowered, add another secondary repo at 3 PRs rather than lift per-repo caps. Trades scaffolding cost for sample size; preserves language/culture diversity.
 
 PREREG_V2.md is registerable. 8 commits across v2 prep. Open work: register the prereg, decide ruff/django (or other) secondary additions, run dev set.
+
+### 17:00 — v2 round 11: scope tightened to TS/Go/Rust, doc tightened, 11 rounds total
+
+Final scope locks:
+- Drop django + fastapi (Python). v1 pilot showed Python setup was 90min of dep iteration; both eligible PRs no-opped. v3_questions pre-seed 7 captures "does forge work on Python?" as open question.
+- Keep cli/cli (Go) + ruff (Rust) as secondaries.
+- N=10 caps stay (surprise is bigger at 10 than 3 per user).
+- Iterative hunt-spec stays (user's actual usage pattern).
+- Sample: 21 minimum (15 + 2x3), 45 maximum (25 + 2x10).
+- Power expansion = add repos (re-add Python first), don't lift per-repo caps.
+
+Doc tightened: "Changes from v1" was numbered prose; now a bullet list. Per-repo registered-tools dropped Python entries. Sample-size totals simpler. PREREG_V2.md now ~1030 lines (was ~895 before rounds 6-10 added codex-hostile-review responses + analysis stance + recommendation criterion; back to readable density).
+
+11 total v2-prep rounds. Next: register the prereg, then start v2 dev-set extraction on gemini-cli.
