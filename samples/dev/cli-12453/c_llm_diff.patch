@@ -1,0 +1,270 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/api/queries_pr.go /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/api/queries_pr.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/api/queries_pr.go	2026-04-16 00:29:27
++++ /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/api/queries_pr.go	2026-04-16 00:29:28
+@@ -705,6 +705,19 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		User struct {
++			ID       string
++			Login    string
++			Name     string
++			TypeName string `graphql:"__typename"`
++		} `graphql:"... on User"`
++		Bot struct {
++			ID       string
++			Login    string
++			TypeName string `graphql:"__typename"`
++		} `graphql:"... on Bot"`
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -714,69 +727,32 @@
+ 		Node struct {
+ 			Issue struct {
+ 				SuggestedActors struct {
+-					Nodes []struct {
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-							TypeName string `graphql:"__typename"`
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-							TypeName string `graphql:"__typename"`
+-						} `graphql:"... on Bot"`
+-					}
++					Nodes []suggestedActorNode
+ 				} `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+ 				SuggestedActors struct {
+-					Nodes []struct {
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-							TypeName string `graphql:"__typename"`
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-							TypeName string `graphql:"__typename"`
+-						} `graphql:"... on Bot"`
+-					}
++					Nodes []suggestedActorNode
+ 				} `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+ 
+-	variables := map[string]interface{}{
+-		"id": githubv4.ID(assignableID),
+-	}
++	var queryArg interface{} = (*githubv4.String)(nil)
+ 	if query != "" {
+-		variables["query"] = githubv4.String(query)
+-	} else {
+-		variables["query"] = (*githubv4.String)(nil)
++		queryArg = githubv4.String(query)
+ 	}
++	variables := map[string]interface{}{
++		"id":    githubv4.ID(assignableID),
++		"query": queryArg,
++	}
+ 
+ 	var result responseData
+ 	if err := client.Query(repo.RepoHost(), "SuggestedAssignableActors", &result, variables); err != nil {
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-			TypeName string `graphql:"__typename"`
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-			TypeName string `graphql:"__typename"`
+-		} `graphql:"... on Bot"`
+-	}
+-
++	var nodes []suggestedActorNode
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+ 	} else if result.Node.Issue.SuggestedActors.Nodes != nil {
+@@ -789,16 +765,16 @@
+ 	viewerIncluded := false
+ 
+ 	for _, n := range nodes {
++		var actorLogin string
+ 		if n.User.TypeName == "User" && n.User.Login != "" {
+ 			actors = append(actors, AssignableUser{id: n.User.ID, login: n.User.Login, name: n.User.Name})
+-			if query == "" && viewerLogin != "" && n.User.Login == viewerLogin {
+-				viewerIncluded = true
+-			}
++			actorLogin = n.User.Login
+ 		} else if n.Bot.TypeName == "Bot" && n.Bot.Login != "" {
+ 			actors = append(actors, AssignableBot{id: n.Bot.ID, login: n.Bot.Login})
+-			if query == "" && viewerLogin != "" && n.Bot.Login == viewerLogin {
+-				viewerIncluded = true
+-			}
++			actorLogin = n.Bot.Login
++		}
++		if query == "" && viewerLogin != "" && actorLogin == viewerLogin {
++			viewerIncluded = true
+ 		}
+ 	}
+ 
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/internal/prompter/prompter.go /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/internal/prompter/prompter.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/internal/prompter/prompter.go	2026-04-16 00:29:27
++++ /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/internal/prompter/prompter.go	2026-04-16 00:29:28
+@@ -27,8 +27,10 @@
+ 	// Items passed in persistentOptions are always shown in the list, even when not selected.
+ 	// Unlike MultiSelect, MultiselectWithSearch returns the selected option strings,
+ 	// not their indices, since the list of options is dynamic.
+-	// The searchFunc args and return values are: func(query) (map[keys]labels, moreResultsCount, searchError)
+-	// Where the selected keys are eventually returned by MultiSelectWithSearch and the labels are what is shown to the user in the prompt.
++	// The searchFunc receives the query string and returns a MultiSelectSearchResult.
++	// Keys are returned by MultiSelectWithSearch when selected, Labels are shown to
++	// the user, MoreResults reports how many matches are not shown, and Err reports
++	// a search failure.
+ 	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+ 	// Input prompts the user to enter a string value.
+ 	Input(prompt string, defaultValue string) (string, error)
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/pr/edit/edit.go /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/pr/edit/edit.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/pr/edit/edit.go	2026-04-16 00:29:27
++++ /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/pr/edit/edit.go	2026-04-16 00:29:28
+@@ -337,36 +337,30 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+ 			assignableID,
+ 			input)
+ 		if err != nil {
+-			return prompter.MultiSelectSearchResult{
+-				Keys:        nil,
+-				Labels:      nil,
+-				MoreResults: 0,
+-				Err:         err,
+-			}
++			return prompter.MultiSelectSearchResult{Err: err}
+ 		}
+ 
+ 		var logins []string
+ 		var displayNames []string
+ 
+ 		for _, a := range actors {
+-			if a.Login() != "" {
+-				logins = append(logins, a.Login())
+-			} else {
++			login := a.Login()
++			if login == "" {
+ 				continue
+ 			}
+-
+-			if a.DisplayName() != "" {
+-				displayNames = append(displayNames, a.DisplayName())
+-			} else {
+-				displayNames = append(displayNames, a.Login())
++			label := a.DisplayName()
++			if label == "" {
++				label = login
+ 			}
++			logins = append(logins, login)
++			displayNames = append(displayNames, label)
+ 
+ 			// Update the assignable actors metadata in the editable struct
+ 			// so that updating the PR later can resolve the actor ID.
+@@ -379,7 +373,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/pr/shared/editable.go /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/pr/shared/editable.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:28
++++ /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:28
+@@ -307,7 +307,6 @@
+ 	}
+ 	if editable.Assignees.Edited {
+ 		if editable.AssigneeSearchFunc != nil {
+-			editable.Assignees.Options = []string{}
+ 			editable.Assignees.Value, err = p.MultiSelectWithSearch(
+ 				"Assignees",
+ 				"Search assignees",
+@@ -429,18 +428,8 @@
+ 
+ 	fetchAssignees := false
+ 	if editable.Assignees.Edited {
+-		// Similar as above, this is likely an interactive flow if no Add/Remove slices are set.
+-		// The addition here is that we also check for an assignee search func.
+-		// If we have a search func, we don't need to fetch assignees since we
+-		// assume that will be done dynamically in the prompting flow.
+-		if len(editable.Assignees.Add) == 0 && len(editable.Assignees.Remove) == 0 && editable.AssigneeSearchFunc == nil {
+-			fetchAssignees = true
+-		}
+-		// However, if we have Add/Remove operations (non-interactive flow),
+-		// we do need to fetch the assignees.
+-		if len(editable.Assignees.Add) > 0 || len(editable.Assignees.Remove) > 0 {
+-			fetchAssignees = true
+-		}
++		hasAssigneeMutations := len(editable.Assignees.Add) > 0 || len(editable.Assignees.Remove) > 0
++		fetchAssignees = hasAssigneeMutations || editable.AssigneeSearchFunc == nil
+ 	}
+ 
+ 	input := api.RepoMetadataInput{
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/preview/prompter/prompter.go /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/preview/prompter/prompter.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12453/c_test/pkg/cmd/preview/prompter/prompter.go	2026-04-16 00:29:28
++++ /tmp/refactor-eq-workdir/snapshots-cli/12453/c_llm/pkg/cmd/preview/prompter/prompter.go	2026-04-16 00:29:28
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2, // Indicate that there are more results available
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}

@@ -1,0 +1,591 @@
+--- a/internal/featuredetection/feature_detection.go
++++ b/internal/featuredetection/feature_detection.go
+@@ -23,11 +23,35 @@
+ }
+ 
+ type IssueFeatures struct {
+-	ActorIsAssignable bool
++	// TODO ApiActorsSupported
++	// ApiActorsSupported indicates the host supports actor-based APIs. True for
++	// github.com and ghe.com, false for GHES.
++	//
++	// The GitHub API has two generations of assignee/reviewer types:
++	//
++	// Legacy (GHES): Uses AssignableUser (users only) and node-ID-based mutations.
++	//   - assignableUsers query returns []AssignableUser
++	//   - Mutations take node IDs (assigneeIds, userReviewerIds, teamReviewerIds)
++	//
++	// Actor-based (github.com): Uses AssignableActor (User + Bot union) and
++	// login-based mutations, enabling assignment of non-user actors like Copilot.
++	//   - suggestedActors query returns []AssignableActor (User | Bot)
++	//   - suggestedReviewerActors returns []ReviewerCandidate (User | Bot | Team)
++	//   - Mutations take logins (replaceActorsForAssignable, requestReviewsByLogin)
++	//
++	// When GHES adds support for the actor-based types and mutations, this flag
++	// can be removed and all // TODO ApiActorsSupported sites collapsed to the
++	// actor-only path. To verify GHES support, check whether the GHES GraphQL
++	// schema includes:
++	//   - The suggestedActors field on Repository (assignee search)
++	//   - The suggestedReviewerActors field on PullRequest (reviewer search)
++	//   - The replaceActorsForAssignable mutation
++	//   - The requestReviewsByLogin mutation
++	ApiActorsSupported bool
+ }
+ 
+ var allIssueFeatures = IssueFeatures{
+-	ActorIsAssignable: true,
++	ApiActorsSupported: true,
+ }
+ 
+ type PullRequestFeatures struct {
+@@ -136,7 +160,7 @@
+ 	}
+ 
+ 	return IssueFeatures{
+-		ActorIsAssignable: false, // replaceActorsForAssignable GraphQL mutation unavailable on GHES
++		ApiActorsSupported: false, // TODO ApiActorsSupported — actor-based mutations unavailable on GHES
+ 	}, nil
+ }
+ 
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -524,7 +524,7 @@
+ 		}
+ 	}
+ 
+-	// Assign users using login-based mutation when ActorAssignees is true (github.com).
++	// Assign users using login-based mutation when ApiActorsSupported is true (github.com).
+ 	if assigneeLogins, ok := params["assigneeLogins"].([]string); ok && len(assigneeLogins) > 0 {
+ 		err := ReplaceActorsForAssignableByLogin(client, repo, pr.ID, assigneeLogins)
+ 		if err != nil {
+@@ -532,7 +532,7 @@
+ 		}
+ 	}
+ 
+-	// TODO requestReviewsByLoginCleanup
++	// TODO ApiActorsSupported
+ 	// Request reviewers using either login-based (github.com) or ID-based (GHES) mutation.
+ 	// The ID-based path can be removed once GHES supports requestReviewsByLogin.
+ 	userLogins, hasUserLogins := params["userReviewerLogins"].([]string)
+@@ -599,6 +599,12 @@
+ 
+ 	actorLogins := make([]githubv4.String, len(logins))
+ 	for i, l := range logins {
++		// The replaceActorsForAssignable mutation requires the [bot] suffix
++		// for bot actor logins (e.g. "copilot-swe-agent[bot]"), unlike
++		// requestReviewsByLogin which has a separate botLogins field.
++		if l == CopilotAssigneeLogin {
++			l = l + "[bot]"
++		}
+ 		actorLogins[i] = githubv4.String(l)
+ 	}
+ 
+--- a/api/queries_issue.go
++++ b/api/queries_issue.go
+@@ -311,7 +311,7 @@
+ 	}
+ 	issue := &result.CreateIssue.Issue
+ 
+-	// Assign users using login-based mutation when ActorAssignees is true (github.com).
++	// Assign users using login-based mutation when ApiActorsSupported is true (github.com).
+ 	if assigneeLogins, ok := params["assigneeLogins"].([]string); ok && len(assigneeLogins) > 0 {
+ 		err := ReplaceActorsForAssignableByLogin(client, repo, issue.ID, assigneeLogins)
+ 		if err != nil {
+--- a/api/queries_repo.go
++++ b/api/queries_repo.go
+@@ -922,14 +922,15 @@
+ }
+ 
+ type RepoMetadataInput struct {
+-	Assignees      bool
+-	ActorAssignees bool
+-	Reviewers      bool
+-	TeamReviewers  bool
+-	Labels         bool
+-	ProjectsV1     bool
+-	ProjectsV2     bool
+-	Milestones     bool
++	Assignees     bool
++	Reviewers     bool
++	TeamReviewers bool
++	// TODO ApiActorsSupported
++	ApiActorsSupported bool
++	Labels             bool
++	ProjectsV1         bool
++	ProjectsV2         bool
++	Milestones         bool
+ }
+ 
+ // RepoMetadata pre-fetches the metadata for attaching to issues and pull requests
+@@ -938,7 +939,8 @@
+ 	var g errgroup.Group
+ 
+ 	if input.Assignees || input.Reviewers {
+-		if input.ActorAssignees {
++		// TODO ApiActorsSupported
++		if input.ApiActorsSupported {
+ 			g.Go(func() error {
+ 				actors, err := RepoAssignableActors(client, repo)
+ 				if err != nil {
+--- a/pkg/cmd/pr/shared/editable_http.go
++++ b/pkg/cmd/pr/shared/editable_http.go
+@@ -66,7 +66,8 @@
+ 			// other issue fields to ensure consistency with how legacy
+ 			// user assignees are handled.
+ 			// https://github.com/cli/cli/pull/10960#discussion_r2086725348
+-			if options.Assignees.Edited && options.Assignees.ActorAssignees {
++			// TODO ApiActorsSupported
++			if options.Assignees.Edited && options.ApiActorsSupported {
+ 				apiClient := api.NewClientFromHTTP(httpClient)
+ 				logins, err := options.AssigneeLogins(apiClient, repo)
+ 				if err != nil {
+@@ -99,7 +100,8 @@
+ 	}
+ 
+ 	var assigneeIds *[]string
+-	if !options.Assignees.ActorAssignees {
++	// TODO ApiActorsSupported
++	if !options.ApiActorsSupported {
+ 		assigneeIds, err = options.AssigneeIds(apiClient, repo)
+ 		if err != nil {
+ 			return err
+--- a/pkg/cmd/pr/shared/params.go
++++ b/pkg/cmd/pr/shared/params.go
+@@ -61,11 +61,13 @@
+ 		return nil
+ 	}
+ 
+-	// When ActorReviewers is true, we use login-based mutation and don't need to resolve reviewer IDs.
+-	needReviewerIDs := len(tb.Reviewers) > 0 && !tb.ActorReviewers
++	// TODO ApiActorsSupported
++	// When ApiActorsSupported is true, we use login-based mutation and don't need to resolve reviewer IDs.
++	needReviewerIDs := len(tb.Reviewers) > 0 && !tb.ApiActorsSupported
+ 
+-	// When ActorAssignees is true, we use login-based mutation and don't need to resolve assignee IDs.
+-	needAssigneeIDs := len(tb.Assignees) > 0 && !tb.ActorAssignees
++	// TODO ApiActorsSupported
++	// When ApiActorsSupported is true, we use login-based mutation and don't need to resolve assignee IDs.
++	needAssigneeIDs := len(tb.Assignees) > 0 && !tb.ApiActorsSupported
+ 
+ 	// Retrieve minimal information needed to resolve metadata if this was not previously cached from additional metadata survey.
+ 	if tb.MetadataResult == nil {
+@@ -88,9 +90,10 @@
+ 		tb.MetadataResult = metadataResult
+ 	}
+ 
+-	// When ActorAssignees is true (github.com), pass logins directly for use with
++	// TODO ApiActorsSupported
++	// When ApiActorsSupported is true (github.com), pass logins directly for use with
+ 	// ReplaceActorsForAssignable mutation. The ID-based else branch is for GHES compatibility.
+-	if tb.ActorAssignees {
++	if tb.ApiActorsSupported {
+ 		params["assigneeLogins"] = tb.Assignees
+ 	} else {
+ 		assigneeIDs, err := tb.MetadataResult.MembersToIDs(tb.Assignees)
+@@ -138,11 +141,11 @@
+ 		}
+ 	}
+ 
+-	// TODO requestReviewsByLoginCleanup
+-	// When ActorReviewers is true (github.com), pass logins directly for use with
++	// TODO ApiActorsSupported
++	// When ApiActorsSupported is true (github.com), pass logins directly for use with
+ 	// RequestReviewsByLogin mutation. The ID-based else branch can be removed once
+ 	// GHES supports requestReviewsByLogin.
+-	if tb.ActorReviewers {
++	if tb.ApiActorsSupported {
+ 		params["userReviewerLogins"] = userReviewers
+ 		if len(botReviewers) > 0 {
+ 			params["botReviewerLogins"] = botReviewers
+--- a/pkg/cmd/pr/shared/survey.go
++++ b/pkg/cmd/pr/shared/survey.go
+@@ -181,19 +181,20 @@
+ 	}
+ 
+ 	// Retrieve and process data for survey prompts based on the extra fields selected.
+-	// When search-based reviewer selection is available, skip the expensive assignable-users
+-	// and teams fetch since reviewers are found dynamically via the search function.
+-	useReviewerSearch := state.ActorReviewers && reviewerSearchFunc != nil
+-	useAssigneeSearch := state.ActorAssignees && assigneeSearchFunc != nil
++	// When search-based selection is available, skip the expensive assignable-users
++	// and teams fetch since they are found dynamically via the search function.
++	// TODO ApiActorsSupported
++	useReviewerSearch := state.ApiActorsSupported && reviewerSearchFunc != nil
++	useAssigneeSearch := state.ApiActorsSupported && assigneeSearchFunc != nil
+ 	metadataInput := api.RepoMetadataInput{
+-		Reviewers:      isChosen("Reviewers") && !useReviewerSearch,
+-		TeamReviewers:  isChosen("Reviewers") && !useReviewerSearch,
+-		Assignees:      isChosen("Assignees") && !useAssigneeSearch,
+-		ActorAssignees: isChosen("Assignees") && !useAssigneeSearch && state.ActorAssignees,
+-		Labels:         isChosen("Labels"),
+-		ProjectsV1:     isChosen("Projects") && projectsV1Support == gh.ProjectsV1Supported,
+-		ProjectsV2:     isChosen("Projects"),
+-		Milestones:     isChosen("Milestone"),
++		Reviewers:          isChosen("Reviewers") && !useReviewerSearch,
++		TeamReviewers:      isChosen("Reviewers") && !useReviewerSearch,
++		Assignees:          isChosen("Assignees") && !useAssigneeSearch,
++		ApiActorsSupported: state.ApiActorsSupported,
++		Labels:             isChosen("Labels"),
++		ProjectsV1:         isChosen("Projects") && projectsV1Support == gh.ProjectsV1Supported,
++		ProjectsV2:         isChosen("Projects"),
++		Milestones:         isChosen("Milestone"),
+ 	}
+ 	metadataResult, err := fetcher.RepoMetadataFetch(metadataInput)
+ 	if err != nil {
+@@ -217,7 +218,8 @@
+ 	var assignees []string
+ 	var assigneesDefault []string
+ 	if !useAssigneeSearch {
+-		if state.ActorAssignees {
++		// TODO ApiActorsSupported
++		if state.ApiActorsSupported {
+ 			for _, u := range metadataResult.AssignableActors {
+ 				assignees = append(assignees, u.DisplayName())
+ 
+@@ -273,7 +275,7 @@
+ 			}
+ 			values.Reviewers = selectedReviewers
+ 		} else if len(reviewers) > 0 {
+-			// TODO requestReviewsByLoginCleanup
++			// TODO ApiActorsSupported
+ 			// The static MultiSelect path can be removed once GHES supports
+ 			// requestReviewsByLogin and search-based selection is always used.
+ 			selected, err := p.MultiSelect("Reviewers", state.Reviewers, reviewers)
+@@ -305,7 +307,8 @@
+ 				return err
+ 			}
+ 			for _, i := range selected {
+-				if state.ActorAssignees {
++				// TODO ApiActorsSupported
++				if state.ApiActorsSupported {
+ 					values.Assignees = append(values.Assignees, metadataResult.AssignableActors[i].Login())
+ 				} else {
+ 					values.Assignees = append(values.Assignees, metadataResult.AssignableUsers[i].Login())
+--- a/pkg/cmd/pr/shared/editable.go
++++ b/pkg/cmd/pr/shared/editable.go
+@@ -22,6 +22,13 @@
+ 	Projects           EditableProjects
+ 	Milestone          EditableString
+ 	Metadata           api.RepoMetadataResult
++
++	// TODO ApiActorsSupported
++	// ApiActorsSupported indicates the host supports actor-based APIs (github.com, ghe.com).
++	// When true, mutations use logins directly instead of resolving node IDs.
++	// Remove this flag (and collapse to actor-only paths) once GHES supports
++	// replaceActorsForAssignable and requestReviewsByLogin mutations.
++	ApiActorsSupported bool
+ }
+ 
+ type EditableString struct {
+@@ -42,11 +49,9 @@
+ }
+ 
+ // EditableAssignees is a special case of EditableSlice.
+-// It contains a flag to indicate whether the assignees are actors or not.
+ type EditableAssignees struct {
+ 	EditableSlice
+-	ActorAssignees bool
+-	DefaultLogins  []string // For disambiguating actors from display names
++	DefaultLogins []string // For disambiguating actors from display names
+ }
+ 
+ // EditableReviewers is a special case of EditableSlice.
+@@ -95,7 +100,8 @@
+ 	// If assignees came in from command line flags, we need to
+ 	// curate the final list of assignees from the default list.
+ 	if len(e.Assignees.Add) != 0 || len(e.Assignees.Remove) != 0 {
+-		replacer := NewSpecialAssigneeReplacer(client, repo.RepoHost(), e.Assignees.ActorAssignees, true)
++		// TODO ApiActorsSupported
++		replacer := NewSpecialAssigneeReplacer(client, repo.RepoHost(), e.ApiActorsSupported, true)
+ 
+ 		assigneeSet := set.NewStringSet()
+ 
+@@ -107,7 +113,8 @@
+ 		// So, we need to add the default logins here instead of the DisplayNames.
+ 		// Otherwise, the value the user provided won't be found in the
+ 		// set to be added or removed, causing unexpected behavior.
+-		if e.Assignees.ActorAssignees {
++		// TODO ApiActorsSupported
++		if e.ApiActorsSupported {
+ 			assigneeSet.AddValues(e.Assignees.DefaultLogins)
+ 		} else {
+ 			assigneeSet.AddValues(e.Assignees.Default)
+@@ -283,6 +290,7 @@
+ 		Labels:             e.Labels.clone(),
+ 		Projects:           e.Projects.clone(),
+ 		Milestone:          e.Milestone.clone(),
++		ApiActorsSupported: e.ApiActorsSupported,
+ 		// Shallow copy since no mutation.
+ 		Metadata: e.Metadata,
+ 	}
+@@ -319,9 +327,8 @@
+ 
+ func (ea *EditableAssignees) clone() EditableAssignees {
+ 	return EditableAssignees{
+-		EditableSlice:  ea.EditableSlice.clone(),
+-		ActorAssignees: ea.ActorAssignees,
+-		DefaultLogins:  ea.DefaultLogins,
++		EditableSlice: ea.EditableSlice.clone(),
++		DefaultLogins: ea.DefaultLogins,
+ 	}
+ }
+ 
+@@ -522,22 +529,23 @@
+ 			fetchAssignees = true
+ 		}
+ 		// For non-interactive Add/Remove operations, we only need to fetch assignees
+-		// on GHES where ID resolution is required. On github.com (ActorAssignees),
++		// on GHES where ID resolution is required. On github.com (ApiActorsSupported),
+ 		// logins are passed directly to the mutation.
+-		if (len(editable.Assignees.Add) > 0 || len(editable.Assignees.Remove) > 0) && !editable.Assignees.ActorAssignees {
++		// TODO ApiActorsSupported
++		if (len(editable.Assignees.Add) > 0 || len(editable.Assignees.Remove) > 0) && !editable.ApiActorsSupported {
+ 			fetchAssignees = true
+ 		}
+ 	}
+ 
+ 	input := api.RepoMetadataInput{
+-		Reviewers:      fetchReviewers,
+-		TeamReviewers:  teamReviewers,
+-		Assignees:      fetchAssignees,
+-		ActorAssignees: editable.Assignees.ActorAssignees,
+-		Labels:         editable.Labels.Edited,
+-		ProjectsV1:     editable.Projects.Edited && projectV1Support == gh.ProjectsV1Supported,
+-		ProjectsV2:     editable.Projects.Edited,
+-		Milestones:     editable.Milestone.Edited,
++		Reviewers:          fetchReviewers,
++		TeamReviewers:      teamReviewers,
++		Assignees:          fetchAssignees,
++		ApiActorsSupported: editable.ApiActorsSupported,
++		Labels:             editable.Labels.Edited,
++		ProjectsV1:         editable.Projects.Edited && projectV1Support == gh.ProjectsV1Supported,
++		ProjectsV2:         editable.Projects.Edited,
++		Milestones:         editable.Milestone.Edited,
+ 	}
+ 	metadata, err := api.RepoMetadata(client, repo, input)
+ 	if err != nil {
+@@ -574,7 +582,8 @@
+ 
+ 	editable.Metadata = *metadata
+ 	editable.Reviewers.Options = append(users, teams...)
+-	if editable.Assignees.ActorAssignees {
++	// TODO ApiActorsSupported
++	if editable.ApiActorsSupported {
+ 		editable.Assignees.Options = actors
+ 	} else {
+ 		editable.Assignees.Options = users
+--- a/pkg/cmd/pr/shared/state.go
++++ b/pkg/cmd/pr/shared/state.go
+@@ -18,10 +18,15 @@
+ type IssueMetadataState struct {
+ 	Type metadataStateType
+ 
+-	Draft          bool
+-	ActorAssignees bool
+-	ActorReviewers bool
++	Draft bool
+ 
++	// TODO ApiActorsSupported
++	// ApiActorsSupported indicates the host supports actor-based APIs (github.com, ghe.com).
++	// When true, mutations use logins directly instead of resolving node IDs.
++	// Remove this flag (and collapse to actor-only paths) once GHES supports
++	// replaceActorsForAssignable and requestReviewsByLogin mutations.
++	ApiActorsSupported bool
++
+ 	Body  string
+ 	Title string
+ 
+--- a/pkg/cmd/pr/edit/edit.go
++++ b/pkg/cmd/pr/edit/edit.go
+@@ -270,8 +270,8 @@
+ 		return err
+ 	}
+ 
+-	// TODO actorIsAssignableCleanup
+-	if issueFeatures.ActorIsAssignable {
++	// TODO ApiActorsSupported
++	if issueFeatures.ApiActorsSupported {
+ 		findOptions.Fields = append(findOptions.Fields, "assignedActors")
+ 	} else {
+ 		findOptions.Fields = append(findOptions.Fields, "assignees")
+@@ -289,9 +289,9 @@
+ 	editable.Base.Default = pr.BaseRefName
+ 	editable.Reviewers.Default = pr.ReviewRequests.DisplayNames()
+ 	editable.Reviewers.DefaultLogins = pr.ReviewRequests.Logins()
+-	// TODO actorIsAssignableCleanup
+-	if issueFeatures.ActorIsAssignable {
+-		editable.Assignees.ActorAssignees = true
++	// TODO ApiActorsSupported
++	if issueFeatures.ApiActorsSupported {
++		editable.ApiActorsSupported = true
+ 		editable.Assignees.Default = pr.AssignedActors.DisplayNames()
+ 		editable.Assignees.DefaultLogins = pr.AssignedActors.Logins()
+ 	} else {
+@@ -320,8 +320,8 @@
+ 	// Wire up search functions for assignees and reviewers.
+ 	// When these aren't wired up, it triggers a downstream fallback
+ 	// to legacy reviewer/assignee fetching.
+-	// TODO actorIsAssignableCleanup
+-	if issueFeatures.ActorIsAssignable {
++	// TODO ApiActorsSupported
++	if issueFeatures.ApiActorsSupported {
+ 		editable.AssigneeSearchFunc = shared.AssigneeSearchFunc(apiClient, repo, pr.ID)
+ 		editable.ReviewerSearchFunc = reviewerSearchFunc(apiClient, repo, &editable, pr.ID)
+ 	}
+@@ -438,7 +438,8 @@
+ 		// Replace @copilot with the Copilot reviewer login (only on github.com).
+ 		// Also use DefaultLogins (not Default display names) for computing the set.
+ 		var defaultLogins []string
+-		if editable.Assignees.ActorAssignees {
++		// TODO ApiActorsSupported
++		if editable.ApiActorsSupported {
+ 			copilotReplacer := shared.NewCopilotReviewerReplacer()
+ 			add = copilotReplacer.ReplaceSlice(add)
+ 			remove = copilotReplacer.ReplaceSlice(remove)
+@@ -457,7 +458,8 @@
+ 
+ 	// On github.com, use the new GraphQL mutation which supports bots.
+ 	// On GHES, fall back to REST API.
+-	if editable.Assignees.ActorAssignees {
++	// TODO ApiActorsSupported
++	if editable.ApiActorsSupported {
+ 		return updatePullRequestReviewsGraphQL(client, repo, prID, editable)
+ 	}
+ 	return updatePullRequestReviewsREST(client, repo, number, editable)
+--- a/pkg/cmd/pr/create/create.go
++++ b/pkg/cmd/pr/create/create.go
+@@ -399,7 +399,7 @@
+ 
+ 	client := ctx.Client
+ 
+-	// Detect ActorIsAssignable feature to determine if we can use search-based
++	// Detect ApiActorsSupported feature to determine if we can use search-based
+ 	// reviewer selection (github.com) or need to use legacy ID-based selection (GHES)
+ 	issueFeatures, err := opts.Detector.IssueFeatures()
+ 	if err != nil {
+@@ -407,7 +407,7 @@
+ 	}
+ 	var reviewerSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	var assigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+-	if issueFeatures.ActorIsAssignable {
++	if issueFeatures.ApiActorsSupported {
+ 		reviewerSearchFunc = func(query string) prompter.MultiSelectSearchResult {
+ 			candidates, moreResults, err := api.SuggestedReviewerActorsForRepo(client, ctx.PRRefs.BaseRepo(), query)
+ 			if err != nil {
+@@ -424,14 +424,14 @@
+ 		assigneeSearchFunc = shared.RepoAssigneeSearchFunc(client, ctx.PRRefs.BaseRepo())
+ 	}
+ 
+-	state, err := NewIssueState(*ctx, *opts)
++	state, err := NewIssueState(*ctx, *opts, issueFeatures.ApiActorsSupported)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+-	if issueFeatures.ActorIsAssignable {
+-		state.ActorReviewers = true
+-		state.ActorAssignees = true
++	// TODO ApiActorsSupported
++	if issueFeatures.ApiActorsSupported {
++		state.ApiActorsSupported = true
+ 	}
+ 
+ 	var openURL string
+@@ -672,14 +672,14 @@
+ 	return nil
+ }
+ 
+-func NewIssueState(ctx CreateContext, opts CreateOptions) (*shared.IssueMetadataState, error) {
++func NewIssueState(ctx CreateContext, opts CreateOptions, apiActorsSupported bool) (*shared.IssueMetadataState, error) {
+ 	var milestoneTitles []string
+ 	if opts.Milestone != "" {
+ 		milestoneTitles = []string{opts.Milestone}
+ 	}
+ 
+-	meReplacer := shared.NewMeReplacer(ctx.Client, ctx.PRRefs.BaseRepo().RepoHost())
+-	assignees, err := meReplacer.ReplaceSlice(opts.Assignees)
++	assigneeReplacer := shared.NewSpecialAssigneeReplacer(ctx.Client, ctx.PRRefs.BaseRepo().RepoHost(), apiActorsSupported, !opts.WebMode)
++	assignees, err := assigneeReplacer.ReplaceSlice(opts.Assignees)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+--- a/pkg/cmd/issue/edit/edit.go
++++ b/pkg/cmd/issue/edit/edit.go
+@@ -215,9 +215,9 @@
+ 
+ 	lookupFields := []string{"id", "number", "title", "body", "url"}
+ 	if editable.Assignees.Edited {
+-		// TODO actorIsAssignableCleanup
+-		if issueFeatures.ActorIsAssignable {
+-			editable.Assignees.ActorAssignees = true
++		// TODO ApiActorsSupported
++		if issueFeatures.ApiActorsSupported {
++			editable.ApiActorsSupported = true
+ 			lookupFields = append(lookupFields, "assignedActors")
+ 		} else {
+ 			lookupFields = append(lookupFields, "assignees")
+@@ -249,9 +249,9 @@
+ 	// Fetch editable shared fields once for all issues.
+ 	apiClient := api.NewClientFromHTTP(httpClient)
+ 
+-	// Wire up search function for assignees when ActorIsAssignable is available.
++	// Wire up search function for assignees when ApiActorsSupported is available.
+ 	// Interactive mode only supports a single issue, so we use its ID for the search query.
+-	if issueFeatures.ActorIsAssignable && opts.Interactive && len(issues) == 1 {
++	if issueFeatures.ApiActorsSupported && opts.Interactive && len(issues) == 1 {
+ 		editable.AssigneeSearchFunc = prShared.AssigneeSearchFunc(apiClient, baseRepo, issues[0].ID)
+ 	}
+ 
+@@ -280,7 +280,8 @@
+ 		editable.Body.Default = issue.Body
+ 		// We use Actors as the default assignees if Actors are assignable
+ 		// on this GitHub host.
+-		if editable.Assignees.ActorAssignees {
++		// TODO ApiActorsSupported
++		if editable.ApiActorsSupported {
+ 			editable.Assignees.Default = issue.AssignedActors.DisplayNames()
+ 			editable.Assignees.DefaultLogins = issue.AssignedActors.Logins()
+ 		} else {
+--- a/pkg/cmd/issue/create/create.go
++++ b/pkg/cmd/issue/create/create.go
+@@ -179,7 +179,7 @@
+ 
+ 	// Replace special values in assignees
+ 	// For web mode, @copilot should be replaced by name; otherwise, login.
+-	assigneeReplacer := prShared.NewSpecialAssigneeReplacer(apiClient, baseRepo.RepoHost(), issueFeatures.ActorIsAssignable, !opts.WebMode)
++	assigneeReplacer := prShared.NewSpecialAssigneeReplacer(apiClient, baseRepo.RepoHost(), issueFeatures.ApiActorsSupported, !opts.WebMode)
+ 	assignees, err := assigneeReplacer.ReplaceSlice(opts.Assignees)
+ 	if err != nil {
+ 		return err
+@@ -188,14 +188,14 @@
+ 	assigneeSet.AddValues(assignees)
+ 
+ 	tb := prShared.IssueMetadataState{
+-		Type:           prShared.IssueMetadata,
+-		ActorAssignees: issueFeatures.ActorIsAssignable,
+-		Assignees:      assigneeSet.ToSlice(),
+-		Labels:         opts.Labels,
+-		ProjectTitles:  opts.Projects,
+-		Milestones:     milestones,
+-		Title:          opts.Title,
+-		Body:           opts.Body,
++		Type:               prShared.IssueMetadata,
++		ApiActorsSupported: issueFeatures.ApiActorsSupported, // TODO ApiActorsSupported
++		Assignees:          assigneeSet.ToSlice(),
++		Labels:             opts.Labels,
++		ProjectTitles:      opts.Projects,
++		Milestones:         milestones,
++		Title:              opts.Title,
++		Body:               opts.Body,
+ 	}
+ 
+ 	if opts.RecoverFile != "" {
+@@ -309,7 +309,7 @@
+ 				State:     &tb,
+ 			}
+ 			var assigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+-			if issueFeatures.ActorIsAssignable {
++			if issueFeatures.ApiActorsSupported {
+ 				assigneeSearchFunc = prShared.RepoAssigneeSearchFunc(apiClient, baseRepo)
+ 			}
+ 			err = prShared.MetadataSurvey(opts.Prompter, opts.IO, baseRepo, fetcher, &tb, projectsV1Support, nil, assigneeSearchFunc)

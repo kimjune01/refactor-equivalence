@@ -1,0 +1,1155 @@
+--- a/internal/licenses/licenses.go
++++ b/internal/licenses/licenses.go
+@@ -1,31 +1,28 @@
+ package licenses
+ 
+ import (
++	"embed"
+ 	"fmt"
+ 	"io/fs"
+-	"path"
++	"path/filepath"
+ 	"sort"
+ 	"strings"
+ )
+ 
+-// Content returns the full license report, including the main report and all
+-// third-party licenses.
++//go:embed embed/report.txt
++var report string
++
++//go:embed all:embed/third-party
++var thirdParty embed.FS
++
+ func Content() string {
+-	return content(embedFS, rootDir)
++	return content(report, thirdParty, "embed/third-party")
+ }
+ 
+-func content(embedFS fs.ReadFileFS, rootDir string) string {
++func content(report string, thirdPartyFS fs.ReadFileFS, root string) string {
+ 	var b strings.Builder
+ 
+-	reportPath := path.Join(rootDir, "report.txt")
+-	thirdPartyPath := path.Join(rootDir, "third-party")
+-
+-	report, err := fs.ReadFile(embedFS, reportPath)
+-	if err != nil {
+-		return "License information is only available in official release builds.\n"
+-	}
+-
+-	b.Write(report)
++	b.WriteString(report)
+ 	b.WriteString("\n")
+ 
+ 	// Walk the third-party directory and output each license/notice file
+@@ -35,13 +32,8 @@
+ 		files []string
+ 	}
+ 
+-	thirdPartyFS, err := fs.Sub(embedFS, thirdPartyPath)
+-	if err != nil {
+-		return b.String()
+-	}
+-
+ 	modules := map[string]*moduleFiles{}
+-	fs.WalkDir(thirdPartyFS, ".", func(filePath string, d fs.DirEntry, err error) error {
++	fs.WalkDir(thirdPartyFS, root, func(filePath string, d fs.DirEntry, err error) error {
+ 		if err != nil {
+ 			return fmt.Errorf("failed to read embedded file %s: %w", filePath, err)
+ 		}
+@@ -50,11 +42,18 @@
+ 			return nil
+ 		}
+ 
+-		dir := path.Dir(filePath)
+-		if _, ok := modules[dir]; !ok {
+-			modules[dir] = &moduleFiles{path: dir}
++		name := d.Name()
++		if name == "PLACEHOLDER" {
++			return nil
+ 		}
+-		modules[dir].files = append(modules[dir].files, filePath)
++
++		// Module path is the directory relative to root
++		dir := filepath.Dir(filepath.FromSlash(filePath))
++		rel, _ := filepath.Rel(filepath.FromSlash(root), dir)
++		if _, ok := modules[rel]; !ok {
++			modules[rel] = &moduleFiles{path: rel}
++		}
++		modules[rel].files = append(modules[rel].files, filePath)
+ 		return nil
+ 	})
+ 
+@@ -72,7 +71,7 @@
+ 		b.WriteString("================================================================================\n\n")
+ 
+ 		for _, filePath := range mod.files {
+-			data, err := fs.ReadFile(thirdPartyFS, filePath)
++			data, err := thirdPartyFS.ReadFile(filePath)
+ 			if err != nil {
+ 				continue
+ 			}
+--- a/internal/featuredetection/feature_detection.go
++++ b/internal/featuredetection/feature_detection.go
+@@ -23,13 +23,15 @@
+ }
+ 
+ type IssueFeatures struct {
+-	StateReason       bool
+-	ActorIsAssignable bool
++	StateReason          bool
++	StateReasonDuplicate bool
++	ActorIsAssignable    bool
+ }
+ 
+ var allIssueFeatures = IssueFeatures{
+-	StateReason:       true,
+-	ActorIsAssignable: true,
++	StateReason:          true,
++	StateReasonDuplicate: true,
++	ActorIsAssignable:    true,
+ }
+ 
+ type PullRequestFeatures struct {
+@@ -138,8 +140,9 @@
+ 	}
+ 
+ 	features := IssueFeatures{
+-		StateReason:       false,
+-		ActorIsAssignable: false, // replaceActorsForAssignable GraphQL mutation unavailable on GHES
++		StateReason:          false,
++		StateReasonDuplicate: false,
++		ActorIsAssignable:    false, // replaceActorsForAssignable GraphQL mutation unavailable on GHES
+ 	}
+ 
+ 	var featureDetection struct {
+@@ -148,6 +151,11 @@
+ 				Name string
+ 			} `graphql:"fields(includeDeprecated: true)"`
+ 		} `graphql:"Issue: __type(name: \"Issue\")"`
++		IssueClosedStateReason struct {
++			EnumValues []struct {
++				Name string
++			} `graphql:"enumValues(includeDeprecated: true)"`
++		} `graphql:"IssueClosedStateReason: __type(name: \"IssueClosedStateReason\")"`
+ 	}
+ 
+ 	gql := api.NewClientFromHTTP(d.httpClient)
+@@ -159,6 +167,15 @@
+ 	for _, field := range featureDetection.Issue.Fields {
+ 		if field.Name == "stateReason" {
+ 			features.StateReason = true
++		}
++	}
++
++	if features.StateReason {
++		for _, enumValue := range featureDetection.IssueClosedStateReason.EnumValues {
++			if enumValue.Name == "DUPLICATE" {
++				features.StateReasonDuplicate = true
++				break
++			}
+ 		}
+ 	}
+ 
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -296,10 +296,9 @@
+ }
+ 
+ type PullRequestFile struct {
+-	Path       string `json:"path"`
+-	Additions  int    `json:"additions"`
+-	Deletions  int    `json:"deletions"`
+-	ChangeType string `json:"changeType"`
++	Path      string `json:"path"`
++	Additions int    `json:"additions"`
++	Deletions int    `json:"deletions"`
+ }
+ 
+ type ReviewRequests struct {
+--- a/api/query_builder.go
++++ b/api/query_builder.go
+@@ -148,8 +148,7 @@
+ 		nodes {
+ 			additions,
+ 			deletions,
+-			path,
+-			changeType
++			path
+ 		}
+ 	}
+ `)
+--- a/api/client.go
++++ b/api/client.go
+@@ -10,7 +10,6 @@
+ 	"regexp"
+ 	"strings"
+ 
+-	"github.com/cli/cli/v2/pkg/set"
+ 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
+ 	ghauth "github.com/cli/go-gh/v2/pkg/auth"
+ )
+@@ -181,10 +180,6 @@
+ 
+ 	var gqlErr *ghAPI.GraphQLError
+ 	if errors.As(err, &gqlErr) {
+-		scopeErr := GenerateScopeErrorForGQL(gqlErr)
+-		if scopeErr != nil {
+-			return scopeErr
+-		}
+ 		return GraphQLError{
+ 			GraphQLError: gqlErr,
+ 		}
+@@ -193,40 +188,6 @@
+ 	return err
+ }
+ 
+-func GenerateScopeErrorForGQL(gqlErr *ghAPI.GraphQLError) error {
+-	missing := set.NewStringSet()
+-	for _, e := range gqlErr.Errors {
+-		if e.Type != "INSUFFICIENT_SCOPES" {
+-			continue
+-		}
+-		missing.AddValues(requiredScopesFromServerMessage(e.Message))
+-	}
+-	if missing.Len() > 0 {
+-		s := missing.ToSlice()
+-		// TODO: this duplicates parts of generateScopesSuggestion
+-		return fmt.Errorf(
+-			"error: your authentication token is missing required scopes %v\n"+
+-				"To request it, run:  gh auth refresh -s %s",
+-			s,
+-			strings.Join(s, ","))
+-	}
+-	return nil
+-}
+-
+-var scopesRE = regexp.MustCompile(`one of the following scopes: \[(.+?)]`)
+-
+-func requiredScopesFromServerMessage(msg string) []string {
+-	m := scopesRE.FindStringSubmatch(msg)
+-	if m == nil {
+-		return nil
+-	}
+-	var scopes []string
+-	for _, mm := range strings.Split(m[1], ",") {
+-		scopes = append(scopes, strings.Trim(mm, "' "))
+-	}
+-	return scopes
+-}
+-
+ // ScopesSuggestion is an error messaging utility that prints the suggestion to request additional OAuth
+ // scopes in case a server response indicates that there are missing scopes.
+ func ScopesSuggestion(resp *http.Response) string {
+--- a/pkg/cmd/copilot/copilot.go
++++ b/pkg/cmd/copilot/copilot.go
+@@ -170,7 +170,6 @@
+ 	externalCmd.Stdin = opts.IO.In
+ 	externalCmd.Stdout = opts.IO.Out
+ 	externalCmd.Stderr = opts.IO.ErrOut
+-	externalCmd.Env = append(os.Environ(), "COPILOT_GH=true")
+ 
+ 	if err := externalCmd.Run(); err != nil {
+ 		if exitErr, ok := err.(*exec.ExitError); ok {
+--- a/pkg/cmd/agent-task/capi/sessions.go
++++ b/pkg/cmd/agent-task/capi/sessions.go
+@@ -100,94 +100,6 @@
+ type SessionError struct {
+ 	Code    string
+ 	Message string
+-}
+-
+-// SessionFields defines the available fields for JSON export of a Session.
+-var SessionFields = []string{
+-	"id",
+-	"name",
+-	"state",
+-	"repository",
+-	"user",
+-	"createdAt",
+-	"updatedAt",
+-	"completedAt",
+-	"pullRequestNumber",
+-	"pullRequestUrl",
+-	"pullRequestTitle",
+-	"pullRequestState",
+-}
+-
+-// ExportData implements the exportable interface for JSON output.
+-func (s *Session) ExportData(fields []string) map[string]interface{} {
+-	data := make(map[string]interface{}, len(fields))
+-	for _, f := range fields {
+-		switch f {
+-		case "id":
+-			data[f] = s.ID
+-		case "name":
+-			data[f] = s.Name
+-		case "state":
+-			data[f] = s.State
+-		case "repository":
+-			if s.PullRequest != nil && s.PullRequest.Repository != nil {
+-				data[f] = s.PullRequest.Repository.NameWithOwner
+-			} else {
+-				data[f] = nil
+-			}
+-		case "user":
+-			if s.User != nil {
+-				data[f] = s.User.Login
+-			} else {
+-				data[f] = nil
+-			}
+-		case "createdAt":
+-			if s.CreatedAt.IsZero() {
+-				data[f] = nil
+-			} else {
+-				data[f] = s.CreatedAt
+-			}
+-		case "updatedAt":
+-			if s.LastUpdatedAt.IsZero() {
+-				data[f] = nil
+-			} else {
+-				data[f] = s.LastUpdatedAt
+-			}
+-		case "completedAt":
+-			if s.CompletedAt.IsZero() {
+-				data[f] = nil
+-			} else {
+-				data[f] = s.CompletedAt
+-			}
+-		case "pullRequestNumber":
+-			if s.PullRequest != nil {
+-				data[f] = s.PullRequest.Number
+-			} else {
+-				data[f] = nil
+-			}
+-		case "pullRequestUrl":
+-			if s.PullRequest != nil {
+-				data[f] = s.PullRequest.URL
+-			} else {
+-				data[f] = nil
+-			}
+-		case "pullRequestTitle":
+-			if s.PullRequest != nil {
+-				data[f] = s.PullRequest.Title
+-			} else {
+-				data[f] = nil
+-			}
+-		case "pullRequestState":
+-			if s.PullRequest != nil {
+-				data[f] = s.PullRequest.State
+-			} else {
+-				data[f] = nil
+-			}
+-		default:
+-			data[f] = nil
+-		}
+-	}
+-	return data
+ }
+ 
+ type resource struct {
+--- a/pkg/cmd/agent-task/list/list.go
++++ b/pkg/cmd/agent-task/list/list.go
+@@ -25,7 +25,6 @@
+ 	CapiClient func() (capi.CapiClient, error)
+ 	Web        bool
+ 	Browser    browser.Browser
+-	Exporter   cmdutil.Exporter
+ }
+ 
+ // NewCmdList creates the list command
+@@ -55,8 +54,6 @@
+ 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum number of agent tasks to fetch")
+ 	cmd.Flags().BoolVarP(&opts.Web, "web", "w", false, "Open agent tasks in the browser")
+ 
+-	cmdutil.AddJSONFlags(cmd, &opts.Exporter, capi.SessionFields)
+-
+ 	return cmd
+ }
+ 
+@@ -90,14 +87,10 @@
+ 
+ 	opts.IO.StopProgressIndicator()
+ 
+-	if len(sessions) == 0 && opts.Exporter == nil {
++	if len(sessions) == 0 {
+ 		return cmdutil.NewNoResultsError("no agent tasks found")
+ 	}
+ 
+-	if opts.Exporter != nil {
+-		return opts.Exporter.Write(opts.IO, sessions)
+-	}
+-
+ 	if err := opts.IO.StartPager(); err == nil {
+ 		defer opts.IO.StopPager()
+ 	} else {
+--- a/pkg/cmd/agent-task/view/view.go
++++ b/pkg/cmd/agent-task/view/view.go
+@@ -37,7 +37,6 @@
+ 	Finder     prShared.PRFinder
+ 	Prompter   prompter.Prompter
+ 	Browser    browser.Browser
+-	Exporter   cmdutil.Exporter
+ 
+ 	LogRenderer func() shared.LogRenderer
+ 	Sleep       func(d time.Duration)
+@@ -126,8 +125,6 @@
+ 	cmd.Flags().BoolVar(&opts.Log, "log", false, "Show agent session logs")
+ 	cmd.Flags().BoolVar(&opts.Follow, "follow", false, "Follow agent session logs")
+ 
+-	cmdutil.AddJSONFlags(cmd, &opts.Exporter, capi.SessionFields)
+-
+ 	return cmd
+ }
+ 
+@@ -288,10 +285,6 @@
+ 		opts.IO.StopProgressIndicator()
+ 	}
+ 
+-	if opts.Exporter != nil {
+-		return opts.Exporter.Write(opts.IO, session)
+-	}
+-
+ 	if opts.Log {
+ 		return printLogs(opts, capiClient, session.ID)
+ 	}
+--- a/pkg/cmd/pr/diff/diff.go
++++ b/pkg/cmd/pr/diff/diff.go
+@@ -190,7 +190,7 @@
+ const lineBufferSize = 4096
+ 
+ var (
+-	colorHeader   = []byte("\x1b[1;37m")
++	colorHeader   = []byte("\x1b[1;38m")
+ 	colorAddition = []byte("\x1b[32m")
+ 	colorRemoval  = []byte("\x1b[31m")
+ 	colorReset    = []byte("\x1b[m")
+--- a/pkg/cmd/project/item-edit/item_edit.go
++++ b/pkg/cmd/project/item-edit/item_edit.go
+@@ -16,11 +16,9 @@
+ 
+ type editItemOpts struct {
+ 	// updateDraftIssue
+-	title        string
+-	titleChanged bool
+-	body         string
+-	bodyChanged  bool
+-	itemID       string
++	title  string
++	body   string
++	itemID string
+ 	// updateItem
+ 	fieldID              string
+ 	projectID            string
+@@ -47,12 +45,6 @@
+ 	} `graphql:"updateProjectV2DraftIssue(input:$input)"`
+ }
+ 
+-type DraftIssueQuery struct {
+-	DraftIssueNode struct {
+-		DraftIssue queries.DraftIssue `graphql:"... on DraftIssue"`
+-	} `graphql:"node(id: $id)"`
+-}
+-
+ type UpdateProjectV2FieldValue struct {
+ 	Update struct {
+ 		Item queries.ProjectItem `graphql:"projectV2Item"`
+@@ -86,8 +78,6 @@
+ 		`),
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+ 			opts.numberChanged = cmd.Flags().Changed("number")
+-			opts.titleChanged = cmd.Flags().Changed("title")
+-			opts.bodyChanged = cmd.Flags().Changed("body")
+ 			if err := cmdutil.MutuallyExclusive(
+ 				"only one of `--text`, `--number`, `--date`, `--single-select-option-id` or `--iteration-id` may be used",
+ 				opts.text != "",
+@@ -153,7 +143,7 @@
+ 	}
+ 
+ 	// update draft issue
+-	if config.opts.titleChanged || config.opts.bodyChanged {
++	if config.opts.title != "" || config.opts.body != "" {
+ 		return updateDraftIssue(config)
+ 	}
+ 
+@@ -167,42 +157,14 @@
+ 	}
+ 	return cmdutil.SilentError
+ }
+-
+-func fetchDraftIssueByID(config editItemConfig, draftIssueID string) (*queries.DraftIssue, error) {
+-	var query DraftIssueQuery
+-	variables := map[string]interface{}{
+-		"id": githubv4.ID(draftIssueID),
+-	}
+-
+-	err := config.client.Query("DraftIssueByID", &query, variables)
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	return &query.DraftIssueNode.DraftIssue, nil
+-}
+-
+-func buildEditDraftIssue(config editItemConfig, currentDraftIssue *queries.DraftIssue) (*EditProjectDraftIssue, map[string]interface{}) {
+-	input := githubv4.UpdateProjectV2DraftIssueInput{
+-		DraftIssueID: githubv4.ID(config.opts.itemID),
+-	}
+-
+-	if config.opts.titleChanged {
+-		input.Title = githubv4.NewString(githubv4.String(config.opts.title))
+-	} else if currentDraftIssue != nil {
+-		// Preserve existing if title is not provided
+-		input.Title = githubv4.NewString(githubv4.String(currentDraftIssue.Title))
+-	}
+ 
+-	if config.opts.bodyChanged {
+-		input.Body = githubv4.NewString(githubv4.String(config.opts.body))
+-	} else if currentDraftIssue != nil {
+-		// Preserve existing if body is not provided
+-		input.Body = githubv4.NewString(githubv4.String(currentDraftIssue.Body))
+-	}
+-
++func buildEditDraftIssue(config editItemConfig) (*EditProjectDraftIssue, map[string]interface{}) {
+ 	return &EditProjectDraftIssue{}, map[string]interface{}{
+-		"input": input,
++		"input": githubv4.UpdateProjectV2DraftIssueInput{
++			Body:         githubv4.NewString(githubv4.String(config.opts.body)),
++			DraftIssueID: githubv4.ID(config.opts.itemID),
++			Title:        githubv4.NewString(githubv4.String(config.opts.title)),
++		},
+ 	}
+ }
+ 
+@@ -288,19 +250,9 @@
+ 		return cmdutil.FlagErrorf("ID must be the ID of the draft issue content which is prefixed with `DI_`")
+ 	}
+ 
+-	// Fetch current draft issue to preserve fields that aren't being updated
+-	var currentDraftIssue *queries.DraftIssue
+-	var err error
+-	if !config.opts.titleChanged || !config.opts.bodyChanged {
+-		currentDraftIssue, err = fetchDraftIssueByID(config, config.opts.itemID)
+-		if err != nil {
+-			return err
+-		}
+-	}
++	query, variables := buildEditDraftIssue(config)
+ 
+-	query, variables := buildEditDraftIssue(config, currentDraftIssue)
+-
+-	err = config.client.Mutate("EditDraftIssueItem", query, variables)
++	err := config.client.Mutate("EditDraftIssueItem", query, variables)
+ 	if err != nil {
+ 		return err
+ 	}
+--- a/pkg/cmd/project/shared/queries/queries.go
++++ b/pkg/cmd/project/shared/queries/queries.go
+@@ -103,11 +103,6 @@
+ 	return handleError(err)
+ }
+ 
+-func (c *Client) Query(operationName string, query interface{}, variables map[string]interface{}) error {
+-	err := c.apiClient.Query(operationName, query, variables)
+-	return handleError(err)
+-}
+-
+ // PageInfo is a PageInfo GraphQL object https://docs.github.com/en/graphql/reference/objects#pageinfo.
+ type PageInfo struct {
+ 	EndCursor   githubv4.String
+--- a/pkg/cmd/issue/develop/develop.go
++++ b/pkg/cmd/issue/develop/develop.go
+@@ -4,8 +4,6 @@
+ 	ctx "context"
+ 	"fmt"
+ 	"net/http"
+-	"net/url"
+-	"strings"
+ 
+ 	"github.com/MakeNowJust/heredoc"
+ 	"github.com/cli/cli/v2/api"
+@@ -152,22 +150,21 @@
+ 		return err
+ 	}
+ 
+-	opts.IO.StartProgressIndicatorWithLabel(fmt.Sprintf("Fetching issue #%d", opts.IssueNumber))
+-	defer opts.IO.StopProgressIndicator()
+-
++	opts.IO.StartProgressIndicator()
+ 	issue, err := shared.FindIssueOrPR(httpClient, baseRepo, opts.IssueNumber, []string{"id", "number"})
++	opts.IO.StopProgressIndicator()
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+ 	apiClient := api.NewClientFromHTTP(httpClient)
+ 
+-	opts.IO.StartProgressIndicatorWithLabel("Checking linked branch support")
++	opts.IO.StartProgressIndicator()
+ 	err = api.CheckLinkedBranchFeature(apiClient, baseRepo.RepoHost())
++	opts.IO.StopProgressIndicator()
+ 	if err != nil {
+ 		return err
+ 	}
+-	opts.IO.StopProgressIndicator()
+ 
+ 	if opts.List {
+ 		return developRunList(opts, apiClient, baseRepo, issue)
+@@ -177,75 +174,33 @@
+ 
+ func developRunCreate(opts *DevelopOptions, apiClient *api.Client, issueRepo ghrepo.Interface, issue *api.Issue) error {
+ 	branchRepo := issueRepo
++	var repoID string
+ 	if opts.BranchRepo != "" {
+ 		var err error
+ 		branchRepo, err = ghrepo.FromFullName(opts.BranchRepo)
+-		if err != nil {
+-			return err
+-		}
+-	}
+-
+-	opts.IO.StartProgressIndicatorWithLabel("Preparing linked branch")
+-	defer opts.IO.StopProgressIndicator()
+-
+-	branchName := ""
+-	reusedExisting := false
+-	if opts.Name != "" {
+-		opts.IO.StartProgressIndicatorWithLabel("Checking existing linked branches")
+-		branches, err := api.ListLinkedBranches(apiClient, issueRepo, issue.Number)
+-		if err != nil {
+-			return err
+-		}
+-		branchName = findExistingLinkedBranchName(branches, branchRepo, opts.Name)
+-		reusedExisting = branchName != ""
+-	}
+-
+-	repoID := ""
+-	branchID := ""
+-	baseValidated := false
+-	if opts.BaseBranch != "" {
+-		opts.IO.StartProgressIndicatorWithLabel(fmt.Sprintf("Validating base branch %q", opts.BaseBranch))
+-		foundRepoID, foundBranchID, err := api.FindRepoBranchID(apiClient, branchRepo, opts.BaseBranch)
+-		if err != nil {
+-			return err
+-		}
+-		repoID = foundRepoID
+-		branchID = foundBranchID
+-		baseValidated = true
+-	}
+-
+-	if branchName == "" {
+-		if !baseValidated {
+-			opts.IO.StartProgressIndicatorWithLabel("Resolving base branch")
+-			foundRepoID, foundBranchID, err := api.FindRepoBranchID(apiClient, branchRepo, opts.BaseBranch)
+-			if err != nil {
+-				return err
+-			}
+-			repoID = foundRepoID
+-			branchID = foundBranchID
+-		}
+-
+-		opts.IO.StartProgressIndicatorWithLabel("Creating linked branch")
+-		createdBranchName, err := api.CreateLinkedBranch(apiClient, branchRepo.RepoHost(), repoID, issue.ID, branchID, opts.Name)
+ 		if err != nil {
+ 			return err
+ 		}
+-		branchName = createdBranchName
+ 	}
+ 
+-	if branchName == "" {
+-		return fmt.Errorf("failed to create linked branch: API returned empty branch name")
++	opts.IO.StartProgressIndicator()
++	repoID, branchID, err := api.FindRepoBranchID(apiClient, branchRepo, opts.BaseBranch)
++	opts.IO.StopProgressIndicator()
++	if err != nil {
++		return err
+ 	}
+ 
++	opts.IO.StartProgressIndicator()
++	branchName, err := api.CreateLinkedBranch(apiClient, branchRepo.RepoHost(), repoID, issue.ID, branchID, opts.Name)
+ 	opts.IO.StopProgressIndicator()
+-
+-	if reusedExisting && opts.IO.IsStdoutTTY() {
+-		fmt.Fprintf(opts.IO.ErrOut, "Using existing linked branch %q\n", branchName)
++	if err != nil {
++		return err
+ 	}
+ 
+ 	// Remember which branch to target when creating a PR.
+ 	if opts.BaseBranch != "" {
+-		if err := opts.GitClient.SetBranchConfig(ctx.Background(), branchName, git.MergeBaseConfig, opts.BaseBranch); err != nil {
++		err = opts.GitClient.SetBranchConfig(ctx.Background(), branchName, git.MergeBaseConfig, opts.BaseBranch)
++		if err != nil {
+ 			return err
+ 		}
+ 	}
+@@ -255,44 +210,13 @@
+ 	return checkoutBranch(opts, branchRepo, branchName)
+ }
+ 
+-func findExistingLinkedBranchName(branches []api.LinkedBranch, branchRepo ghrepo.Interface, branchName string) string {
+-	for _, branch := range branches {
+-		if branch.BranchName != branchName {
+-			continue
+-		}
+-		linkedRepo, err := linkedBranchRepoFromURL(branch.URL)
+-		if err != nil {
+-			continue
+-		}
+-		if ghrepo.IsSame(linkedRepo, branchRepo) {
+-			return branch.BranchName
+-		}
+-	}
+-	return ""
+-}
+-
+-func linkedBranchRepoFromURL(branchURL string) (ghrepo.Interface, error) {
+-	u, err := url.Parse(branchURL)
+-	if err != nil {
+-		return nil, err
+-	}
+-	pathParts := strings.SplitN(strings.Trim(u.Path, "/"), "/", 3)
+-	if len(pathParts) < 2 {
+-		return nil, fmt.Errorf("invalid linked branch URL: %q", branchURL)
+-	}
+-	u.Path = "/" + strings.Join(pathParts[0:2], "/")
+-	return ghrepo.FromURL(u)
+-}
+-
+ func developRunList(opts *DevelopOptions, apiClient *api.Client, issueRepo ghrepo.Interface, issue *api.Issue) error {
+-	opts.IO.StartProgressIndicatorWithLabel("Fetching linked branches")
+-	defer opts.IO.StopProgressIndicator()
+-
++	opts.IO.StartProgressIndicator()
+ 	branches, err := api.ListLinkedBranches(apiClient, issueRepo, issue.Number)
++	opts.IO.StopProgressIndicator()
+ 	if err != nil {
+ 		return err
+ 	}
+-	opts.IO.StopProgressIndicator()
+ 
+ 	if len(branches) == 0 {
+ 		return cmdutil.NewNoResultsError(fmt.Sprintf("no linked branches found for %s#%d", ghrepo.FullName(issueRepo), issue.Number))
+--- a/pkg/cmd/issue/close/close.go
++++ b/pkg/cmd/issue/close/close.go
+@@ -24,6 +24,7 @@
+ 	IssueNumber int
+ 	Comment     string
+ 	Reason      string
++	DuplicateOf string
+ 
+ 	Detector fd.Detector
+ }
+@@ -55,6 +56,13 @@
+ 			}
+ 
+ 			opts.IssueNumber = issueNumber
++			if opts.DuplicateOf != "" {
++				if opts.Reason == "" {
++					opts.Reason = "duplicate"
++				} else if opts.Reason != "duplicate" {
++					return cmdutil.FlagErrorf("`--duplicate-of` can only be used with `--reason duplicate`")
++				}
++			}
+ 
+ 			if runF != nil {
+ 				return runF(opts)
+@@ -64,13 +72,22 @@
+ 	}
+ 
+ 	cmd.Flags().StringVarP(&opts.Comment, "comment", "c", "", "Leave a closing comment")
+-	cmdutil.StringEnumFlag(cmd, &opts.Reason, "reason", "r", "", []string{"completed", "not planned"}, "Reason for closing")
++	cmdutil.StringEnumFlag(cmd, &opts.Reason, "reason", "r", "", []string{"completed", "not planned", "duplicate"}, "Reason for closing")
++	cmd.Flags().StringVar(&opts.DuplicateOf, "duplicate-of", "", "Mark as duplicate of another issue by number or URL")
+ 
+ 	return cmd
+ }
+ 
+ func closeRun(opts *CloseOptions) error {
+ 	cs := opts.IO.ColorScheme()
++	closeReason := opts.Reason
++	if opts.DuplicateOf != "" {
++		if closeReason == "" {
++			closeReason = "duplicate"
++		} else if closeReason != "duplicate" {
++			return cmdutil.FlagErrorf("`--duplicate-of` can only be used with `--reason duplicate`")
++		}
++	}
+ 
+ 	httpClient, err := opts.HttpClient()
+ 	if err != nil {
+@@ -92,6 +109,32 @@
+ 		return nil
+ 	}
+ 
++	var duplicateIssueID string
++	if opts.DuplicateOf != "" {
++		if issue.IsPullRequest() {
++			return cmdutil.FlagErrorf("`--duplicate-of` is only supported for issues")
++		}
++		duplicateIssueNumber, duplicateRepo, err := shared.ParseIssueFromArg(opts.DuplicateOf)
++		if err != nil {
++			return cmdutil.FlagErrorf("invalid value for `--duplicate-of`: %v", err)
++		}
++		duplicateIssueRepo := baseRepo
++		if parsedRepo, present := duplicateRepo.Value(); present {
++			duplicateIssueRepo = parsedRepo
++		}
++		if ghrepo.IsSame(baseRepo, duplicateIssueRepo) && issue.Number == duplicateIssueNumber {
++			return cmdutil.FlagErrorf("`--duplicate-of` cannot reference the current issue")
++		}
++		duplicateIssue, err := shared.FindIssueOrPR(httpClient, duplicateIssueRepo, duplicateIssueNumber, []string{"id"})
++		if err != nil {
++			return err
++		}
++		if duplicateIssue.IsPullRequest() {
++			return cmdutil.FlagErrorf("`--duplicate-of` must reference an issue")
++		}
++		duplicateIssueID = duplicateIssue.ID
++	}
++
+ 	if opts.Comment != "" {
+ 		commentOpts := &prShared.CommentableOptions{
+ 			Body:       opts.Comment,
+@@ -108,7 +151,7 @@
+ 		}
+ 	}
+ 
+-	err = apiClose(httpClient, baseRepo, issue, opts.Detector, opts.Reason)
++	err = apiClose(httpClient, baseRepo, issue, opts.Detector, closeReason, duplicateIssueID)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -118,12 +161,12 @@
+ 	return nil
+ }
+ 
+-func apiClose(httpClient *http.Client, repo ghrepo.Interface, issue *api.Issue, detector fd.Detector, reason string) error {
++func apiClose(httpClient *http.Client, repo ghrepo.Interface, issue *api.Issue, detector fd.Detector, reason string, duplicateIssueID string) error {
+ 	if issue.IsPullRequest() {
+ 		return api.PullRequestClose(httpClient, repo, issue.ID)
+ 	}
+ 
+-	if reason != "" {
++	if reason != "" || duplicateIssueID != "" {
+ 		if detector == nil {
+ 			cachedClient := api.NewCachedHTTPClient(httpClient, time.Hour*24)
+ 			detector = fd.NewDetector(cachedClient, repo.RepoHost())
+@@ -135,7 +178,16 @@
+ 		// TODO stateReasonCleanup
+ 		if !features.StateReason {
+ 			// If StateReason is not supported silently close issue without setting StateReason.
++			if duplicateIssueID != "" {
++				return fmt.Errorf("closing as duplicate is not supported on %s", repo.RepoHost())
++			}
+ 			reason = ""
++		} else if reason == "duplicate" && !features.StateReasonDuplicate {
++			if duplicateIssueID != "" {
++				return fmt.Errorf("closing as duplicate is not supported on %s", repo.RepoHost())
++			}
++			// If DUPLICATE is not supported silently close issue without setting StateReason.
++			reason = ""
+ 		}
+ 	}
+ 
+@@ -144,6 +196,8 @@
+ 		// If no reason is specified do not set it.
+ 	case "not planned":
+ 		reason = "NOT_PLANNED"
++	case "duplicate":
++		reason = "DUPLICATE"
+ 	default:
+ 		reason = "COMPLETED"
+ 	}
+@@ -158,8 +212,9 @@
+ 
+ 	variables := map[string]interface{}{
+ 		"input": CloseIssueInput{
+-			IssueID:     issue.ID,
+-			StateReason: reason,
++			IssueID:          issue.ID,
++			StateReason:      reason,
++			DuplicateIssueID: duplicateIssueID,
+ 		},
+ 	}
+ 
+@@ -168,6 +223,7 @@
+ }
+ 
+ type CloseIssueInput struct {
+-	IssueID     string `json:"issueId"`
+-	StateReason string `json:"stateReason,omitempty"`
++	IssueID          string `json:"issueId"`
++	StateReason      string `json:"stateReason,omitempty"`
++	DuplicateIssueID string `json:"duplicateIssueId,omitempty"`
+ }
+--- a/pkg/cmd/issue/list/http.go
++++ b/pkg/cmd/issue/list/http.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"fmt"
+-	"regexp"
+ 
+ 	"github.com/cli/cli/v2/api"
+ 	fd "github.com/cli/cli/v2/internal/featuredetection"
+@@ -10,8 +9,6 @@
+ 	prShared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
+ )
+ 
+-var pullRequestSearchQualifierRE = regexp.MustCompile(`(?i)\b(?:is|type):(?:pr|pull-?request)\b`)
+-
+ func listIssues(client *api.Client, repo ghrepo.Interface, filters prShared.FilterOptions, limit int) (*api.IssuesAndTotalCount, error) {
+ 	var states []string
+ 	switch filters.State {
+@@ -117,10 +114,6 @@
+ }
+ 
+ func searchIssues(client *api.Client, detector fd.Detector, repo ghrepo.Interface, filters prShared.FilterOptions, limit int) (*api.IssuesAndTotalCount, error) {
+-	if pullRequestSearchQualifierRE.MatchString(filters.Search) {
+-		return nil, fmt.Errorf("cannot use pull request search qualifiers with `gh issue list`; use `gh pr list` instead")
+-	}
+-
+ 	// TODO advancedIssueSearchCleanup
+ 	// We won't need feature detection when GHES 3.17 support ends, since
+ 	// the advanced issue search is the only available search backend for
+--- a/pkg/cmd/issue/view/http.go
++++ b/pkg/cmd/issue/view/http.go
+@@ -20,14 +20,15 @@
+ 		} `graphql:"node(id: $id)"`
+ 	}
+ 
+-	if !issue.Comments.PageInfo.HasNextPage {
+-		return nil
+-	}
+-
+ 	variables := map[string]interface{}{
+ 		"id":        githubv4.ID(issue.ID),
+-		"endCursor": githubv4.String(issue.Comments.PageInfo.EndCursor),
++		"endCursor": (*githubv4.String)(nil),
+ 	}
++	if issue.Comments.PageInfo.HasNextPage {
++		variables["endCursor"] = githubv4.String(issue.Comments.PageInfo.EndCursor)
++	} else {
++		issue.Comments.Nodes = issue.Comments.Nodes[0:0]
++	}
+ 
+ 	gql := api.NewClientFromHTTP(client)
+ 	for {
+--- a/pkg/cmd/issue/view/view.go
++++ b/pkg/cmd/issue/view/view.go
+@@ -144,6 +144,8 @@
+ 	}
+ 
+ 	if lookupFields.Contains("comments") {
++		// FIXME: this re-fetches the comments connection even though the initial set of 100 were
++		// fetched in the previous request.
+ 		err := preloadIssueComments(httpClient, baseRepo, issue)
+ 		if err != nil {
+ 			return err
+--- a/pkg/cmd/api/api.go
++++ b/pkg/cmd/api/api.go
+@@ -455,8 +455,6 @@
+ 
+ 	return tmpl.Flush()
+ }
+-
+-var jsonContentTypeRE = regexp.MustCompile(`[/+]json(;|$)`)
+ 
+ func processResponse(resp *http.Response, opts *ApiOptions, bodyWriter, headersWriter io.Writer, template *template.Template, isFirstPage, isLastPage bool) (endCursor string, err error) {
+ 	if opts.ShowResponseHeaders {
+@@ -471,7 +469,7 @@
+ 	var responseBody io.Reader = resp.Body
+ 	defer resp.Body.Close()
+ 
+-	isJSON := jsonContentTypeRE.MatchString(resp.Header.Get("Content-Type"))
++	isJSON, _ := regexp.MatchString(`[/+]json(;|$)`, resp.Header.Get("Content-Type"))
+ 
+ 	var serverError string
+ 	if isJSON && (opts.RequestPath == "graphql" || resp.StatusCode >= 400) {
+--- a/pkg/cmd/browse/browse.go
++++ b/pkg/cmd/browse/browse.go
+@@ -44,7 +44,6 @@
+ 	SettingsFlag    bool
+ 	WikiFlag        bool
+ 	ActionsFlag     bool
+-	BlameFlag       bool
+ 	NoBrowserFlag   bool
+ 	HasRepoOverride bool
+ }
+@@ -92,9 +91,6 @@
+ 			# Open main.go at line 312
+ 			$ gh browse main.go:312
+ 
+-			# Open blame view for main.go at line 312
+-			$ gh browse main.go:312 --blame
+-
+ 			# Open main.go with the repository at head of bug-fix branch
+ 			$ gh browse main.go --branch bug-fix
+ 
+@@ -143,10 +139,6 @@
+ 				opts.ActionsFlag,
+ 			); err != nil {
+ 				return err
+-			}
+-
+-			if opts.BlameFlag && opts.SelectorArg == "" {
+-				return cmdutil.FlagErrorf("`--blame` requires a file path argument")
+ 			}
+ 
+ 			if (isNumber(opts.SelectorArg) || isCommit(opts.SelectorArg)) && (opts.Branch != "" || opts.Commit != "") {
+@@ -171,7 +163,6 @@
+ 	cmd.Flags().BoolVarP(&opts.WikiFlag, "wiki", "w", false, "Open repository wiki")
+ 	cmd.Flags().BoolVarP(&opts.ActionsFlag, "actions", "a", false, "Open repository actions")
+ 	cmd.Flags().BoolVarP(&opts.SettingsFlag, "settings", "s", false, "Open repository settings")
+-	cmd.Flags().BoolVar(&opts.BlameFlag, "blame", false, "Open blame view for a file")
+ 	cmd.Flags().BoolVarP(&opts.NoBrowserFlag, "no-browser", "n", false, "Print destination URL instead of opening the browser")
+ 	cmd.Flags().StringVarP(&opts.Commit, "commit", "c", "", "Select another commit by passing in the commit SHA, default is the last commit")
+ 	cmd.Flags().StringVarP(&opts.Branch, "branch", "b", "", "Select another branch by passing in the branch name")
+@@ -281,16 +272,9 @@
+ 		} else {
+ 			rangeFragment = fmt.Sprintf("L%d", rangeStart)
+ 		}
+-		if opts.BlameFlag {
+-			return fmt.Sprintf("blame/%s/%s#%s", escapePath(ref), escapePath(filePath), rangeFragment), nil
+-		}
+ 		return fmt.Sprintf("blob/%s/%s?plain=1#%s", escapePath(ref), escapePath(filePath), rangeFragment), nil
+ 	}
+ 
+-	if opts.BlameFlag {
+-		return fmt.Sprintf("blame/%s/%s", escapePath(ref), escapePath(filePath)), nil
+-	}
+-
+ 	return strings.TrimSuffix(fmt.Sprintf("tree/%s/%s", escapePath(ref), escapePath(filePath)), "/"), nil
+ }
+ 
+--- a/pkg/cmd/repo/fork/fork.go
++++ b/pkg/cmd/repo/fork/fork.go
+@@ -111,10 +111,6 @@
+ 				return cmdutil.FlagErrorf("--remote-name cannot be blank")
+ 			} else if !cmd.Flags().Changed("remote-name") {
+ 				opts.Rename = true // Any existing 'origin' will be renamed to upstream
+-			}
+-
+-			if opts.Repository != "" && cmd.Flags().Changed("remote") {
+-				return cmdutil.FlagErrorf("the `--remote` flag is unsupported when a repository argument is provided")
+ 			}
+ 
+ 			if promptOk {
+--- a/pkg/cmd/repo/clone/clone.go
++++ b/pkg/cmd/repo/clone/clone.go
+@@ -27,7 +27,6 @@
+ 	GitArgs      []string
+ 	Repository   string
+ 	UpstreamName string
+-	NoUpstream   bool
+ }
+ 
+ func NewCmdClone(f *cmdutil.Factory, runF func(*CloneOptions) error) *cobra.Command {
+@@ -61,7 +60,6 @@
+ 			the remote after the owner of the parent repository.
+ 
+ 			If the repository is a fork, its parent repository will be set as the default remote repository.
+-			To skip this behavior, use %[1]s--no-upstream%[1]s.
+ 		`, "`"),
+ 		Example: heredoc.Doc(`
+ 			# Clone a repository from a specific org
+@@ -79,9 +77,6 @@
+ 
+ 			# Clone a repository with additional git clone flags
+ 			$ gh repo clone cli/cli -- --depth=1
+-
+-			# Clone a fork without adding an upstream remote
+-			$ gh repo clone myfork --no-upstream
+ 		`),
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+ 			opts.Repository = args[0]
+@@ -96,8 +91,6 @@
+ 	}
+ 
+ 	cmd.Flags().StringVarP(&opts.UpstreamName, "upstream-remote-name", "u", "upstream", "Upstream remote name when cloning a fork")
+-	cmd.Flags().BoolVar(&opts.NoUpstream, "no-upstream", false, "Do not add an upstream remote when cloning a fork")
+-	cmd.MarkFlagsMutuallyExclusive("upstream-remote-name", "no-upstream")
+ 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+ 		if err == pflag.ErrHelp {
+ 			return err
+@@ -194,43 +187,37 @@
+ 
+ 	// If the repo is a fork, add the parent as an upstream remote and set the parent as the default repo.
+ 	if canonicalRepo.Parent != nil {
++		protocol := cfg.GitProtocol(canonicalRepo.Parent.RepoHost()).Value
++		upstreamURL := ghrepo.FormatRemoteURL(canonicalRepo.Parent, protocol)
++
++		upstreamName := opts.UpstreamName
++		if opts.UpstreamName == "@owner" {
++			upstreamName = canonicalRepo.Parent.RepoOwner()
++		}
++
+ 		gc := gitClient.Copy()
+ 		gc.RepoDir = cloneDir
+ 
+-		if opts.NoUpstream {
+-			if err := gc.SetRemoteResolution(ctx, "origin", "base"); err != nil {
+-				return err
+-			}
+-		} else {
+-			protocol := cfg.GitProtocol(canonicalRepo.Parent.RepoHost()).Value
+-			upstreamURL := ghrepo.FormatRemoteURL(canonicalRepo.Parent, protocol)
++		if _, err := gc.AddRemote(ctx, upstreamName, upstreamURL, []string{canonicalRepo.Parent.DefaultBranchRef.Name}); err != nil {
++			return err
++		}
+ 
+-			upstreamName := opts.UpstreamName
+-			if opts.UpstreamName == "@owner" {
+-				upstreamName = canonicalRepo.Parent.RepoOwner()
+-			}
+-
+-			if _, err := gc.AddRemote(ctx, upstreamName, upstreamURL, []string{canonicalRepo.Parent.DefaultBranchRef.Name}); err != nil {
+-				return err
+-			}
++		if err := gc.Fetch(ctx, upstreamName, ""); err != nil {
++			return err
++		}
+ 
+-			if err := gc.Fetch(ctx, upstreamName, ""); err != nil {
+-				return err
+-			}
++		if err := gc.SetRemoteBranches(ctx, upstreamName, `*`); err != nil {
++			return err
++		}
+ 
+-			if err := gc.SetRemoteBranches(ctx, upstreamName, `*`); err != nil {
+-				return err
+-			}
++		if err = gc.SetRemoteResolution(ctx, upstreamName, "base"); err != nil {
++			return err
++		}
+ 
+-			if err := gc.SetRemoteResolution(ctx, upstreamName, "base"); err != nil {
+-				return err
+-			}
+-
+-			connectedToTerminal := opts.IO.IsStdoutTTY()
+-			if connectedToTerminal {
+-				cs := opts.IO.ColorScheme()
+-				fmt.Fprintf(opts.IO.ErrOut, "%s Repository %s set as the default repository. To learn more about the default repository, run: gh repo set-default --help\n", cs.WarningIcon(), cs.Bold(ghrepo.FullName(canonicalRepo.Parent)))
+-			}
++		connectedToTerminal := opts.IO.IsStdoutTTY()
++		if connectedToTerminal {
++			cs := opts.IO.ColorScheme()
++			fmt.Fprintf(opts.IO.ErrOut, "%s Repository %s set as the default repository. To learn more about the default repository, run: gh repo set-default --help\n", cs.WarningIcon(), cs.Bold(ghrepo.FullName(canonicalRepo.Parent)))
+ 		}
+ 	}
+ 	return nil
+--- a/pkg/jsoncolor/jsoncolor.go
++++ b/pkg/jsoncolor/jsoncolor.go
+@@ -9,7 +9,7 @@
+ )
+ 
+ const (
+-	colorDelim  = "1;37" // bold white
++	colorDelim  = "1;38" // bright white
+ 	colorKey    = "1;34" // bright blue
+ 	colorNull   = "36"   // cyan
+ 	colorString = "32"   // green

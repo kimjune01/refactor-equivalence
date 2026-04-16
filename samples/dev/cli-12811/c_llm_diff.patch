@@ -1,0 +1,139 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/api/api.go /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/api/api.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/api/api.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/api/api.go	2026-04-16 00:29:26
+@@ -33,6 +33,8 @@
+ 	ttyIndent = "  "
+ )
+ 
++var jsonContentTypeRE = regexp.MustCompile(`[/+]json(;|$)`)
++
+ type ApiOptions struct {
+ 	AppVersion string
+ 	BaseRepo   func() (ghrepo.Interface, error)
+@@ -469,7 +471,7 @@
+ 	var responseBody io.Reader = resp.Body
+ 	defer resp.Body.Close()
+ 
+-	isJSON, _ := regexp.MatchString(`[/+]json(;|$)`, resp.Header.Get("Content-Type"))
++	isJSON := jsonContentTypeRE.MatchString(resp.Header.Get("Content-Type"))
+ 
+ 	var serverError string
+ 	if isJSON && (opts.RequestPath == "graphql" || resp.StatusCode >= 400) {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/issue/close/close.go /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/issue/close/close.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/issue/close/close.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/issue/close/close.go	2026-04-16 00:29:26
+@@ -56,12 +56,8 @@
+ 			}
+ 
+ 			opts.IssueNumber = issueNumber
+-			if opts.DuplicateOf != "" {
+-				if opts.Reason == "" {
+-					opts.Reason = "duplicate"
+-				} else if opts.Reason != "duplicate" {
+-					return cmdutil.FlagErrorf("`--duplicate-of` can only be used with `--reason duplicate`")
+-				}
++			if err := normalizeDuplicateReason(opts.DuplicateOf, &opts.Reason); err != nil {
++				return err
+ 			}
+ 
+ 			if runF != nil {
+@@ -78,15 +74,23 @@
+ 	return cmd
+ }
+ 
++func normalizeDuplicateReason(duplicateOf string, reason *string) error {
++	if duplicateOf == "" {
++		return nil
++	}
++	if *reason == "" {
++		*reason = "duplicate"
++	} else if *reason != "duplicate" {
++		return cmdutil.FlagErrorf("`--duplicate-of` can only be used with `--reason duplicate`")
++	}
++	return nil
++}
++
+ func closeRun(opts *CloseOptions) error {
+ 	cs := opts.IO.ColorScheme()
+ 	closeReason := opts.Reason
+-	if opts.DuplicateOf != "" {
+-		if closeReason == "" {
+-			closeReason = "duplicate"
+-		} else if closeReason != "duplicate" {
+-			return cmdutil.FlagErrorf("`--duplicate-of` can only be used with `--reason duplicate`")
+-		}
++	if err := normalizeDuplicateReason(opts.DuplicateOf, &closeReason); err != nil {
++		return err
+ 	}
+ 
+ 	httpClient, err := opts.HttpClient()
+@@ -176,17 +180,12 @@
+ 			return err
+ 		}
+ 		// TODO stateReasonCleanup
+-		if !features.StateReason {
+-			// If StateReason is not supported silently close issue without setting StateReason.
++		duplicateUnsupported := !features.StateReason || (reason == "duplicate" && !features.StateReasonDuplicate)
++		if duplicateUnsupported {
+ 			if duplicateIssueID != "" {
+ 				return fmt.Errorf("closing as duplicate is not supported on %s", repo.RepoHost())
+ 			}
+-			reason = ""
+-		} else if reason == "duplicate" && !features.StateReasonDuplicate {
+-			if duplicateIssueID != "" {
+-				return fmt.Errorf("closing as duplicate is not supported on %s", repo.RepoHost())
+-			}
+-			// If DUPLICATE is not supported silently close issue without setting StateReason.
++			// If StateReason or DUPLICATE is not supported silently close issue without setting StateReason.
+ 			reason = ""
+ 		}
+ 	}
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/project/item-edit/item_edit.go /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/project/item-edit/item_edit.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/project/item-edit/item_edit.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/project/item-edit/item_edit.go	2026-04-16 00:29:26
+@@ -158,16 +158,6 @@
+ 	return cmdutil.SilentError
+ }
+ 
+-func buildEditDraftIssue(config editItemConfig) (*EditProjectDraftIssue, map[string]interface{}) {
+-	return &EditProjectDraftIssue{}, map[string]interface{}{
+-		"input": githubv4.UpdateProjectV2DraftIssueInput{
+-			Body:         githubv4.NewString(githubv4.String(config.opts.body)),
+-			DraftIssueID: githubv4.ID(config.opts.itemID),
+-			Title:        githubv4.NewString(githubv4.String(config.opts.title)),
+-		},
+-	}
+-}
+-
+ func buildUpdateItem(config editItemConfig, date time.Time) (*UpdateProjectV2FieldValue, map[string]interface{}) {
+ 	var value githubv4.ProjectV2FieldValue
+ 	if config.opts.text != "" {
+@@ -250,7 +240,14 @@
+ 		return cmdutil.FlagErrorf("ID must be the ID of the draft issue content which is prefixed with `DI_`")
+ 	}
+ 
+-	query, variables := buildEditDraftIssue(config)
++	query := &EditProjectDraftIssue{}
++	variables := map[string]interface{}{
++		"input": githubv4.UpdateProjectV2DraftIssueInput{
++			Body:         githubv4.NewString(githubv4.String(config.opts.body)),
++			DraftIssueID: githubv4.ID(config.opts.itemID),
++			Title:        githubv4.NewString(githubv4.String(config.opts.title)),
++		},
++	}
+ 
+ 	err := config.client.Mutate("EditDraftIssueItem", query, variables)
+ 	if err != nil {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/repo/clone/clone.go /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/repo/clone/clone.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/12811/c_test/pkg/cmd/repo/clone/clone.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/12811/c_llm/pkg/cmd/repo/clone/clone.go	2026-04-16 00:29:26
+@@ -214,8 +214,7 @@
+ 			return err
+ 		}
+ 
+-		connectedToTerminal := opts.IO.IsStdoutTTY()
+-		if connectedToTerminal {
++		if opts.IO.IsStdoutTTY() {
+ 			cs := opts.IO.ColorScheme()
+ 			fmt.Fprintf(opts.IO.ErrOut, "%s Repository %s set as the default repository. To learn more about the default repository, run: gh repo set-default --help\n", cs.WarningIcon(), cs.Bold(ghrepo.FullName(canonicalRepo.Parent)))
+ 		}

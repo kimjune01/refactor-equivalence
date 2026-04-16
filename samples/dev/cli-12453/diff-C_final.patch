@@ -1,0 +1,500 @@
+--- a/internal/prompter/prompter.go
++++ b/internal/prompter/prompter.go
+@@ -29,7 +29,7 @@
+ 	// not their indices, since the list of options is dynamic.
+ 	// The searchFunc args and return values are: func(query) (map[keys]labels, moreResultsCount, searchError)
+ 	// Where the selected keys are eventually returned by MultiSelectWithSearch and the labels are what is shown to the user in the prompt.
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error)
++	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+ 	// Input prompts the user to enter a string value.
+ 	Input(prompt string, defaultValue string) (string, error)
+ 	// Password prompts the user to enter a password.
+@@ -329,7 +329,7 @@
+ 	return text, nil
+ }
+ 
+-func (p *accessiblePrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++func (p *accessiblePrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ 	return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
+ }
+ 
+@@ -349,11 +349,18 @@
+ 	return p.prompter.MultiSelect(prompt, defaultValues, options)
+ }
+ 
+-func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ 	return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
+ }
+ 
+-func multiSelectWithSearch(p Prompter, prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++type MultiSelectSearchResult struct {
++	Keys        []string
++	Labels      []string
++	MoreResults int
++	Err         error
++}
++
++func multiSelectWithSearch(p Prompter, prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ 	selectedOptions := defaultValues
+ 
+ 	// The optionKeyLabels map is used to uniquely identify optionKeyLabels
+@@ -363,10 +370,13 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
+-	searchResultKeys, searchResultLabels, moreResults, err := searchFunc("")
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to search: %w", err)
++	searchResult := searchFunc("")
++	if searchResult.Err != nil {
++		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
++	searchResultKeys := searchResult.Keys
++	searchResultLabels := searchResult.Labels
++	moreResults := searchResult.MoreResults
+ 
+ 	for i, k := range searchResultKeys {
+ 		optionKeyLabels[k] = searchResultLabels[i]
+@@ -474,10 +484,13 @@
+ 				return nil, err
+ 			}
+ 
+-			searchResultKeys, searchResultLabels, moreResults, err = searchFunc(query)
+-			if err != nil {
+-				return nil, err
++			searchResult := searchFunc(query)
++			if searchResult.Err != nil {
++				return nil, searchResult.Err
+ 			}
++			searchResultKeys = searchResult.Keys
++			searchResultLabels = searchResult.Labels
++			moreResults = searchResult.MoreResults
+ 
+ 			for i, k := range searchResultKeys {
+ 				optionKeyLabels[k] = searchResultLabels[i]
+--- a/internal/prompter/test.go
++++ b/internal/prompter/test.go
+@@ -99,7 +99,7 @@
+ 	return s.fn(prompt, defaultValue, blankAllowed)
+ }
+ 
+-func (m *MockPrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++func (m *MockPrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ 	var s multiSelectWithSearchStub
+ 	if len(m.multiSelectWithSearchStubs) == 0 {
+ 		return nil, NoSuchPromptErr(prompt)
+--- a/internal/prompter/prompter_mock.go
++++ b/internal/prompter/prompter_mock.go
+@@ -38,7 +38,7 @@
+ //			MultiSelectFunc: func(prompt string, defaults []string, options []string) ([]int, error) {
+ //				panic("mock out the MultiSelect method")
+ //			},
+-//			MultiSelectWithSearchFunc: func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++//			MultiSelectWithSearchFunc: func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ //				panic("mock out the MultiSelectWithSearch method")
+ //			},
+ //			PasswordFunc: func(prompt string) (string, error) {
+@@ -76,7 +76,7 @@
+ 	MultiSelectFunc func(prompt string, defaults []string, options []string) ([]int, error)
+ 
+ 	// MultiSelectWithSearchFunc mocks the MultiSelectWithSearch method.
+-	MultiSelectWithSearchFunc func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error)
++	MultiSelectWithSearchFunc func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+ 
+ 	// PasswordFunc mocks the Password method.
+ 	PasswordFunc func(prompt string) (string, error)
+@@ -140,7 +140,7 @@
+ 			// PersistentOptions is the persistentOptions argument value.
+ 			PersistentOptions []string
+ 			// SearchFunc is the searchFunc argument value.
+-			SearchFunc func(string) ([]string, []string, int, error)
++			SearchFunc func(string) MultiSelectSearchResult
+ 		}
+ 		// Password holds details about calls to the Password method.
+ 		Password []struct {
+@@ -408,7 +408,7 @@
+ }
+ 
+ // MultiSelectWithSearch calls MultiSelectWithSearchFunc.
+-func (mock *PrompterMock) MultiSelectWithSearch(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error) {
++func (mock *PrompterMock) MultiSelectWithSearch(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+ 	if mock.MultiSelectWithSearchFunc == nil {
+ 		panic("PrompterMock.MultiSelectWithSearchFunc: method is nil but Prompter.MultiSelectWithSearch was just called")
+ 	}
+@@ -417,7 +417,7 @@
+ 		SearchPrompt      string
+ 		Defaults          []string
+ 		PersistentOptions []string
+-		SearchFunc        func(string) ([]string, []string, int, error)
++		SearchFunc        func(string) MultiSelectSearchResult
+ 	}{
+ 		Prompt:            prompt,
+ 		SearchPrompt:      searchPrompt,
+@@ -440,14 +440,14 @@
+ 	SearchPrompt      string
+ 	Defaults          []string
+ 	PersistentOptions []string
+-	SearchFunc        func(string) ([]string, []string, int, error)
++	SearchFunc        func(string) MultiSelectSearchResult
+ } {
+ 	var calls []struct {
+ 		Prompt            string
+ 		SearchPrompt      string
+ 		Defaults          []string
+ 		PersistentOptions []string
+-		SearchFunc        func(string) ([]string, []string, int, error)
++		SearchFunc        func(string) MultiSelectSearchResult
+ 	}
+ 	mock.lockMultiSelectWithSearch.RLock()
+ 	calls = mock.calls.MultiSelectWithSearch
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -700,7 +700,112 @@
+ 	// The endpoint responds with the updated pull request object; we don't need it here.
+ 	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+ }
++
++// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
++// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
++// If query is empty, the query variable is passed as null to omit filtering.
++func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type responseData struct {
++		Viewer struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"viewer"`
++		Node struct {
++			Issue struct {
++				SuggestedActors struct {
++					Nodes []struct {
++					    TypeName string `graphql:"__typename"`
++						User struct {
++							ID       string
++							Login    string
++							Name     string
++						} `graphql:"... on User"`
++						Bot struct {
++							ID       string
++							Login    string
++						} `graphql:"... on Bot"`
++					}
++				} `graphql:"suggestedActors(first: 10, query: $query)"`
++			} `graphql:"... on Issue"`
++			PullRequest struct {
++				SuggestedActors struct {
++					Nodes []struct {
++					    TypeName string `graphql:"__typename"`
++						User struct {
++							ID       string
++							Login    string
++							Name     string							
++						} `graphql:"... on User"`
++						Bot struct {
++							ID       string
++							Login    string
++						} `graphql:"... on Bot"`
++					}
++				} `graphql:"suggestedActors(first: 10, query: $query)"`
++			} `graphql:"... on PullRequest"`
++		} `graphql:"node(id: $id)"`
++	}
+ 
++	variables := map[string]interface{}{
++		"id": githubv4.ID(assignableID),
++	}
++	if query != "" {
++		variables["query"] = githubv4.String(query)
++	} else {
++		variables["query"] = (*githubv4.String)(nil)
++	}
++
++	var result responseData
++	if err := client.Query(repo.RepoHost(), "SuggestedAssignableActors", &result, variables); err != nil {
++		return nil, err
++	}
++
++	var nodes []struct {
++		TypeName string `graphql:"__typename"`
++		User struct {
++			ID       string
++			Login    string
++			Name     string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID       string
++			Login    string
++		} `graphql:"... on Bot"`
++	}
++
++	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
++		nodes = result.Node.PullRequest.SuggestedActors.Nodes
++	} else if result.Node.Issue.SuggestedActors.Nodes != nil {
++		nodes = result.Node.Issue.SuggestedActors.Nodes
++	}
++
++	actors := make([]AssignableActor, 0, len(nodes)+1) // +1 in case we add viewer
++	viewer := result.Viewer
++	viewerLogin := viewer.Login
++	viewerIncluded := false
++
++	for _, n := range nodes {
++		if n.TypeName == "User" && n.User.Login != "" {
++			actors = append(actors, AssignableUser{id: n.User.ID, login: n.User.Login, name: n.User.Name})
++			if query == "" && viewerLogin != "" && n.User.Login == viewerLogin {
++				viewerIncluded = true
++			}
++		} else if n.TypeName == "Bot" && n.Bot.Login != "" {
++			actors = append(actors, AssignableBot{id: n.Bot.ID, login: n.Bot.Login})
++			if query == "" && viewerLogin != "" && n.Bot.Login == viewerLogin {
++				viewerIncluded = true
++			}
++		}
++	}
++
++	// When query is blank, append viewer if not already present.
++	if query == "" && viewerLogin != "" && !viewerIncluded {
++		actors = append(actors, AssignableUser{id: viewer.ID, login: viewer.Login, name: viewer.Name})
++	}
++	return actors, nil
++}
++
+ func UpdatePullRequestBranch(client *Client, repo ghrepo.Interface, params githubv4.UpdatePullRequestBranchInput) error {
+ 	var mutation struct {
+ 		UpdatePullRequestBranch struct {
+--- a/pkg/cmd/pr/shared/survey.go
++++ b/pkg/cmd/pr/shared/survey.go
+@@ -9,6 +9,7 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -40,7 +41,7 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) ([]string, []string, int, error)) ([]string, error)
++	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+--- a/pkg/cmd/pr/shared/editable.go
++++ b/pkg/cmd/pr/shared/editable.go
+@@ -6,19 +6,22 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/set"
+ )
+ 
+ type Editable struct {
+-	Title     EditableString
+-	Body      EditableString
+-	Base      EditableString
+-	Reviewers EditableSlice
+-	Assignees EditableAssignees
+-	Labels    EditableSlice
+-	Projects  EditableProjects
+-	Milestone EditableString
+-	Metadata  api.RepoMetadataResult
++	Title              EditableString
++	Body               EditableString
++	Base               EditableString
++	Reviewers          EditableSlice
++	ReviewerSearchFunc func(string) ([]string, []string, error)
++	Assignees          EditableAssignees
++	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++	Labels             EditableSlice
++	Projects           EditableProjects
++	Milestone          EditableString
++	Metadata           api.RepoMetadataResult
+ }
+ 
+ type EditableString struct {
+@@ -277,6 +280,7 @@
+ 	Input(string, string) (string, error)
+ 	MarkdownEditor(string, string, bool) (string, error)
+ 	MultiSelect(string, []string, []string) ([]int, error)
++	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ 	Confirm(string, bool) (bool, error)
+ }
+ 
+@@ -302,10 +306,24 @@
+ 		}
+ 	}
+ 	if editable.Assignees.Edited {
+-		editable.Assignees.Value, err = multiSelectSurvey(
+-			p, "Assignees", editable.Assignees.Default, editable.Assignees.Options)
+-		if err != nil {
+-			return err
++		if editable.AssigneeSearchFunc != nil {
++			editable.Assignees.Options = []string{}
++			editable.Assignees.Value, err = p.MultiSelectWithSearch(
++				"Assignees",
++				"Search assignees",
++				editable.Assignees.DefaultLogins,
++				// No persistent options required here as teams cannot be assignees.
++				[]string{},
++				editable.AssigneeSearchFunc)
++			if err != nil {
++				return err
++			}
++		} else {
++			editable.Assignees.Value, err = multiSelectSurvey(
++				p, "Assignees", editable.Assignees.Default, editable.Assignees.Options)
++			if err != nil {
++				return err
++			}
+ 		}
+ 	}
+ 	if editable.Labels.Edited {
+@@ -408,10 +426,27 @@
+ 			teamReviewers = true
+ 		}
+ 	}
++
++	fetchAssignees := false
++	if editable.Assignees.Edited {
++		// Similar as above, this is likely an interactive flow if no Add/Remove slices are set.
++		// The addition here is that we also check for an assignee search func.
++		// If we have a search func, we don't need to fetch assignees since we
++		// assume that will be done dynamically in the prompting flow.
++		if len(editable.Assignees.Add) == 0 && len(editable.Assignees.Remove) == 0 && editable.AssigneeSearchFunc == nil {
++			fetchAssignees = true
++		}
++		// However, if we have Add/Remove operations (non-interactive flow),
++		// we do need to fetch the assignees.
++		if len(editable.Assignees.Add) > 0 || len(editable.Assignees.Remove) > 0 {
++			fetchAssignees = true
++		}
++	}
++
+ 	input := api.RepoMetadataInput{
+ 		Reviewers:      editable.Reviewers.Edited,
+ 		TeamReviewers:  teamReviewers,
+-		Assignees:      editable.Assignees.Edited,
++		Assignees:      fetchAssignees,
+ 		ActorAssignees: editable.Assignees.ActorAssignees,
+ 		Labels:         editable.Labels.Edited,
+ 		ProjectsV1:     editable.Projects.Edited && projectV1Support == gh.ProjectsV1Supported,
+--- a/pkg/cmd/pr/edit/edit.go
++++ b/pkg/cmd/pr/edit/edit.go
+@@ -12,6 +12,7 @@
+ 	fd "github.com/cli/cli/v2/internal/featuredetection"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/cli/cli/v2/internal/prompter"
+ 	shared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+@@ -292,6 +293,12 @@
+ 
+ 	apiClient := api.NewClientFromHTTP(httpClient)
+ 
++	// Wire up search functions for assignees and reviewers.
++	// TODO KW: Wire up reviewer search func if/when it exists.
++	if issueFeatures.ActorIsAssignable {
++		editable.AssigneeSearchFunc = assigneeSearchFunc(apiClient, repo, &editable, pr.ID)
++	}
++
+ 	opts.IO.StartProgressIndicator()
+ 	err = opts.Fetcher.EditableOptionsFetch(apiClient, repo, &editable, opts.Detector.ProjectsV1())
+ 	opts.IO.StopProgressIndicator()
+@@ -330,7 +337,53 @@
+ 
+ 	return nil
+ }
++
++func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++		actors, err := api.SuggestedAssignableActors(
++			apiClient,
++			repo,
++			assignableID,
++			input)
++		if err != nil {
++			return prompter.MultiSelectSearchResult{
++				Keys:        nil,
++				Labels:      nil,
++				MoreResults: 0,
++				Err:         err,
++			}
++		}
+ 
++		logins := make([]string, 0, len(actors))
++		displayNames := make([]string, 0, len(actors))
++
++		for _, a := range actors {
++			if a.Login() != "" {
++				logins = append(logins, a.Login())
++			} else {
++				continue
++			}
++
++			if a.DisplayName() != "" {
++				displayNames = append(displayNames, a.DisplayName())
++			} else {
++				displayNames = append(displayNames, a.Login())
++			}
++
++			// Update the assignable actors metadata in the editable struct
++			// so that updating the PR later can resolve the actor ID.
++			editable.Metadata.AssignableActors = append(editable.Metadata.AssignableActors, a)
++		}
++		return prompter.MultiSelectSearchResult{
++			Keys:        logins,
++			Labels:      displayNames,
++			MoreResults: 0,
++			Err:         nil,
++		}
++	}
++	return searchFunc
++}
++
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+ 	var wg errgroup.Group
+ 	wg.Go(func() error {
+--- a/pkg/cmd/preview/prompter/prompter.go
++++ b/pkg/cmd/preview/prompter/prompter.go
+@@ -157,7 +157,7 @@
+ func runMultiSelectWithSearch(p prompter.Prompter, io *iostreams.IOStreams) error {
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+-	searchFunc := func(input string) ([]string, []string, int, error) {
++	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+ 		var searchResultKeys []string
+ 		var searchResultLabels []string
+ 
+@@ -165,7 +165,12 @@
+ 			moreResults := 2 // Indicate that there are more results available
+ 			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+ 			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+-			return searchResultKeys, searchResultLabels, moreResults, nil
++			return prompter.MultiSelectSearchResult{
++				Keys:        searchResultKeys,
++				Labels:      searchResultLabels,
++				MoreResults: moreResults,
++				Err:         nil,
++			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+@@ -173,7 +178,12 @@
+ 		moreResults := 0
+ 		searchResultKeys = []string{"search-result-1", "search-result-2"}
+ 		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+-		return searchResultKeys, searchResultLabels, moreResults, nil
++		return prompter.MultiSelectSearchResult{
++			Keys:        searchResultKeys,
++			Labels:      searchResultLabels,
++			MoreResults: moreResults,
++			Err:         nil,
++		}
+ 	}
+ 
+ 	selections, err := p.MultiSelectWithSearch("Select an option", "Search for an option", []string{}, persistentOptions, searchFunc)

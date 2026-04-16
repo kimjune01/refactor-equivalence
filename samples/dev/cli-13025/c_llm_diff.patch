@@ -1,0 +1,117 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/api/queries_repo.go /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/api/queries_repo.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/api/queries_repo.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/api/queries_repo.go	2026-04-16 00:29:27
+@@ -952,10 +952,9 @@
+ 				// skip retrieving the same info through RepoAssignableUsers().
+ 				var users []AssignableUser
+ 				for _, a := range actors {
+-					if _, ok := a.(AssignableUser); !ok {
+-						continue
++					if user, ok := a.(AssignableUser); ok {
++						users = append(users, user)
+ 					}
+-					users = append(users, a.(AssignableUser))
+ 				}
+ 				result.AssignableUsers = users
+ 				return nil
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/create/create.go /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/create/create.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/create/create.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/create/create.go	2026-04-16 00:29:27
+@@ -407,6 +407,7 @@
+ 	}
+ 	var reviewerSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	var assigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++	// TODO ApiActorsSupported
+ 	if issueFeatures.ApiActorsSupported {
+ 		reviewerSearchFunc = func(query string) prompter.MultiSelectSearchResult {
+ 			candidates, moreResults, err := api.SuggestedReviewerActorsForRepo(client, ctx.PRRefs.BaseRepo(), query)
+@@ -429,11 +430,6 @@
+ 		return err
+ 	}
+ 
+-	// TODO ApiActorsSupported
+-	if issueFeatures.ApiActorsSupported {
+-		state.ApiActorsSupported = true
+-	}
+-
+ 	var openURL string
+ 
+ 	if opts.WebMode {
+@@ -688,13 +684,14 @@
+ 	reviewers := copilotReplacer.ReplaceSlice(opts.Reviewers)
+ 
+ 	state := &shared.IssueMetadataState{
+-		Type:          shared.PRMetadata,
+-		Reviewers:     reviewers,
+-		Assignees:     assignees,
+-		Labels:        opts.Labels,
+-		ProjectTitles: opts.Projects,
+-		Milestones:    milestoneTitles,
+-		Draft:         opts.IsDraft,
++		Type:               shared.PRMetadata,
++		ApiActorsSupported: apiActorsSupported,
++		Reviewers:          reviewers,
++		Assignees:          assignees,
++		Labels:             opts.Labels,
++		ProjectTitles:      opts.Projects,
++		Milestones:         milestoneTitles,
++		Draft:              opts.IsDraft,
+ 	}
+ 
+ 	if opts.FillVerbose || opts.Autofill || opts.FillFirst || !opts.TitleProvided || !opts.BodyProvided {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/shared/editable.go /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/shared/editable.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:26
++++ /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:27
+@@ -174,20 +174,20 @@
+ // SpecialAssigneeReplacer expands special assignee names (@me, Copilot actors)
+ // in login slices. Use NewSpecialAssigneeReplacer to create one.
+ type SpecialAssigneeReplacer struct {
+-	meReplacer      *MeReplacer
+-	copilotReplacer *CopilotReplacer
+-	actorAssignees  bool
++	meReplacer         *MeReplacer
++	copilotReplacer    *CopilotReplacer
++	apiActorsSupported bool
+ }
+ 
+ // NewSpecialAssigneeReplacer creates a replacer that expands @me and (when
+-// actorAssignees is true) Copilot actor names in assignee slices.
++// apiActorsSupported is true) Copilot actor names in assignee slices.
+ // copilotUseLogin controls whether Copilot actors are replaced with their
+ // login (true) or display name (false, used for web mode).
+-func NewSpecialAssigneeReplacer(client *api.Client, host string, actorAssignees bool, copilotUseLogin bool) *SpecialAssigneeReplacer {
++func NewSpecialAssigneeReplacer(client *api.Client, host string, apiActorsSupported bool, copilotUseLogin bool) *SpecialAssigneeReplacer {
+ 	return &SpecialAssigneeReplacer{
+-		meReplacer:      NewMeReplacer(client, host),
+-		copilotReplacer: NewCopilotReplacer(copilotUseLogin),
+-		actorAssignees:  actorAssignees,
++		meReplacer:         NewMeReplacer(client, host),
++		copilotReplacer:    NewCopilotReplacer(copilotUseLogin),
++		apiActorsSupported: apiActorsSupported,
+ 	}
+ }
+ 
+@@ -196,7 +196,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if r.actorAssignees {
++	if r.apiActorsSupported {
+ 		replaced = r.copilotReplacer.ReplaceSlice(replaced)
+ 	}
+ 	return replaced, nil
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/shared/survey.go /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/shared/survey.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13025/c_test/pkg/cmd/pr/shared/survey.go	2026-04-16 00:29:27
++++ /tmp/refactor-eq-workdir/snapshots-cli/13025/c_llm/pkg/cmd/pr/shared/survey.go	2026-04-16 00:29:27
+@@ -183,9 +183,8 @@
+ 	// Retrieve and process data for survey prompts based on the extra fields selected.
+ 	// When search-based selection is available, skip the expensive assignable-users
+ 	// and teams fetch since they are found dynamically via the search function.
+-	// TODO ApiActorsSupported
+-	useReviewerSearch := state.ApiActorsSupported && reviewerSearchFunc != nil
+-	useAssigneeSearch := state.ApiActorsSupported && assigneeSearchFunc != nil
++	useReviewerSearch := reviewerSearchFunc != nil
++	useAssigneeSearch := assigneeSearchFunc != nil
+ 	metadataInput := api.RepoMetadataInput{
+ 		Reviewers:          isChosen("Reviewers") && !useReviewerSearch,
+ 		TeamReviewers:      isChosen("Reviewers") && !useReviewerSearch,

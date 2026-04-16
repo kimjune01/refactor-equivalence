@@ -1,0 +1,293 @@
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_issue.go /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_issue.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_issue.go	2026-04-16 00:29:25
++++ /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_issue.go	2026-04-16 00:29:25
+@@ -311,12 +311,8 @@
+ 	}
+ 	issue := &result.CreateIssue.Issue
+ 
+-	// Assign users using login-based mutation when ActorAssignees is true (github.com).
+-	if assigneeLogins, ok := params["assigneeLogins"].([]string); ok && len(assigneeLogins) > 0 {
+-		err := ReplaceActorsForAssignableByLogin(client, repo, issue.ID, assigneeLogins)
+-		if err != nil {
+-			return issue, err
+-		}
++	if err := replaceActorsForAssignableFromParams(client, repo, issue.ID, params); err != nil {
++		return issue, err
+ 	}
+ 
+ 	// projectV2 parameters aren't supported in the `createIssue` mutation,
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_pr.go /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_pr.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_pr.go	2026-04-16 00:29:25
++++ /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_pr.go	2026-04-16 00:29:25
+@@ -524,12 +524,8 @@
+ 		}
+ 	}
+ 
+-	// Assign users using login-based mutation when ActorAssignees is true (github.com).
+-	if assigneeLogins, ok := params["assigneeLogins"].([]string); ok && len(assigneeLogins) > 0 {
+-		err := ReplaceActorsForAssignableByLogin(client, repo, pr.ID, assigneeLogins)
+-		if err != nil {
+-			return pr, err
+-		}
++	if err := replaceActorsForAssignableFromParams(client, repo, pr.ID, params); err != nil {
++		return pr, err
+ 	}
+ 
+ 	// TODO requestReviewsByLoginCleanup
+@@ -616,6 +612,15 @@
+ 	}
+ 
+ 	return client.Mutate(repo.RepoHost(), "ReplaceActorsForAssignable", &mutation, variables)
++}
++
++func replaceActorsForAssignableFromParams(client *Client, repo ghrepo.Interface, assignableID string, params map[string]interface{}) error {
++	assigneeLogins, ok := params["assigneeLogins"].([]string)
++	if !ok || len(assigneeLogins) == 0 {
++		return nil
++	}
++
++	return ReplaceActorsForAssignableByLogin(client, repo, assignableID, assigneeLogins)
+ }
+ 
+ // SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_repo.go /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_repo.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/api/queries_repo.go	2026-04-16 00:29:25
++++ /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/api/queries_repo.go	2026-04-16 00:29:25
+@@ -1238,19 +1238,7 @@
+ 	type responseData struct {
+ 		Repository struct {
+ 			SuggestedActors struct {
+-				Nodes []struct {
+-					User struct {
+-						ID       string
+-						Login    string
+-						Name     string
+-						TypeName string `graphql:"__typename"`
+-					} `graphql:"... on User"`
+-					Bot struct {
+-						ID       string
+-						Login    string
+-						TypeName string `graphql:"__typename"`
+-					} `graphql:"... on Bot"`
+-				}
++				Nodes    []suggestedAssignableActorNode
+ 				PageInfo struct {
+ 					HasNextPage bool
+ 					EndCursor   string
+@@ -1273,22 +1261,7 @@
+ 			return nil, err
+ 		}
+ 
+-		for _, node := range query.Repository.SuggestedActors.Nodes {
+-			if node.User.TypeName == "User" {
+-				actor := AssignableUser{
+-					id:    node.User.ID,
+-					login: node.User.Login,
+-					name:  node.User.Name,
+-				}
+-				actors = append(actors, actor)
+-			} else if node.Bot.TypeName == "Bot" {
+-				actor := AssignableBot{
+-					id:    node.Bot.ID,
+-					login: node.Bot.Login,
+-				}
+-				actors = append(actors, actor)
+-			}
+-		}
++		actors = append(actors, assignableActorsFromSuggestedNodes(query.Repository.SuggestedActors.Nodes)...)
+ 
+ 		if !query.Repository.SuggestedActors.PageInfo.HasNextPage {
+ 			break
+@@ -1308,19 +1281,7 @@
+ 				TotalCount int
+ 			}
+ 			SuggestedActors struct {
+-				Nodes []struct {
+-					User struct {
+-						ID       string
+-						Login    string
+-						Name     string
+-						TypeName string `graphql:"__typename"`
+-					} `graphql:"... on User"`
+-					Bot struct {
+-						ID       string
+-						Login    string
+-						TypeName string `graphql:"__typename"`
+-					} `graphql:"... on Bot"`
+-				}
++				Nodes []suggestedAssignableActorNode
+ 			} `graphql:"suggestedActors(first: 10, query: $query, capabilities: CAN_BE_ASSIGNED)"`
+ 		} `graphql:"repository(owner: $owner, name: $name)"`
+ 	}
+@@ -1342,8 +1303,28 @@
+ 		return nil, 0, err
+ 	}
+ 
++	actors := assignableActorsFromSuggestedNodes(result.Repository.SuggestedActors.Nodes)
++
++	return actors, result.Repository.AssignableUsers.TotalCount, nil
++}
++
++type suggestedAssignableActorNode struct {
++	User struct {
++		ID       string
++		Login    string
++		Name     string
++		TypeName string `graphql:"__typename"`
++	} `graphql:"... on User"`
++	Bot struct {
++		ID       string
++		Login    string
++		TypeName string `graphql:"__typename"`
++	} `graphql:"... on Bot"`
++}
++
++func assignableActorsFromSuggestedNodes(nodes []suggestedAssignableActorNode) []AssignableActor {
+ 	var actors []AssignableActor
+-	for _, node := range result.Repository.SuggestedActors.Nodes {
++	for _, node := range nodes {
+ 		if node.User.TypeName == "User" {
+ 			actors = append(actors, AssignableUser{
+ 				id:    node.User.ID,
+@@ -1358,7 +1339,7 @@
+ 		}
+ 	}
+ 
+-	return actors, result.Repository.AssignableUsers.TotalCount, nil
++	return actors
+ }
+ 
+ type RepoLabel struct {
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/pkg/cmd/pr/shared/editable.go /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/pkg/cmd/pr/shared/editable.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:25
++++ /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/pkg/cmd/pr/shared/editable.go	2026-04-16 00:29:25
+@@ -112,35 +112,18 @@
+ 			return replaced, nil
+ 		}
+ 
+-		assigneeSet := set.NewStringSet()
+-
+-		// This check below is required because in a non-interactive flow,
+-		// the user gives us a login and not the DisplayName, and when
+-		// we have actor assignees e.Assignees.Default will contain
+-		// DisplayNames and not logins (this is to accommodate special actor
+-		// display names in the interactive flow).
+-		// So, we need to add the default logins here instead of the DisplayNames.
+-		// Otherwise, the value the user provided won't be found in the
+-		// set to be added or removed, causing unexpected behavior.
++		defaults := e.Assignees.Default
++		// Actor defaults are display names in interactive flows, but non-interactive
++		// add/remove values are logins.
+ 		if e.Assignees.ActorAssignees {
+-			assigneeSet.AddValues(e.Assignees.DefaultLogins)
+-		} else {
+-			assigneeSet.AddValues(e.Assignees.Default)
++			defaults = e.Assignees.DefaultLogins
+ 		}
+ 
+-		add, err := replaceSpecialAssigneeNames(e.Assignees.Add)
++		value, err := assigneeAddRemoveValue(defaults, e.Assignees.Add, e.Assignees.Remove, replaceSpecialAssigneeNames)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		assigneeSet.AddValues(add)
+-
+-		remove, err := replaceSpecialAssigneeNames(e.Assignees.Remove)
+-		if err != nil {
+-			return nil, err
+-		}
+-		assigneeSet.RemoveValues(remove)
+-
+-		e.Assignees.Value = assigneeSet.ToSlice()
++		e.Assignees.Value = value
+ 	}
+ 	a, err := e.Metadata.MembersToIDs(e.Assignees.Value)
+ 	return &a, err
+@@ -168,25 +151,33 @@
+ 			return replaced, nil
+ 		}
+ 
+-		assigneeSet := set.NewStringSet()
+-		assigneeSet.AddValues(e.Assignees.DefaultLogins)
+-
+-		add, err := replaceSpecialAssigneeNames(e.Assignees.Add)
++		value, err := assigneeAddRemoveValue(e.Assignees.DefaultLogins, e.Assignees.Add, e.Assignees.Remove, replaceSpecialAssigneeNames)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		assigneeSet.AddValues(add)
++		e.Assignees.Value = value
++	}
+ 
+-		remove, err := replaceSpecialAssigneeNames(e.Assignees.Remove)
+-		if err != nil {
+-			return nil, err
+-		}
+-		assigneeSet.RemoveValues(remove)
++	return e.Assignees.Value, nil
++}
+ 
+-		e.Assignees.Value = assigneeSet.ToSlice()
++func assigneeAddRemoveValue(defaults, addValues, removeValues []string, replace func([]string) ([]string, error)) ([]string, error) {
++	assigneeSet := set.NewStringSet()
++	assigneeSet.AddValues(defaults)
++
++	add, err := replace(addValues)
++	if err != nil {
++		return nil, err
+ 	}
++	assigneeSet.AddValues(add)
+ 
+-	return e.Assignees.Value, nil
++	remove, err := replace(removeValues)
++	if err != nil {
++		return nil, err
++	}
++	assigneeSet.RemoveValues(remove)
++
++	return assigneeSet.ToSlice(), nil
+ }
+ 
+ // ProjectIds returns a slice containing IDs of projects v1 that the issue or a PR has to be linked to.
+diff --color -ruN /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/pkg/cmd/pr/shared/survey.go /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/pkg/cmd/pr/shared/survey.go
+--- /tmp/refactor-eq-workdir/snapshots-cli/13009/c_test/pkg/cmd/pr/shared/survey.go	2026-04-16 00:29:25
++++ /tmp/refactor-eq-workdir/snapshots-cli/13009/c_llm/pkg/cmd/pr/shared/survey.go	2026-04-16 00:29:25
+@@ -217,21 +217,19 @@
+ 	var assignees []string
+ 	var assigneesDefault []string
+ 	if !useAssigneeSearch {
++		addAssignee := func(login, displayName string) {
++			assignees = append(assignees, displayName)
++			if slices.Contains(state.Assignees, login) {
++				assigneesDefault = append(assigneesDefault, displayName)
++			}
++		}
+ 		if state.ActorAssignees {
+ 			for _, u := range metadataResult.AssignableActors {
+-				assignees = append(assignees, u.DisplayName())
+-
+-				if slices.Contains(state.Assignees, u.Login()) {
+-					assigneesDefault = append(assigneesDefault, u.DisplayName())
+-				}
++				addAssignee(u.Login(), u.DisplayName())
+ 			}
+ 		} else {
+ 			for _, u := range metadataResult.AssignableUsers {
+-				assignees = append(assignees, u.DisplayName())
+-
+-				if slices.Contains(state.Assignees, u.Login()) {
+-					assigneesDefault = append(assigneesDefault, u.DisplayName())
+-				}
++				addAssignee(u.Login(), u.DisplayName())
+ 			}
+ 		}
+ 	}
+@@ -261,7 +259,7 @@
+ 	}{}
+ 
+ 	if isChosen("Reviewers") {
+-		if reviewerSearchFunc != nil {
++		if useReviewerSearch {
+ 			selectedReviewers, err := p.MultiSelectWithSearch(
+ 				"Reviewers",
+ 				"Search reviewers",
