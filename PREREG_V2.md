@@ -365,15 +365,88 @@ For each repo, PRs are split into a dev set used for prompt iteration and a test
 
 ### Trail commitment
 
-The following will be published alongside results:
+Everything produced by the pipeline is saved per-trial under `samples/<set>/<repo>-<pr>/` for posterior analysis. The published artifact is a complete reconstruction of every decision point — no summary-only outputs.
 
-- All candidate PRs considered and why each was included or excluded
-- All prompts tried during dev-set iteration, with notes on what changed and why
-- Full pilot data including failures
-- All `C_test` candidate commits, not just the selected one
-- Exclusion log with reasons
-- Complexity-tool output JSON per snapshot per PR (v2 change: proposed O3)
-- Per-PR Python `pip freeze` manifests for Python repos (v2 change: proposed O2)
+**Per-trial artifacts (saved per PR):**
+
+```
+samples/<set>/<repo>-<pr>/
+  meta.json                      # PR number, repo, base/test/final SHAs, model versions
+  goal/
+    issue-<id>.md                # each linked issue's title+body
+    pr-title.txt
+    pr-body.md
+  inputs/
+    diff-base-to-test.patch      # the artifact (input to volley)
+    allowed-files.txt
+  volley/
+    round-1-claims.md            # codex output round 1
+    hunt-spec-round-1.md         # findings round 1
+    round-2-claims.md            # if iterated
+    hunt-spec-round-2.md
+    ...
+    sharpened-spec-final.md      # reconciled, post-iteration
+  blind-blind/
+    opus-dir.diff                # opus's diff vs C_test (full files too big; just patches)
+    codex-dir.diff
+    merge-decisions.json         # per-file: which model won and why
+    merged.diff                  # final merged candidate vs C_test
+  gates/
+    complexity-gate.json         # mean cog at C_test + candidate, pass/fail
+    hunt-code-round-1.md         # findings round 1
+    hunt-code-round-2.md
+    ...
+    build-log.txt                # full build output at final candidate
+    test-log.txt                 # full test output
+  reviewer-loop/
+    round-1-comments.md          # gemini's comments
+    round-1-address.diff         # implementer's response diff
+    round-2-comments.md
+    ...
+    final-state.txt              # converged | impasse | cap-hit
+  c_llm/
+    diff.patch                   # final C_llm vs C_test
+    files/                       # full files of C_llm in allowed edit set
+  c_random/                      # if generated
+    diff.patch
+    seed.txt
+    validation.json
+  measurements/
+    c_test.json                  # raw measure_complexity output
+    c_llm.json
+    c_final.json
+    c_random.json                # if available
+  phase7/
+    review-bundle.md             # what gemini saw
+    review-assignment.json       # A/B order seed
+    review-phase1.json           # forced choice + rationale + concerns
+    review-phase23.json          # trajectory + blinding check
+    sonnet-phase1.json           # if calibration-subset
+    gpt5-phase1.json             # if calibration-subset
+  no-op-class.txt                # hard | trivial | out-of-scope | none
+  exclusion-reason.txt           # if excluded
+  venv-requirements.txt          # Python only
+```
+
+**Cross-trial summaries:**
+
+- Candidate-pool log: every PR considered for a batch, with include/exclude decision and reason
+- Exclusion log aggregating per-trial exclusion-reason files
+- Complexity-tool output JSON aggregated across all trials in a single CSV/JSON for analysis
+- Per-language scaffolding-cost log (registered timebox vs actual)
+- Reviewer-loop convergence stats: rounds-to-converge histogram per repo
+
+**Why exhaustive:**
+
+Posterior analysis (including reanalyses with new metrics, new reviewer models, or new statistical tests) needs to be possible without re-running the pipeline. Every artifact a future analyst might want is committed at trial-completion time. Cost: ~5-50 MB per trial; trivially within repo-size budget.
+
+This extends v1's trail commitment which was prompt + diff + final-snapshot only. v2 saves the whole pipeline so that:
+- Failed trials can be re-analyzed (e.g., "what would have happened if we used a different complexity tool?")
+- Pipeline failures can be retroactively classified (e.g., "did hunt-spec catch this case?")
+- Reviewer judgments can be re-collected with new models without re-running forge
+- The forge pipeline itself can be evaluated in isolation from the experiment outcome
+
+**v2 change: extends V1 trail commitment** with full per-trial artifact capture. Pulls in O2 (Python venv manifest) and O3 (complexity JSON) as locked, plus pipeline-stage transcripts (volley rounds, hunt rounds, reviewer-loop iterations) which were not in v1.
 
 ### For each sampled PR:
 
@@ -446,7 +519,12 @@ The following will be published alongside results:
 
    **Phase 2 - Trajectory classification.** Reveal `C_final` labeled as "the version reviewers accepted." Reviewer classifies `C_llm` as past `C_final`, short of `C_final`, or wrong direction.
 
-   Primary reviewer model: Gemini 3.1 Pro Preview. Secondary reviewers: Claude Sonnet 4.5 and OpenAI GPT-5 via API where non-conflicted and available. A model that participated in generating `C_llm` may not review that trial, except that Gemini's in-pipeline reviewer-loop participation is explicitly acknowledged as a pre-approval bias for downstream Phase 7. Report each reviewer's judgment separately, aggregate by majority where applicable, and do not discard a trial solely because fewer than 3 reviewers are available. (v2 change: locked S6, proposed R2)
+   **Reviewer protocol (v2):**
+   - **Single reviewer is sufficient for trial validity.** Primary reviewer = Gemini 3.1 Pro Preview throughout (in-pipeline + Phase 7), with the pre-approval bias acknowledged.
+   - Additional reviewers (Claude Sonnet 4.5, OpenAI GPT-5) are **optional** and run only for inter-rater reliability calibration on a pre-registered subset (e.g., the first batch of each repo). Not required per-trial.
+   - The v1 ≥3-reviewer requirement is dropped: pilot blinding failed 5/5, so adding more LLM reviewers averages over the same surface-pattern signal without breaking the bias.
+   - The reviewer receives the same goal anchor as the volley: PR title + PR body + linked issue title/body (where available). This makes the reviewer's task structurally analogous to the volley's task — judge the artifact against the goal.
+   (v2 change: locked R2 + V1 alignment)
 
 9. **Post-ranking blinding check.**
    After submitting judgments, reviewers answer whether they believed any version was final, LLM-generated, or otherwise identifiable.
@@ -596,15 +674,14 @@ For calibration tasks involving `C_random`, ordinal or logistic models may be us
 
 ### Inter-rater reliability
 
-Compute inter-rater reliability for blind review judgments where more than one non-conflicted reviewer is available.
+Inter-rater reliability is computed only on the calibration subset where additional reviewers (Sonnet 4.5, GPT-5) ran. The primary analysis uses single-reviewer (Gemini 3.1 Pro) judgments per trial; IRR informs interpretation, not validity.
 
-Candidate measures:
+Calibration measures (where multi-reviewer data exist):
 
 - Agreement rate on pairwise forced choice
 - Fleiss' kappa or Krippendorff's alpha for categorical preference labels
-- Kendall's W if any secondary ranking task is used
 
-Low agreement is reported as a substantive result, not treated only as noise. Because v2 permits trials with fewer than 3 reviewers, reviewer judgments are also reported separately by model. (v2 change: proposed R2)
+Low agreement on the calibration subset is reported as a substantive result about the LLM-reviewer-pattern-matching ceiling, not as evidence the primary trials are invalid. (v2 change: locked R2)
 
 ### No-op rate
 
