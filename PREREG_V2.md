@@ -2,20 +2,26 @@
 
 ## Changes from v1
 
-This v2 preregistration keeps the v1 estimand and within-PR comparison structure, but incorporates the pilot-locked changes below.
+v2 keeps the v1 estimand and within-PR structure, with these pilot-locked changes:
 
-1. **Volley is goal-anchored and prescriptive.** The refactor spec is generated from a goal plus artifact pair: linked issue(s), PR title, and PR body are the goal; the diff from `C_base` to `C_test` is the artifact. Claims must describe changes that move the artifact closer to the goal. An empty Accepted Claims list is allowed and is itself a finding. (v2 change: locked V1)
-2. **Adversarial reconcile is mandatory-reject on blockers.** Any blocker finding from hunt-spec moves the parent claim to Rejected. The reconciler may narrow warnings but may not narrow or retain blocker findings. (v2 change: locked V2)
-3. **A complexity gate is inserted after blind-blind-merge.** If scoped mean cognitive complexity for the merged candidate exceeds `C_test` by more than `delta = 0.05`, the candidate is rejected and the trial falls back to `C_test` as a no-op. (v2 change: locked S1)
-4. **Hunt-code must run the full build plus tests.** It may not rely on typecheck-only validation. The default commands are `npm run build` plus tests for TypeScript, `go build ./...` plus `go test ./...` for Go, `cargo build` plus tests for Rust, and repo-specific install plus test commands for Python. (v2 change: locked S2)
-5. **Eligibility is restricted to large PRs.** The minimum source-line threshold is 500 changed source lines from `C_base` to `C_test` after exclusions. This is both the experiment eligibility floor and the blind-blind precondition. There is no single-agent path for smaller PRs. (v2 change: locked S4 + C3)
-6. **The maximum source-line bound is raised to 5000.** The previous 2000-line ceiling is replaced by 5000 source lines to admit large but still reviewable PRs. (v2 change: locked C3 cap)
-7. **Hunt-code remains broad-scope and iterative.** It follows the bug-hunt default: hunt, address findings, re-hunt until zero findings, with expected convergence in one pass for most PRs. (v2 change: locked S5)
-8. **A reviewer loop is inserted before shipping `C_llm`.** Gemini 3.1 Pro reviews the candidate, the implementer addresses comments, and Gemini re-reviews. Iteration stops at zero comments or when comment-count shrinkage stops, with hard cap `N = 10`. The same Gemini model is also used in downstream Phase 7 review, and the resulting pre-approval bias is acknowledged. (v2 change: locked S6)
-9. **P2 and P3 use both parity nulls and improvement thresholds.** P2 parity null: past in `[25%, 45%]`, short in `[40%, 55%]`, wrong in `[10%, 20%]`; improvement threshold: past at least 50%. P3 parity null: prefer-`C_llm` rate in `[40%, 60%]`; improvement threshold: at least 65%. (v2 change: locked R1)
-10. **Survivorship bias is explicit.** The estimand is restricted to drafts of merged brownfield PRs. This makes positive results on P1, P2, and P3 conservative, but understates real-world slop-slope prevalence for P4. (v2 change: locked R5)
+- **V1**: volley is goal-anchored and prescriptive. Goal = linked issue(s) + PR title/body. Artifact = diff. Empty Accepted Claims allowed.
+- **V2**: reconcile mandatory-rejects blocker findings from hunt-spec.
+- **S1**: complexity gate at ship-time (after hunt-code + reviewer-loop converge). δ=0.05 on scoped mean cognitive complexity. Trip → fall back to C_test.
+- **S2**: hunt-code runs the repo's full build + tests, not just typecheck.
+- **S4 + C3**: eligibility floor 500 source lines = blind-blind precondition. No single-agent path. Cap raised to 5000.
+- **S5**: hunt-code stays broad, iterates to zero-findings (cap N=10).
+- **S6**: reviewer-loop after hunt-code. Gemini 3.1 Pro throughout (in-pipeline + Phase 7), pre-approval bias acknowledged. Iterate to zero comments OR impasse on comment-count shrinkage. Cap N=10.
+- **R1**: P2 and P3 each get parity null + improvement threshold (P2 past ∈ [25-45%] / improvement ≥50%; P3 prefer-C_llm ∈ [40-60%] / improvement ≥65%).
+- **R2**: single reviewer (Gemini) sufficient. No multi-reviewer panel.
+- **R5**: survivorship bias explicit. Estimand = drafts of merged brownfield PRs. Bias direction: helps P1/P2/P3 credibility, understates P4.
+- **Hunt-spec**: now iterative (was single-pass in v1), N=10 cap. Matches the user's actual workflow.
+- **Blind-blind merge**: whole-model selection (sum-of-churn across all allowed-edit files), not per-file. Avoids Frankenstein candidates.
+- **C_random**: dropped. The proposed mechanical-control transformations don't approximate multi-file LLM refactor; control would measure noise. P1 measures direction-only.
+- **Sample**: 21 min (15 primary + 2×3 secondary), 45 max. Python repos dropped — open question for v3.
+- **Hard caps**: 25 primary, 10 secondary. Power expansion = add repos, not expand one.
+- **Trail commitment**: every pipeline artifact saved per-trial, plus per-trial anomalies/deviations and a v3-questions backlog.
 
-All pilot-derived changes from improvements.md are now incorporated as **locked** in v2: V3 implementation evidence, V4 per-language spec templates (kept short), C1 pre-selection feasibility checks, C2 source-only revision-in-scope refinement, R2 single reviewer is sufficient, R3 precise no-op classes, R4 per-language scaffolding cost (logged, not formalized), O1 serialized test runs across PRs, O2 per-PR Python venv manifests, and O3 raw measurement JSON saved per snapshot.
+Implementation-detail items also locked: V3 implementation evidence, V4 per-language spec templates (short idiom notes), C1 pre-selection feasibility checks, C2 source-only revision-in-scope, R3 no-op classes (hard/trivial/out-of-scope), R4 setup time logged, O1 serialized tests across PRs, O3 raw measurement JSON saved per snapshot.
 
 Design heuristic: this prereg favors **simpler over rigorous**. The goal is to provide evidence either way for v2's hypotheses, not to produce paper-grade statistics.
 
@@ -113,12 +119,12 @@ One primary repo goes deep. Four secondary repos go shallow. If results on the p
 
 - **Primary:** `google-gemini/gemini-cli` (TypeScript monorepo, 20+ contributors, active review culture). 15 PRs.
 - **Secondary (3 PRs each, expandable to 10):**
-  - `cli/cli` (Go) - GitHub's own CLI, strict review, fast `go test`, active review culture
+  - `cli/cli` (Go) - GitHub's own CLI, strict review, fast `go test`
   - `astral-sh/ruff` (Rust) - Python linter, strict review, comprehensive test suite
-  - `django/django` (Python) - mature triage/merger workflow, regression tests required, decades of review culture
-  - `fastapi/fastapi` (Python) - modern Python, strict typing, active post-cutoff
 
-These repos are now preregistered for v2. If a repo becomes infeasible because current dependencies, historical tests, or CI reconstruction cannot be made reproducible within the registered timebox, it may be replaced only by a repo of equal caliber and the swap is recorded before extraction of the replacement begins. The selection criteria remain: language diversity, strict enforced review, at least 10 contributors, active post-cutoff, and reconstructable build/test commands.
+**Python repos dropped from v2 scope.** v1 pilot showed Python (fastapi) required ~90 minutes of dependency-iteration before tests would run, and the volley descriptive-vs-prescriptive failure mode was first observed there. v2 keeps "does forge work on Python repos?" as an open question for v3 (see v3_questions.md). Dropping Python avoids burying the primary question (does forge work on TS/Go) under Python-specific scaffolding cost.
+
+If a remaining repo becomes infeasible, it may be replaced by a repo of equal caliber and the swap is recorded before extraction of the replacement begins. Selection criteria: language diversity, strict enforced review, ≥10 contributors, active post-cutoff, reconstructable build/test commands.
 
 **Build-time bias:** All selected repos have fast build/test cycles by ecosystem standards. This excludes heavyweight C++ projects and large compiler codebases where build times make per-trial iteration impractical. The experiment's results may not generalize to codebases where the build itself is the bottleneck.
 
@@ -126,13 +132,11 @@ These repos are now preregistered for v2. If a repo becomes infeasible because c
 
 The following defaults are committed before extraction. If a repo's CI reveals a narrower gating shard, the narrower shard may be used only if recorded before that repo's first sampled PR is run.
 
-- `google-gemini/gemini-cli`: Node >= 22.x, `npm ci`, `npm run build`, repo test command from CI or `npm test` if CI has no narrower shard, TypeScript complexity via `scripts/measure_complexity.mjs` using `@typescript-eslint/typescript-estree`.
-- `cli/cli`: Go toolchain from `go.mod`, `go build ./...`, `go test ./...`, Go cognitive complexity via `gocognit`, cyclomatic via `gocyclo`, formatting via `gofmt -w`.
-- `astral-sh/ruff`: Rust toolchain from `rust-toolchain` or repo docs, `cargo build`, `cargo test`, formatting via `cargo fmt`, lint diagnostics via `cargo clippy` where feasible, complexity via `rust-code-analysis-cli`.
-- `django/django`: Python version from repo CI, virtualenv per PR, install command from Django contributor docs, test command narrowed to affected apps where CI supports it, complexity via `radon cc --json`, cognitive complexity via `flake8-cognitive-complexity` or the `cognitive_complexity` package if the flake8 plugin cannot emit machine-readable per-function output.
-- `fastapi/fastapi`: Python version from repo CI, virtualenv per PR, install from project dependency metadata, `pytest` with preregistered deselects for environment-dependent tests, complexity via `radon cc --json`, cognitive complexity via `flake8-cognitive-complexity` or the `cognitive_complexity` package if needed.
+- `google-gemini/gemini-cli`: Node ≥22, `npm ci`, `npm run build`, test command from CI or `npm test`, TypeScript complexity via `scripts/measure_complexity.mjs` (typescript-estree).
+- `cli/cli`: Go from `go.mod`, `go build ./...`, `go test ./...`, complexity via `gocognit` + `gocyclo`, formatting via `gofmt`.
+- `astral-sh/ruff`: Rust from `rust-toolchain`, `cargo build`, `cargo test`, formatting via `cargo fmt`, complexity via `rust-code-analysis-cli`.
 
-For each secondary language, the complexity tool version, test command, random-control transformation family, estimated environment setup cost, and fallback if the cost exceeds the timebox are recorded before extraction. (v2 change: proposed R4)
+Per-repo setup time is logged. If a repo's setup exceeds 2 hours wall-clock to first passing build, the trial is paused and the cost is recorded — repeated cost-overruns motivate dropping the repo. (v2 change: locked R4)
 
 ### Training-contamination restriction
 
@@ -190,19 +194,9 @@ When multiple eligible PRs are available, select from the top of the size-sorted
 
 ### Sample size
 
-Initial target: 27 **eligible** PRs (15 primary + 4×3 secondary), where "eligible" means surviving inclusion criteria 1-8 plus pre-selection feasibility checks.
+Initial target: 21 **eligible** PRs (15 primary + 2×3 secondary).
 
-Pilot exclusion rate was ~25-30% (4 of 13 cli/cli candidates excluded post-reconstruction; 1 of 3 fastapi). To absorb this, **pre-select more candidates than the eligibility target**:
-
-```
-candidates_to_pre_select = ceil(target_eligible / (1 - expected_exclusion_rate))
-
-with expected_exclusion_rate = 0.30 (conservative based on pilot):
-  primary: ceil(15 / 0.70) = 22 candidates pre-selected
-  secondary: ceil(3 / 0.70) = 5 candidates pre-selected per repo
-```
-
-Pre-selection draws from the size-sorted candidate pool, top down. If still under-target after exhausting the pool, expand selection criteria as documented for that batch.
+Pilot exclusion rate was ~25-30%. Pre-select `ceil(target / 0.70)` candidates from the size-sorted pool: 22 primary, 5 per secondary.
 
 A dev/pilot set is used for feasibility and prompt iteration. Dev-set PRs do not enter the primary test-set analysis.
 
@@ -217,7 +211,7 @@ This is group sequential in spirit: look after each batch, expand if uncertain. 
 
 **Hard caps (per codex hostile-review Q20 PARTIAL):** primary repo capped at 25 PRs total; each secondary repo capped at 10 PRs total. v1's "no fixed maximum" was unbounded adaptive expansion; v2 caps it. The stopping rule is confidence, not a number — but bounded. Each expansion decision and its rationale are recorded in the work log before the next batch begins.
 
-**Path to more power: add repos, don't expand any one.** If the registered sample (15 + 4×3 = 27 minimum, 25 + 4×10 = 65 maximum) is underpowered, the expansion path is to add ANOTHER secondary repo at 3 PRs (and expand it to 10 if its trigger fires), not to lift the per-repo cap. This trades scaffolding cost for sample size while preserving language/culture diversity. New secondary repos must meet the original criteria (language diversity, strict review, ≥10 contributors, active post-cutoff, reconstructable build/test) and be registered before extraction begins.
+**Path to more power: add repos, don't expand any one.** Registered sample: 15 + 2×3 = 21 minimum, 25 + 2×10 = 45 maximum. If underpowered, the expansion path is to ADD a secondary repo at 3 PRs (the dropped Python repos django/fastapi are first-pick re-additions; new repos in other languages also acceptable). Lifting per-repo caps is not allowed.
 
 ## Snapshot Definitions
 

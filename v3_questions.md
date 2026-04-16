@@ -77,6 +77,16 @@ Format per entry:
 
 **Provisional priority**: low — practitioner prior already says "weaker → worse." A formal trial may not move the posterior much beyond confirming the prior. But useful if v2 results need to be hedged for less-capable model deployments.
 
+### Pre-seed 7 — does forge work on Python?
+
+**Trigger**: v1 pilot's fastapi attempt cost ~90 minutes of dependency iteration before tests would run, then both eligible PRs went no-op or wrong-direction. v2 dropped Python entirely (django + fastapi) to keep the primary question (does forge work on TS/Go?) clean.
+
+**v2 evidence (so far)**: not in v2 scope. Open question.
+
+**v3 hypothesis**: with V1 (goal anchor + prescriptive volley) live, the descriptive-vs-prescriptive volley failure on fastapi 14962 may be fixed. Worth re-trying Python in v3 with the v2 design and budget for the dependency-setup cost upfront. django and fastapi are first-pick re-additions; if Python is still infeasible after the setup-cost budget, that's an answer too.
+
+**Provisional priority**: medium — Python is too widely used to leave indefinitely as "too hard." But not blocking v2.
+
 ### Pre-seed 6 — refactor-bench positioning (pipeline-bench, not model-bench)
 
 **Trigger**: v2's design is benchmark-shaped — fixed PR set, reproducible pipeline, pre-registered scoring, multi-language, real merged PRs as ground truth.
