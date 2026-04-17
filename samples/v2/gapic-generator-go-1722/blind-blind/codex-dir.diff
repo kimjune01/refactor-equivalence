@@ -1,0 +1,238 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/generator.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go	2026-03-31 10:32:08
++++ /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/generator.go	2026-04-17 09:05:48
+@@ -105,13 +105,15 @@
+ 	// attach config to generator.
+ 	g.cfg = cfg
+ 
+-	var methods []*descriptorpb.MethodDescriptorProto
+-	for _, f := range req.GetProtoFile() {
+-		for _, s := range f.GetService() {
+-			methods = append(methods, s.GetMethod()...)
++	if g.featureEnabled(DynamicResourceHeuristicsFeature) {
++		var methods []*descriptorpb.MethodDescriptorProto
++		for _, f := range req.GetProtoFile() {
++			for _, s := range f.GetService() {
++				methods = append(methods, s.GetMethod()...)
++			}
+ 		}
++		g.vocabulary = buildHeuristicVocabulary(methods)
+ 	}
+-	g.vocabulary = buildHeuristicVocabulary(methods)
+ 
+ 	files := req.GetProtoFile()
+ 	files = append(files, wellKnownTypeFiles...)
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/gengapic.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go	2026-03-31 10:32:08
++++ /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/gengapic.go	2026-04-17 09:06:19
+@@ -501,35 +501,7 @@
+ 			if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 				resTarget := g.resourceNameField(m)
+ 				if resTarget != nil {
+-					p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-
+-					// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
+-					// the expression fieldGetter(resField) returns an accessor for the full
+-					// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
+-					// APIs (missing the resource_reference annotation), an empty string is returned.
+-
+-					// Prepend the service host if available
+-					var getters []string
+-					for _, f := range resTarget.FieldNames {
+-						getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
+-					}
+-					gettersStr := strings.Join(getters, ", ")
+-
+-					serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
+-					host := ""
+-					if proto.HasExtension(serv.Options, annotations.E_DefaultHost) {
+-						host = proto.GetExtension(serv.Options, annotations.E_DefaultHost).(string)
+-					}
+-
+-					escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+-					if host != "" {
+-						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+-					} else {
+-						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+-					}
+-					p("}")
+-					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+-					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++					g.emitResourceNameTelemetry(m, resTarget)
+ 				}
+ 			}
+ 		case rest:
+@@ -539,33 +511,7 @@
+ 			if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 				resTarget := g.resourceNameField(m)
+ 				if resTarget != nil {
+-					p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-					// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
+-					// the expression fieldGetter(resField) returns an accessor for the full
+-					// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
+-					// APIs (missing the resource_reference annotation), an empty string is returned.
+-
+-					var getters []string
+-					for _, f := range resTarget.FieldNames {
+-						getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
+-					}
+-					gettersStr := strings.Join(getters, ", ")
+-
+-					serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
+-					host := ""
+-					if proto.HasExtension(serv.Options, annotations.E_DefaultHost) {
+-						host = proto.GetExtension(serv.Options, annotations.E_DefaultHost).(string)
+-					}
+-
+-					escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+-					if host != "" {
+-						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+-					} else {
+-						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+-					}
+-					p("}")
+-					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+-					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++					g.emitResourceNameTelemetry(m, resTarget)
+ 				}
+ 			}
+ 		}
+@@ -583,6 +529,32 @@
+ 	}
+ }
+ 
++func (g *generator) emitResourceNameTelemetry(m *descriptorpb.MethodDescriptorProto, resTarget *heuristicTarget) {
++	g.printf("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
++
++	var getters []string
++	for _, f := range resTarget.FieldNames {
++		getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++	}
++	gettersStr := strings.Join(getters, ", ")
++
++	serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
++	host := ""
++	if proto.HasExtension(serv.Options, annotations.E_DefaultHost) {
++		host = proto.GetExtension(serv.Options, annotations.E_DefaultHost).(string)
++	}
++
++	escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
++	if host != "" {
++		g.printf(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++	} else {
++		g.printf(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++	}
++	g.printf("}")
++	g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
++	g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++}
++
+ // insertAutoPopulatedFields generates the conditional initialization of any
+ // default-value request fields (for the given method) that are specified for
+ // auto-population by autoPopulatedFields.
+@@ -903,10 +875,11 @@
+ 	return matches
+ }
+ 
+-// resourceNameField returns the name of the field in the input message
+-// that carries a google.api.resource_reference annotation.
+-// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
+-// If no input type or associated attributes are found, it returns an empty string.
++// resourceNameField returns the resource-name target for telemetry formatting.
++// Annotated google.api.resource_reference fields are preferred; if multiple
++// annotated fields match, it prioritizes one that also appears in the HTTP path.
++// If no annotation exists, dynamic HTTP-path inference is used only when
++// DynamicResourceHeuristicsFeature is enabled.
+ func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
+ 	if m.GetInputType() == "" {
+ 		return nil
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/heuristics.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go	2026-03-31 10:32:08
++++ /tmp/refactor-eq-workdir/bb-codex-1722/internal/gengapic/heuristics.go	2026-04-17 09:06:35
+@@ -45,17 +45,14 @@
+ func buildHeuristicVocabulary(methods []*descriptorpb.MethodDescriptorProto) map[string]bool {
+ 	resourceCollections := make(map[string]bool)
+ 
+-	// Step 1: Seed standard infrastructure resource collections.
++	// Seed standard infrastructure resource collections.
+ 	resourceCollections["projects"] = true
+ 	resourceCollections["locations"] = true
+ 	resourceCollections["folders"] = true
+ 	resourceCollections["organizations"] = true
+ 	resourceCollections["billingAccounts"] = true
+ 
+-	// Step 2: Define "CRUD-like" patterns for vocabulary learning.
+-	// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
+-	// often have path literals that are random verbs or actions, not resource collections.
+-	// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++	// Learn only from CRUD-like method names.
+ 	discoveryExactVerbs := map[string]struct{}{
+ 		"get":  {},
+ 		"list": {},
+@@ -75,12 +72,7 @@
+ 		"get", "list", "create", "update", "delete", "patch", "insert",
+ 	}
+ 
+-	// Step 3: Walk methods and learn valid resource collection nouns.
+-	// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
+-	// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
+-	// extracting the static literal nouns that sit immediately before a `{variable}`
+-	// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
+-	// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++	// Inspect all HTTP patterns for valid resource collection nouns.
+ 	for _, m := range methods {
+ 		nameLower := strings.ToLower(m.GetName())
+ 
+@@ -102,41 +94,27 @@
+ 			}
+ 		}
+ 
+-		// We only learn from standard verbs.
+ 		if !isCRUDPrefix && !isDiscoveryExact && !isDiscoverySuffix {
+ 			continue
+ 		}
+ 
+-		// m.GetOptions() retrieves protobuf options
+-		// (e.g. `(google.api.http) = { get: "/v1/..." }` attached to the method).
+ 		if m.GetOptions() == nil {
+ 			continue
+ 		}
+ 
+-		// proto.GetExtension extracts standard Protobuf Option Extensions. In this case,
+-		// we ask for the HTTP mapping rule (annotations.E_Http / google.api.http).
+-		// If we have unannotated methods, we skip them as they are probably either:
+-		// - Pure gRPC (no REST binding).
+-		// - Legacy REST using custom non-standard transports.
+ 		eHTTP := proto.GetExtension(m.GetOptions(), annotations.E_Http)
+ 		if eHTTP == nil {
+ 			continue
+ 		}
+ 
+-		// Cast to HttpRule for use in getHTTPPatterns, below.
+ 		h, ok := eHTTP.(*annotations.HttpRule)
+ 		if !ok || h == nil {
+ 			continue
+ 		}
+ 
+-		// Step 4: Extract literals that appear before variables.
+ 		patterns := getHTTPPatterns(h)
+ 		for _, pattern := range patterns {
+-			// Find all instances of a literal right before a variable `{...}`
+-			// Trace example: `/v1/projects/{project}/topics/{topic}`
+-			// Matches:
+-			//   match[0] = "projects/{project}" (with groups [ projects ])
+-			//   match[1] = "topics/{topic}" (with groups [ topics ])
++			// Collect literals immediately before variables.
+ 			matches := literalVarRegex.FindAllStringSubmatch(pattern, -1)
+ 			for _, match := range matches {
+ 				if len(match) < 2 {
+@@ -144,8 +122,7 @@
+ 				}
+ 				literal := match[1]
+ 
+-				// We should discard verbs (anything after and including the ':' character)
+-				// so we do not learn generic collection nouns like "projects:cancel".
++				// Strip literal custom verbs and ignore version segments.
+ 				if idx := strings.Index(literal, ":"); idx != -1 {
+ 					literal = literal[:idx]
+ 				}

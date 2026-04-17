@@ -1,0 +1,145 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts /tmp/refactor-eq-workdir/bb-opus-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts	2026-04-08 12:03:08
++++ /tmp/refactor-eq-workdir/bb-opus-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts	2026-04-17 01:18:49
+@@ -280,7 +280,7 @@
+     // New files created within these roots will inherit the Low label.
+     const writableRoots: string[] = [];
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+       ? await isStrictlyApproved(
+           command,
+@@ -294,13 +294,13 @@
+       writableRoots.push(resolvedPaths.workspace);
+     }
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+       await this.grantLowIntegrityAccess(includeDir);
+       writableRoots.push(includeDir);
+     }
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+       try {
+         await fs.promises.access(allowedPath, fs.constants.F_OK);
+@@ -314,7 +314,7 @@
+       writableRoots.push(allowedPath);
+     }
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+       try {
+         await fs.promises.access(writePath, fs.constants.F_OK);
+@@ -335,7 +335,7 @@
+       }
+     }
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+     // processes to ensure they cannot be read or written.
+     const secretsToBlock: string[] = [];
+@@ -383,7 +383,7 @@
+       }
+     }
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+     // the sandboxed process from creating them with Low integrity.
+     // By being created as Medium integrity, they are write-protected from Low processes.
+@@ -392,7 +392,7 @@
+       this.touch(filePath, file.isDirectory);
+     }
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+     const allForbidden = Array.from(
+       new Set([...secretsToBlock, ...resolvedPaths.forbidden]),
+@@ -403,7 +403,7 @@
+     const manifestPath = path.join(tempDir, 'manifest.txt');
+     fs.writeFileSync(manifestPath, allForbidden.join('\n'));
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+     const program = this.helperPath;
+ 
+@@ -416,12 +416,10 @@
+       ...args,
+     ];
+ 
+-    const finalEnv = { ...sanitizedEnv };
+-
+     return {
+       program,
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+       cleanup: () => {
+         try {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24834/packages/core/src/services/sandboxManager.ts /tmp/refactor-eq-workdir/bb-opus-24834/packages/core/src/services/sandboxManager.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24834/packages/core/src/services/sandboxManager.ts	2026-04-08 12:03:08
++++ /tmp/refactor-eq-workdir/bb-opus-24834/packages/core/src/services/sandboxManager.ts	2026-04-17 01:18:37
+@@ -361,7 +361,7 @@
+    * Helper that expands each path to include its realpath (if it's a symlink)
+    * and pipes the result through sanitizePaths for deduplication and absolute path enforcement.
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+     const expanded = paths.flatMap((p) => {
+       try {
+@@ -374,16 +374,16 @@
+     return sanitizePaths(expanded);
+   };
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+       req.policy?.additionalPermissions?.fileSystem?.read,
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+       req.policy?.additionalPermissions?.fileSystem?.write,
+   );
+@@ -394,7 +394,7 @@
+   /**
+    * Filters out any paths that are explicitly forbidden or match the workspace root.
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+       const identity = getPathIdentity(p);
+       return (
+@@ -405,10 +405,10 @@
+   return {
+     workspace,
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+ }
+ /**

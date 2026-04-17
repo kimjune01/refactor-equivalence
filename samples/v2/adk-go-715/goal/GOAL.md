@@ -1,0 +1,3 @@
+# PR #715
+
+This PR implements the core functionality for the `adkgo deploy agentengine` command, enabling the automatic deployment of local Go agents to the Vertex AI Reasoning Engine. It provides a seamless CLI workflow that packages local Go source code, auto-generates a multi-stage Dockerfile, and handles the API calls to create a managed Reasoning Engine instance on Google Cloud.

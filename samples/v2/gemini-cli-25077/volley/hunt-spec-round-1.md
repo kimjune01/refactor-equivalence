@@ -1,0 +1,6 @@
+## Finding F1 — C2 and C3 blur ownership of SACL warning behavior
+**Severity**: warning
+**Claim**: C3
+**What**: C3 says the `ApplyBulkAcls` loops should be responsible only for "iteration and warning handling", but C2 moves the `SetNamedSecurityInfo` block into `ApplyLowIntegrityLabel`. That block has its own non-exception warning path for a nonzero `SetNamedSecurityInfo` result. If an implementer follows C3 literally and centralizes warning handling in the loop catch, they may turn the nonzero result into an exception or otherwise replace the current warning text with the generic allow-ACL warning.
+**Evidence**: `packages/core/src/sandbox/windows/GeminiSandbox.cs:475` logs `Warning: SetNamedSecurityInfo failed for ... with error ...` without throwing, while `packages/core/src/sandbox/windows/GeminiSandbox.cs:482` logs `Warning: Failed to apply allow ACL to ...` only for caught exceptions. The spec text at `round-1-claims.md:11` moves the SACL block into a helper, but `round-1-claims.md:17` says the loops retain warning handling.
+**Fix**: Narrow C3 to say the loops retain only the existing try/catch warning behavior, while `ApplyLowIntegrityLabel` must preserve the current nonzero-`SetNamedSecurityInfo` warning string and must not convert that result into the generic allow-ACL warning.

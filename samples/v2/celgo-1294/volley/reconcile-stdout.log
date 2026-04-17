@@ -1,0 +1,249 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1294
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9bf6-20c4-7600-b810-47e5de059191
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+## Finding F1 — Style cleanup is not goal work
+**Severity**: warning
+**Claim**: C2
+**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
+**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
+
+## Finding F2 — Required JSON-name and extension lookup order is implicit
+**Severity**: warning
+**Claim**: global
+**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
+**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Correct JSON option serialization
+**File**: repl/evaluator.go:1025
+**Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
+**Goal link**: This clarifies the new REPL flag for JSON field-name support.
+**Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
+
+### C2 — Format extension object fields without `fmt.Fprintf`
+**File**: common/types/object.go:190
+**Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, using one local descriptor name for both the displayed label and the `o.Get(String(...))` lookup.
+**Goal link**: This clarifies the extension-field formatting path added for proto2 extension support.
+**Justification**: Direct builder writes express the two cases, normal field name versus backtick-escaped full extension name, without formatting machinery or a mutable `types.String` value that obscures which protobuf name is used for lookup.
+
+## Rejected
+
+- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
+- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names.
+- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly.
+- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md
+## Accepted Claims
+
+1. ### C1 — Correct JSON option serialization
+   **File**: repl/evaluator.go:1025
+   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
+   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
+   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
+
+2. ### C2 — Optional field-formatting cleanup only
+   **File**: common/types/object.go:190
+   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
+   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
+   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
+   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
+
+## Rejected
+
+- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
+- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
+- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
+- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
+- Add `test/proto2pb/test_extensions.proto` to the REPL package descriptor set: the file is outside the allowed edit set and would mix repo-local test protos into the cel-spec package shortcut rather than using the cel-spec proto2 extension descriptors already added.
+- Add or adjust REPL and protobuf tests for JSON field-name flags or extension formatting: test files are explicitly out of scope for this volley, even though those tests would be useful verification for the implementation.
+apply_patch(auto_approved=true) exited 0 in 24ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/celgo-1294/volley/round-2-claims.md b/samples/v2/celgo-1294/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d4ca263ca92a8bc76aa15ea1f63fb17fb7e0daf
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/round-2-claims.md
+@@ -0,0 +1,23 @@
++## Accepted Claims
++
++1. ### C1 — Correct JSON option serialization
++   **File**: repl/evaluator.go:1025
++   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
++   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
++   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
++
++2. ### C2 — Optional field-formatting cleanup only
++   **File**: common/types/object.go:190
++   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
++   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
++   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
++   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
++
++## Rejected
++
++- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
++- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
++- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
++- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
++- Add `test/proto2pb/test_extensions.proto` to the REPL package descriptor set: the file is outside the allowed edit set and would mix repo-local test protos into the cel-spec package shortcut rather than using the cel-spec proto2 extension descriptors already added.
++- Add or adjust REPL and protobuf tests for JSON field-name flags or extension formatting: test files are explicitly out of scope for this volley, even though those tests would be useful verification for the implementation.
+
+file update:
+diff --git a/samples/v2/celgo-1294/volley/round-2-claims.md b/samples/v2/celgo-1294/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d4ca263ca92a8bc76aa15ea1f63fb17fb7e0daf
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/round-2-claims.md
+@@ -0,0 +1,23 @@
++## Accepted Claims
++
++1. ### C1 — Correct JSON option serialization
++   **File**: repl/evaluator.go:1025
++   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
++   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
++   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
++
++2. ### C2 — Optional field-formatting cleanup only
++   **File**: common/types/object.go:190
++   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
++   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
++   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
++   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
++
++## Rejected
++
++- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
++- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
++- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
++- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
++- Add `test/proto2pb/test_extensions.proto` to the REPL package descriptor set: the file is outside the allowed edit set and would mix repo-local test protos into the cel-spec package shortcut rather than using the cel-spec proto2 extension descriptors already added.
++- Add or adjust REPL and protobuf tests for JSON field-name flags or extension formatting: test files are explicitly out of scope for this volley, even though those tests would be useful verification for the implementation.
+
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+## Accepted Claims
+
+1. ### C1 — Correct JSON option serialization
+   **File**: repl/evaluator.go:1025
+   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
+   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
+   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
+
+2. ### C2 — Optional field-formatting cleanup only
+   **File**: common/types/object.go:190
+   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
+   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
+   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
+   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
+
+## Rejected
+
+- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
+- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
+- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
+file update:
+diff --git a/samples/v2/celgo-1294/volley/round-2-claims.md b/samples/v2/celgo-1294/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d4ca263ca92a8bc76aa15ea1f63fb17fb7e0daf
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/round-2-claims.md
+@@ -0,0 +1,23 @@
++## Accepted Claims
++
++1. ### C1 — Correct JSON option serialization
++   **File**: repl/evaluator.go:1025
++   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
++   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
++   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
++
++2. ### C2 — Optional field-formatting cleanup only
++   **File**: common/types/object.go:190
++   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
++   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
++   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
++   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
++
++## Rejected
++
++- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
++- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
++- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
++- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
++- Add `test/proto2pb/test_extensions.proto` to the REPL package descriptor set: the file is outside the allowed edit set and would mix repo-local test protos into the cel-spec package shortcut rather than using the cel-spec proto2 extension descriptors already added.
++- Add or adjust REPL and protobuf tests for JSON field-name flags or extension formatting: test files are explicitly out of scope for this volley, even though those tests would be useful verification for the implementation.
+
+codex
+Created `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md`.
+file update:
+diff --git a/samples/v2/celgo-1294/volley/round-2-claims.md b/samples/v2/celgo-1294/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d4ca263ca92a8bc76aa15ea1f63fb17fb7e0daf
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/round-2-claims.md
+@@ -0,0 +1,23 @@
++## Accepted Claims
++
++1. ### C1 — Correct JSON option serialization
++   **File**: repl/evaluator.go:1025
++   **Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
++   **Goal link**: This clarifies the new REPL flag for JSON field-name support.
++   **Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
++
++2. ### C2 — Optional field-formatting cleanup only
++   **File**: common/types/object.go:190
++   **Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, without changing the selected display label, the backtick escaping for full extension names, iteration order, or the `o.Get(String(...))` lookup key.
++   **Goal link**: This is only a local readability cleanup in the proto object formatting path; it is not required for proto2-extension or JSON-name behavior.
++   **Justification**: Direct builder writes can express the existing two display cases, normal field name versus backtick-escaped full extension name, without formatting machinery, provided the existing label selection and lookup semantics are preserved.
++   **Hunt note**: Retained as narrowed in response to F1 because it is explicitly optional style cleanup and does not authorize behavioral changes to extension formatting or lookup.
++
++## Rejected
++
++- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
++- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names. Required preserved behavior, clarified from hunt finding F2: with JSON field names enabled, lookup must check JSON names first, proto field names second, and extensions third.
++- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly. Required preserved behavior, clarified from hunt finding F2: extension lookup must remain after JSON-name and proto-name lookup.
++- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
++- Add `test/proto2pb/test_extensions.proto` to the REPL package descriptor set: the file is outside the allowed edit set and would mix repo-local test protos into the cel-spec package shortcut rather than using the cel-spec proto2 extension descriptors already added.
++- Add or adjust REPL and protobuf tests for JSON field-name flags or extension formatting: test files are explicitly out of scope for this volley, even though those tests would be useful verification for the implementation.
+
+tokens used
+7,541
+Created `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-2-claims.md`.

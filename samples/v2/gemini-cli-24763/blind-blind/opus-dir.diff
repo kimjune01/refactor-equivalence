@@ -1,0 +1,745 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/services/sandboxedFileSystemService.ts /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/services/sandboxedFileSystemService.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/services/sandboxedFileSystemService.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/services/sandboxedFileSystemService.ts	2026-04-17 02:00:27
+@@ -59,54 +59,56 @@
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
++    try {
++      return await new Promise((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
+ 
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
+ 
+-      let output = '';
+-      let error = '';
++        let output = '';
++        let error = '';
+ 
+-      child.stdout?.on('data', (data) => {
+-        output += data.toString();
+-      });
++        child.stdout?.on('data', (data) => {
++          output += data.toString();
++        });
+ 
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
+ 
+-      child.on('close', (code) => {
+-        prepared.cleanup?.();
+-        if (code === 0) {
+-          resolve(output);
+-        } else {
+-          const isEnoent =
+-            error.toLowerCase().includes('no such file or directory') ||
+-            error.toLowerCase().includes('enoent') ||
+-            error.toLowerCase().includes('could not find file') ||
+-            error.toLowerCase().includes('could not find a part of the path');
+-          const err = new Error(
+-            `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
+-          );
+-          if (isEnoent) {
+-            Object.assign(err, { code: 'ENOENT' });
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve(output);
++          } else {
++            const isEnoent =
++              error.toLowerCase().includes('no such file or directory') ||
++              error.toLowerCase().includes('enoent') ||
++              error.toLowerCase().includes('could not find file') ||
++              error.toLowerCase().includes('could not find a part of the path');
++            const err = new Error(
++              `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++            );
++            if (isEnoent) {
++              Object.assign(err, { code: 'ENOENT' });
++            }
++            reject(err);
+           }
+-          reject(err);
+-        }
+-      });
++        });
+ 
+-      child.on('error', (err) => {
+-        prepared.cleanup?.();
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
++        child.on('error', (err) => {
++          reject(
++            new Error(
++              `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
++            ),
++          );
++        });
+       });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ 
+   async writeTextFile(filePath: string, content: string): Promise<void> {
+@@ -126,55 +128,57 @@
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
++    try {
++      await new Promise<void>((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
+ 
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
+ 
+-      child.stdin?.on('error', (err) => {
+-        // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
+-        if (isNodeError(err) && err.code === 'EPIPE') {
+-          return;
+-        }
+-        debugLogger.error(
+-          `Sandbox Error: stdin error for '${filePath}': ${
+-            err instanceof Error ? err.message : String(err)
+-          }`,
+-        );
+-      });
++        child.stdin?.on('error', (err) => {
++          // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
++          if (isNodeError(err) && err.code === 'EPIPE') {
++            return;
++          }
++          debugLogger.error(
++            `Sandbox Error: stdin error for '${filePath}': ${
++              err instanceof Error ? err.message : String(err)
++            }`,
++          );
++        });
+ 
+-      child.stdin?.write(content);
+-      child.stdin?.end();
++        child.stdin?.write(content);
++        child.stdin?.end();
+ 
+-      let error = '';
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
++        let error = '';
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
+ 
+-      child.on('close', (code) => {
+-        prepared.cleanup?.();
+-        if (code === 0) {
+-          resolve();
+-        } else {
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve();
++          } else {
++            reject(
++              new Error(
++                `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              ),
++            );
++          }
++        });
++
++        child.on('error', (err) => {
+           reject(
+             new Error(
+-              `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+             ),
+           );
+-        }
++        });
+       });
+-
+-      child.on('error', (err) => {
+-        prepared.cleanup?.();
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
+-      });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/grep.ts /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/tools/grep.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/grep.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/tools/grep.ts	2026-04-17 02:00:33
+@@ -348,25 +348,27 @@
+         }
+       }
+ 
+-      return await new Promise((resolve) => {
+-        const child = spawn(finalCommand, finalArgs, {
+-          stdio: 'ignore',
+-          shell: true,
+-          env: finalEnv,
++      try {
++        return await new Promise((resolve) => {
++          const child = spawn(finalCommand, finalArgs, {
++            stdio: 'ignore',
++            shell: true,
++            env: finalEnv,
++          });
++          child.on('close', (code) => {
++            resolve(code === 0);
++          });
++          child.on('error', (err) => {
++            debugLogger.debug(
++              `[GrepTool] Failed to start process for '${command}':`,
++              err.message,
++            );
++            resolve(false);
++          });
+         });
+-        child.on('close', (code) => {
+-          cleanup?.();
+-          resolve(code === 0);
+-        });
+-        child.on('error', (err) => {
+-          cleanup?.();
+-          debugLogger.debug(
+-            `[GrepTool] Failed to start process for '${command}':`,
+-            err.message,
+-          );
+-          resolve(false);
+-        });
+-      });
++      } finally {
++        cleanup?.();
++      }
+     } catch {
+       return false;
+     }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/tool-registry.ts /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/tools/tool-registry.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/tool-registry.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/tools/tool-registry.ts	2026-04-17 02:01:03
+@@ -81,82 +81,84 @@
+       cleanupFunc = prepared.cleanup;
+     }
+ 
+-    const child = spawn(finalCommand, finalArgs, {
+-      env: finalEnv,
+-    });
+-    child.stdin.write(JSON.stringify(this.params));
+-    child.stdin.end();
++    try {
++      const child = spawn(finalCommand, finalArgs, {
++        env: finalEnv,
++      });
++      child.stdin.write(JSON.stringify(this.params));
++      child.stdin.end();
+ 
+-    let stdout = '';
+-    let stderr = '';
+-    let error: Error | null = null;
+-    let code: number | null = null;
+-    let signal: NodeJS.Signals | null = null;
++      let stdout = '';
++      let stderr = '';
++      let error: Error | null = null;
++      let code: number | null = null;
++      let signal: NodeJS.Signals | null = null;
+ 
+-    await new Promise<void>((resolve) => {
+-      const onStdout = (data: Buffer) => {
+-        stdout += data?.toString();
+-      };
++      await new Promise<void>((resolve) => {
++        const onStdout = (data: Buffer) => {
++          stdout += data?.toString();
++        };
+ 
+-      const onStderr = (data: Buffer) => {
+-        stderr += data?.toString();
+-      };
++        const onStderr = (data: Buffer) => {
++          stderr += data?.toString();
++        };
+ 
+-      const onError = (err: Error) => {
+-        cleanupFunc?.();
+-        error = err;
+-      };
++        const onError = (err: Error) => {
++          error = err;
++        };
+ 
+-      const onClose = (
+-        _code: number | null,
+-        _signal: NodeJS.Signals | null,
+-      ) => {
+-        cleanupFunc?.();
+-        code = _code;
+-        signal = _signal;
+-        cleanup();
+-        resolve();
+-      };
++        const onClose = (
++          _code: number | null,
++          _signal: NodeJS.Signals | null,
++        ) => {
++          code = _code;
++          signal = _signal;
++          cleanup();
++          resolve();
++        };
+ 
+-      const cleanup = () => {
+-        child.stdout.removeListener('data', onStdout);
+-        child.stderr.removeListener('data', onStderr);
+-        child.removeListener('error', onError);
+-        child.removeListener('close', onClose);
+-        if (child.connected) {
+-          child.disconnect();
+-        }
+-      };
++        const cleanup = () => {
++          child.stdout.removeListener('data', onStdout);
++          child.stderr.removeListener('data', onStderr);
++          child.removeListener('error', onError);
++          child.removeListener('close', onClose);
++          if (child.connected) {
++            child.disconnect();
++          }
++        };
+ 
+-      child.stdout.on('data', onStdout);
+-      child.stderr.on('data', onStderr);
+-      child.on('error', onError);
+-      child.on('close', onClose);
+-    });
++        child.stdout.on('data', onStdout);
++        child.stderr.on('data', onStderr);
++        child.on('error', onError);
++        child.on('close', onClose);
++      });
+ 
+-    // if there is any error, non-zero exit code, signal, or stderr, return error details instead of stdout
+-    if (error || code !== 0 || signal || stderr) {
+-      const llmContent = [
+-        `Stdout: ${stdout || '(empty)'}`,
+-        `Stderr: ${stderr || '(empty)'}`,
+-        `Error: ${error ?? '(none)'}`,
+-        `Exit Code: ${code ?? '(none)'}`,
+-        `Signal: ${signal ?? '(none)'}`,
+-      ].join('\n');
++      // if there is any error, non-zero exit code, signal, or stderr, return error details instead of stdout
++      if (error || code !== 0 || signal || stderr) {
++        const llmContent = [
++          `Stdout: ${stdout || '(empty)'}`,
++          `Stderr: ${stderr || '(empty)'}`,
++          `Error: ${error ?? '(none)'}`,
++          `Exit Code: ${code ?? '(none)'}`,
++          `Signal: ${signal ?? '(none)'}`,
++        ].join('\n');
++        return {
++          llmContent,
++          returnDisplay: llmContent,
++          error: {
++            message: llmContent,
++            type: ToolErrorType.DISCOVERED_TOOL_EXECUTION_ERROR,
++          },
++        };
++      }
++
+       return {
+-        llmContent,
+-        returnDisplay: llmContent,
+-        error: {
+-          message: llmContent,
+-          type: ToolErrorType.DISCOVERED_TOOL_EXECUTION_ERROR,
+-        },
++        llmContent: stdout,
++        returnDisplay: stdout,
+       };
++    } finally {
++      cleanupFunc?.();
+     }
+-
+-    return {
+-      llmContent: stdout,
+-      returnDisplay: stdout,
+-    };
+   }
+ }
+ 
+@@ -430,37 +432,41 @@
+         stderr += stderrDecoder.write(data);
+       });
+ 
+-      await new Promise<void>((resolve, reject) => {
+-        proc.on('error', (err) => {
+-          cleanupFunc?.();
+-          reject(err);
+-        });
+-        proc.on('close', (code) => {
+-          cleanupFunc?.();
+-          stdout += stdoutDecoder.end();
+-          stderr += stderrDecoder.end();
++      try {
++        await new Promise<void>((resolve, reject) => {
++          proc.on('error', (err) => {
++            reject(err);
++          });
++          proc.on('close', (code) => {
++            stdout += stdoutDecoder.end();
++            stderr += stderrDecoder.end();
+ 
+-          if (sizeLimitExceeded) {
+-            return reject(
+-              new Error(
+-                `Tool discovery command output exceeded size limit of ${MAX_STDOUT_SIZE} bytes.`,
+-              ),
+-            );
+-          }
++            if (sizeLimitExceeded) {
++              return reject(
++                new Error(
++                  `Tool discovery command output exceeded size limit of ${MAX_STDOUT_SIZE} bytes.`,
++                ),
++              );
++            }
+ 
+-          if (code !== 0) {
+-            coreEvents.emitFeedback(
+-              'error',
+-              `Tool discovery command failed with code ${code}.`,
+-              stderr,
+-            );
+-            return reject(
+-              new Error(`Tool discovery command failed with exit code ${code}`),
+-            );
+-          }
+-          resolve();
++            if (code !== 0) {
++              coreEvents.emitFeedback(
++                'error',
++                `Tool discovery command failed with code ${code}.`,
++                stderr,
++              );
++              return reject(
++                new Error(
++                  `Tool discovery command failed with exit code ${code}`,
++                ),
++              );
++            }
++            resolve();
++          });
+         });
+-      });
++      } finally {
++        cleanupFunc?.();
++      }
+ 
+       // execute discovery command and extract function declarations (w/ or w/o "tool" wrappers)
+       const functions: FunctionDeclaration[] = [];
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/utils/shell-utils.ts /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/utils/shell-utils.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/utils/shell-utils.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-opus-24763/packages/core/src/utils/shell-utils.ts	2026-04-17 02:01:34
+@@ -847,36 +847,42 @@
+ 
+   const { program: finalCommand, args: finalArgs, env: finalEnv } = prepared;
+ 
+-  return new Promise((resolve, reject) => {
+-    const child = spawn(finalCommand, finalArgs, {
+-      ...options,
+-      env: finalEnv,
+-    });
+-    let stdout = '';
+-    let stderr = '';
++  try {
++    return await new Promise<{ stdout: string; stderr: string }>(
++      (resolve, reject) => {
++        const child = spawn(finalCommand, finalArgs, {
++          ...options,
++          env: finalEnv,
++        });
++        let stdout = '';
++        let stderr = '';
+ 
+-    child.stdout.on('data', (data) => {
+-      stdout += data.toString();
+-    });
++        child.stdout.on('data', (data) => {
++          stdout += data.toString();
++        });
+ 
+-    child.stderr.on('data', (data) => {
+-      stderr += data.toString();
+-    });
++        child.stderr.on('data', (data) => {
++          stderr += data.toString();
++        });
+ 
+-    child.on('close', (code) => {
+-      prepared.cleanup?.();
+-      if (code === 0) {
+-        resolve({ stdout, stderr });
+-      } else {
+-        reject(new Error(`Command failed with exit code ${code}:\n${stderr}`));
+-      }
+-    });
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve({ stdout, stderr });
++          } else {
++            reject(
++              new Error(`Command failed with exit code ${code}:\n${stderr}`),
++            );
++          }
++        });
+ 
+-    child.on('error', (err) => {
+-      prepared.cleanup?.();
+-      reject(err);
+-    });
+-  });
++        child.on('error', (err) => {
++          reject(err);
++        });
++      },
++    );
++  } finally {
++    prepared.cleanup?.();
++  }
+ };
+ 
+ /**
+@@ -906,112 +912,113 @@
+ 
+   const { program: finalCommand, args: finalArgs, env: finalEnv } = prepared;
+ 
+-  const child = spawn(finalCommand, finalArgs, {
+-    ...options,
+-    env: finalEnv,
+-    // ensure we don't open a window on windows if possible/relevant
+-    windowsHide: true,
+-  });
++  try {
++    const child = spawn(finalCommand, finalArgs, {
++      ...options,
++      env: finalEnv,
++      // ensure we don't open a window on windows if possible/relevant
++      windowsHide: true,
++    });
+ 
+-  const rl = readline.createInterface({
+-    input: child.stdout,
+-    terminal: false,
+-  });
++    const rl = readline.createInterface({
++      input: child.stdout,
++      terminal: false,
++    });
+ 
+-  const errorChunks: Buffer[] = [];
+-  let stderrTotalBytes = 0;
+-  const MAX_STDERR_BYTES = 20 * 1024; // 20KB limit
++    const errorChunks: Buffer[] = [];
++    let stderrTotalBytes = 0;
++    const MAX_STDERR_BYTES = 20 * 1024; // 20KB limit
+ 
+-  child.stderr.on('data', (chunk) => {
+-    if (stderrTotalBytes < MAX_STDERR_BYTES) {
+-      errorChunks.push(chunk);
+-      stderrTotalBytes += chunk.length;
+-    }
+-  });
++    child.stderr.on('data', (chunk) => {
++      if (stderrTotalBytes < MAX_STDERR_BYTES) {
++        errorChunks.push(chunk);
++        stderrTotalBytes += chunk.length;
++      }
++    });
+ 
+-  let error: Error | null = null;
+-  child.on('error', (err) => {
+-    error = err;
+-  });
++    let error: Error | null = null;
++    child.on('error', (err) => {
++      error = err;
++    });
+ 
+-  const onAbort = () => {
+-    // If manually aborted by signal, we kill immediately.
+-    if (!child.killed) child.kill();
+-  };
++    const onAbort = () => {
++      // If manually aborted by signal, we kill immediately.
++      if (!child.killed) child.kill();
++    };
+ 
+-  if (options?.signal?.aborted) {
+-    onAbort();
+-  } else {
+-    options?.signal?.addEventListener('abort', onAbort);
+-  }
+-
+-  let finished = false;
+-  try {
+-    for await (const line of rl) {
+-      if (options?.signal?.aborted) break;
+-      yield line;
++    if (options?.signal?.aborted) {
++      onAbort();
++    } else {
++      options?.signal?.addEventListener('abort', onAbort);
+     }
+-    finished = true;
+-  } finally {
+-    rl.close();
+-    options?.signal?.removeEventListener('abort', onAbort);
+ 
+-    // Ensure process is killed when the generator is closed (consumer breaks loop)
+-    let killedByGenerator = false;
+-    if (!finished && child.exitCode === null && !child.killed) {
+-      try {
+-        child.kill();
+-      } catch {
+-        // ignore error if process is already dead
++    let finished = false;
++    try {
++      for await (const line of rl) {
++        if (options?.signal?.aborted) break;
++        yield line;
+       }
+-      killedByGenerator = true;
+-    }
++      finished = true;
++    } finally {
++      rl.close();
++      options?.signal?.removeEventListener('abort', onAbort);
+ 
+-    // Ensure we wait for the process to exit to check codes
+-    await new Promise<void>((resolve, reject) => {
+-      // If an error occurred before we got here (e.g. spawn failure), reject immediately.
+-      if (error) {
+-        prepared.cleanup?.();
+-        reject(error);
+-        return;
++      // Ensure process is killed when the generator is closed (consumer breaks loop)
++      let killedByGenerator = false;
++      if (!finished && child.exitCode === null && !child.killed) {
++        try {
++          child.kill();
++        } catch {
++          // ignore error if process is already dead
++        }
++        killedByGenerator = true;
+       }
+ 
+-      function checkExit(code: number | null) {
+-        prepared.cleanup?.();
+-        // If we aborted or killed it manually, we treat it as success (stop waiting)
+-        if (options?.signal?.aborted || killedByGenerator) {
+-          resolve();
++      // Ensure we wait for the process to exit to check codes
++      await new Promise<void>((resolve, reject) => {
++        // If an error occurred before we got here (e.g. spawn failure), reject immediately.
++        if (error) {
++          reject(error);
+           return;
+         }
+ 
+-        const allowed = options?.allowedExitCodes ?? [0];
+-        if (code !== null && allowed.includes(code)) {
+-          resolve();
+-        } else {
+-          // If we have an accumulated error or explicit error event
+-          if (error) reject(error);
+-          else {
+-            const stderr = Buffer.concat(errorChunks).toString('utf8');
+-            const truncatedMsg =
+-              stderrTotalBytes >= MAX_STDERR_BYTES ? '...[truncated]' : '';
+-            reject(
+-              new Error(
+-                `Process exited with code ${code}: ${stderr}${truncatedMsg}`,
+-              ),
+-            );
++        function checkExit(code: number | null) {
++          // If we aborted or killed it manually, we treat it as success (stop waiting)
++          if (options?.signal?.aborted || killedByGenerator) {
++            resolve();
++            return;
+           }
++
++          const allowed = options?.allowedExitCodes ?? [0];
++          if (code !== null && allowed.includes(code)) {
++            resolve();
++          } else {
++            // If we have an accumulated error or explicit error event
++            if (error) reject(error);
++            else {
++              const stderr = Buffer.concat(errorChunks).toString('utf8');
++              const truncatedMsg =
++                stderrTotalBytes >= MAX_STDERR_BYTES ? '...[truncated]' : '';
++              reject(
++                new Error(
++                  `Process exited with code ${code}: ${stderr}${truncatedMsg}`,
++                ),
++              );
++            }
++          }
+         }
+-      }
+ 
+-      if (child.exitCode !== null) {
+-        checkExit(child.exitCode);
+-      } else {
+-        child.on('close', (code) => checkExit(code));
+-        child.on('error', (err) => {
+-          prepared.cleanup?.();
+-          reject(err);
+-        });
+-      }
+-    });
++        if (child.exitCode !== null) {
++          checkExit(child.exitCode);
++        } else {
++          child.on('close', (code) => checkExit(code));
++          child.on('error', (err) => {
++            reject(err);
++          });
++        }
++      });
++    }
++  } finally {
++    prepared.cleanup?.();
+   }
+ }

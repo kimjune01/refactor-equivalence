@@ -1,0 +1,374 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24557
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ae7-419e-76e0-8014-ab7f7f41420d
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the existing round-1 spec and hunt findings, then write the reconciled markdown directly to the requested path.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove duplicate keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
+**Severity**: warning
+**Claim**: C1
+**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
+**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
+**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
+
+## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
+**Severity**: warning
+**Claim**: C4
+**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
+**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
+**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+codex
+The hunt pass has two warnings and no blockers. I’m narrowing C1 to assertion pragma parsing and rejecting C4 because the finding identifies it as underspecified dead-edge cleanup rather than a concrete behavior-preserving simplification.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-2-claims.md
+## Accepted Claims
+
+### C1 — Remove duplicate assertion keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
+**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+### C5 — Refresh stale `match_line` documentation
+**File**: `crates/ty_test/src/matcher.rs`:321
+**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
+**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
+**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
+
+## Rejected
+
+- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
+- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
+- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
+- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
+- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-2-claims.md b/samples/v2/ruff-24557/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f0ce732b349075561871ecbc4b6bdbf28aecc9
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-2-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove duplicate assertion keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
++**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-2-claims.md b/samples/v2/ruff-24557/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f0ce732b349075561871ecbc4b6bdbf28aecc9
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-2-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove duplicate assertion keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
++**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove duplicate assertion keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
+**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-2-claims.md b/samples/v2/ruff-24557/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f0ce732b349075561871ecbc4b6bdbf28aecc9
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-2-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove duplicate assertion keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
++**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+codex
+## Accepted Claims
+
+### C1 — Remove duplicate assertion keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
+**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+### C5 — Refresh stale `match_line` documentation
+**File**: `crates/ty_test/src/matcher.rs`:321
+**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
+**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
+**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
+
+## Rejected
+
+- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
+- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
+- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
+- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
+- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-2-claims.md b/samples/v2/ruff-24557/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f0ce732b349075561871ecbc4b6bdbf28aecc9
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-2-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove duplicate assertion keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
++**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+tokens used
+8,182
+## Accepted Claims
+
+### C1 — Remove duplicate assertion keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
+**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+### C5 — Refresh stale `match_line` documentation
+**File**: `crates/ty_test/src/matcher.rs`:321
+**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
+**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
+**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
+
+## Rejected
+
+- Replace `file.code_blocks.last_mut().unwrap()` in `Parser::process_inline_snapshot` with a `bail!(...)` branch: F2 finds the proposed error is underspecified and appears unreachable because each `EmbeddedFile` is constructed with an initial `CodeBlock`; without a concrete reachable malformed input and exact asserted error text, this is unnecessary dead-edge cleanup.
+- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
+- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
+- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
+- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.

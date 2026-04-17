@@ -1,0 +1,471 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/4145
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9cb3-a9a5-7710-87fb-708e42d13c91
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/4145/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/4145/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll review the goal, sharpened claims, patch, allowed files, and relevant source/tests, then write only the requested hunt report.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+# PR #4145
+
+This PR adds `redundantptr` linter to detect `github.Ptr(x)` calls that can be replaced with simple `&x`.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use plain AST inspection for read-only traversal
+**File**: tools/redundantptr/redundantptr.go:17
+**Change**: In `analyzeFunction`, replace the `astutil.Apply(body, pre, nil)` traversal with `ast.Inspect(body, func(n ast.Node) bool { ... })`, inspect `*ast.CallExpr` directly from `n`, and remove the now-unused `golang.org/x/tools/go/ast/astutil` import.
+**Goal link**: The goal is to add a linter for replacing redundant `github.Ptr(x)` calls; this traversal only detects call expressions and never rewrites the AST.
+**Justification**: Using `ast.Inspect` matches the surrounding custom linter idiom and removes an unnecessary rewrite-capable dependency without changing which diagnostics or suggested fixes are emitted.
+
+## Rejected
+
+- Remove the `*ast.Ident` branch in `redundantPtrCall` so only selector calls named `github.Ptr` are reported: this would better match the PR wording but would change current analyzer behavior and make existing `tools/redundantptr` testdata expectations fail unless test files were edited, which is outside the allowed claim scope.
+- Change `collectLocals` to avoid collecting declarations inside nested function literals while analyzing an outer function: this would alter which calls can be reported in closure-heavy code and is a behavioral change rather than a bounded behavior-preserving refactor.
+- Replace remaining literal calls such as `github.Ptr("blob")`, `github.Ptr("100644")`, `github.Ptr(false)`, or `github.Ptr(true)` in `example/commitpr/main.go`: those arguments are not addressable locals, so converting them would require introducing new variables and would go beyond the linter goal of replacing calls that can be directly expressed as `&x`.
+- Collapse duplicated linter descriptions between `.golangci.yml`, `.custom-gcl.yml`, and `BuildAnalyzers`: these files serve different tool configuration surfaces and there is no existing shared source of truth in the repository, so centralizing them would add process coupling outside the PR's goal.
+ succeeded in 0ms:
+.custom-gcl.yml
+.golangci.yml
+example/commitpr/main.go
+github/apps.go
+github/interactions_orgs.go
+github/interactions_repos.go
+github/markdown.go
+github/migrations.go
+github/migrations_user.go
+github/reactions.go
+tools/redundantptr/go.mod
+tools/redundantptr/redundantptr.go
+tools/redundantptr/testdata/src/github.com/google/go-github/v84/github/github.go
+tools/redundantptr/testdata/src/has-warnings/main.go
+tools/redundantptr/testdata/src/no-warnings/main.go
+ succeeded in 0ms:
+diff --git a/.custom-gcl.yml b/.custom-gcl.yml
+index 4c2c4aae..5e07e9c2 100644
+--- a/.custom-gcl.yml
++++ b/.custom-gcl.yml
+@@ -4,6 +4,8 @@ plugins:
+     path: ./tools/extraneousnew
+   - module: "github.com/google/go-github/v84/tools/fmtpercentv"
+     path: ./tools/fmtpercentv
++  - module: "github.com/google/go-github/v84/tools/redundantptr"
++    path: ./tools/redundantptr
+   - module: "github.com/google/go-github/v84/tools/sliceofpointers"
+     path: ./tools/sliceofpointers
+   - module: "github.com/google/go-github/v84/tools/structfield"
+diff --git a/.golangci.yml b/.golangci.yml
+index 9bc14152..91fb1514 100644
+--- a/.golangci.yml
++++ b/.golangci.yml
+@@ -27,6 +27,7 @@ linters:
+     - nolintlint
+     - paralleltest
+codex
+The accepted spec has one concrete claim, focused on replacing traversal machinery in the new `tools/redundantptr` analyzer. I’m checking whether that preserves traversal semantics, imported symbols, and test expectations before writing the report.
+exec
+/bin/zsh -lc "sed -n '220,520p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
++	github.com/golangci/plugin-module-register v0.1.2
++	golang.org/x/tools v0.43.0
++)
++
++require (
++	golang.org/x/mod v0.34.0 // indirect
++	golang.org/x/sync v0.20.0 // indirect
++)
+diff --git a/tools/redundantptr/redundantptr.go b/tools/redundantptr/redundantptr.go
+new file mode 100644
+index 00000000..951e06bf
+--- /dev/null
++++ b/tools/redundantptr/redundantptr.go
+@@ -0,0 +1,239 @@
++// Copyright 2026 The go-github AUTHORS. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++// Package redundantptr is a custom linter to find redundant github.Ptr calls.
+exec
+/bin/zsh -lc "sed -n '1,280p' tools/redundantptr/redundantptr.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package redundantptr is a custom linter to find redundant github.Ptr calls.
+package redundantptr
+
+import (
+	"bytes"
+	"go/ast"
+	"go/format"
+	"go/token"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/ast/astutil"
+)
+
+func init() {
+exec
+/bin/zsh -lc "rg --files -g '*test*' -g '"'!vendor/**'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+github/repos_hooks_deliveries_test.go
+github/orgs_rules_test.go
+github/gists_comments_test.go
+github/copilot_test.go
+github/orgs_artifacts_test.go
+github/emojis_test.go
+github/enterprise_codesecurity_configurations_test.go
+github/repos_actions_permissions_test.go
+github/orgs_users_blocking_test.go
+github/repos_statuses_test.go
+github/users_attestations_test.go
+github/teams_discussion_comments_test.go
+github/repos_forks_test.go
+github/issue_import_test.go
+github/example_iterators_test.go
+github/repos_hooks_test.go
+github/enterprise_audit_log_test.go
+github/apps_hooks_deliveries_test.go
+github/dependabot_secrets_test.go
+github/interactions_repos_test.go
+exec
+/bin/zsh -lc "rg -n \"redundantptr|github\\.Ptr|Ptr\\(\" ." in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+./FORGE_INPUT_DIFF.patch:9:+  - module: "github.com/google/go-github/v84/tools/redundantptr"
+./FORGE_INPUT_DIFF.patch:10:+    path: ./tools/redundantptr
+./FORGE_INPUT_DIFF.patch:22:+    - redundantptr
+./FORGE_INPUT_DIFF.patch:30:+      redundantptr:
+./FORGE_INPUT_DIFF.patch:32:+        description: Reports github.Ptr(x) calls that can be replaced with &x.
+./FORGE_INPUT_DIFF.patch:33:+        original-url: github.com/google/go-github/v84/tools/redundantptr
+./FORGE_INPUT_DIFF.patch:45:-		entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
+./FORGE_INPUT_DIFF.patch:46:+		entries = append(entries, &github.TreeEntry{Path: &file, Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
+./FORGE_INPUT_DIFF.patch:58:-	payload := &Attachment{Title: Ptr(title), Body: Ptr(body)}
+./FORGE_INPUT_DIFF.patch:71:-	interaction := &InteractionRestriction{Limit: Ptr(limit)}
+./FORGE_INPUT_DIFF.patch:84:-	interaction := &InteractionRestriction{Limit: Ptr(limit)}
+./FORGE_INPUT_DIFF.patch:97:-	request := &markdownRenderRequest{Text: Ptr(text)}
+./FORGE_INPUT_DIFF.patch:101:-			request.Mode = Ptr(opts.Mode)
+./FORGE_INPUT_DIFF.patch:105:-			request.Context = Ptr(opts.Context)
+./FORGE_INPUT_DIFF.patch:118:-		body.LockRepositories = Ptr(opts.LockRepositories)
+./FORGE_INPUT_DIFF.patch:119:-		body.ExcludeAttachments = Ptr(opts.ExcludeAttachments)
+./FORGE_INPUT_DIFF.patch:120:-		body.ExcludeReleases = Ptr(opts.ExcludeReleases)
+./FORGE_INPUT_DIFF.patch:135:-		body.LockRepositories = Ptr(opts.LockRepositories)
+./FORGE_INPUT_DIFF.patch:136:-		body.ExcludeAttachments = Ptr(opts.ExcludeAttachments)
+./FORGE_INPUT_DIFF.patch:150:-	body := &Reaction{Content: Ptr(content)}
+exec
+/bin/zsh -lc "sed -n '1,140p' tools/redundantptr/testdata/src/has-warnings/main.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,220p' tools/redundantptr/redundantptr_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package redundantptr
+
+import (
+	"testing"
+
+	"golang.org/x/tools/go/analysis/analysistest"
+)
+
+func TestRun(t *testing.T) {
+	t.Parallel()
+	testdata := analysistest.TestData()
+	plugin, _ := New(nil)
+	analyzers, _ := plugin.BuildAnalyzers()
+	analysistest.Run(t, testdata, analyzers[0], "has-warnings", "no-warnings")
+}
+ succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"github.com/google/go-github/v84/github"
+)
+
+func main() {
+	file, content := getFileAndContent()
+	opts := struct {
+		Mode string
+	}{Mode: "gfm"}
+
+	_ = github.Ptr(string(content))
+
+	_ = github.Ptr(file) // want `replace github.Ptr\(file\) with &file`
+exec
+/bin/zsh -lc "sed -n '1,140p' tools/redundantptr/testdata/src/no-warnings/main.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import "github.com/google/go-github/v84/github"
+
+func main() {
+	// Literal argument cannot be addressed.
+	_ = github.Ptr("a.txt")
+
+	const file = "a.txt"
+	_ = github.Ptr(file)
+
+	for range []int{1, 2} {
+		_ = github.Ptr("a")
+	}
+
+exec
+/bin/zsh -lc 'go test ./tools/redundantptr' in /tmp/refactor-eq-workdir/cleanroom-v2/4145 exited 1 in 0ms:
+FAIL	./tools/redundantptr [setup failed]
+# ./tools/redundantptr
+main module (github.com/google/go-github/v84) does not contain package github.com/google/go-github/v84/tools/redundantptr
+FAIL
+codex
+The repository-level test command can’t target `./tools/redundantptr` from the main module because that tool is its own Go module. I’m checking the module-local test behavior and scanning for traversal edge cases rather than changing any files.
+exec
+/bin/zsh -lc "nl -ba tools/redundantptr/testdata/src/no-warnings/main.go | sed -n '1,90p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+     1	// Copyright 2026 The go-github AUTHORS. All rights reserved.
+     2	//
+     3	// Use of this source code is governed by a BSD-style
+     4	// license that can be found in the LICENSE file.
+     5	
+     6	package main
+     7	
+     8	import "github.com/google/go-github/v84/github"
+     9	
+    10	func main() {
+    11		// Literal argument cannot be addressed.
+    12		_ = github.Ptr("a.txt")
+    13	
+    14		const file = "a.txt"
+    15		_ = github.Ptr(file)
+    16	
+    17		for range []int{1, 2} {
+    18			_ = github.Ptr("a")
+    19		}
+    20	
+exec
+/bin/zsh -lc "nl -ba tools/redundantptr/redundantptr.go | sed -n '1,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "nl -ba tools/redundantptr/testdata/src/has-warnings/main.go | sed -n '1,90p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+     1	// Copyright 2026 The go-github AUTHORS. All rights reserved.
+     2	//
+     3	// Use of this source code is governed by a BSD-style
+     4	// license that can be found in the LICENSE file.
+     5	
+     6	package main
+     7	
+     8	import (
+     9		"github.com/google/go-github/v84/github"
+    10	)
+    11	
+    12	func main() {
+    13		file, content := getFileAndContent()
+    14		opts := struct {
+    15			Mode string
+    16		}{Mode: "gfm"}
+    17	
+    18		_ = github.Ptr(string(content))
+    19	
+    20		_ = github.Ptr(file) // want `replace github.Ptr\(file\) with &file`
+ succeeded in 0ms:
+     1	// Copyright 2026 The go-github AUTHORS. All rights reserved.
+     2	//
+     3	// Use of this source code is governed by a BSD-style
+     4	// license that can be found in the LICENSE file.
+     5	
+     6	// Package redundantptr is a custom linter to find redundant github.Ptr calls.
+     7	package redundantptr
+     8	
+     9	import (
+    10		"bytes"
+    11		"go/ast"
+    12		"go/format"
+    13		"go/token"
+    14	
+    15		"github.com/golangci/plugin-module-register/register"
+    16		"golang.org/x/tools/go/analysis"
+    17		"golang.org/x/tools/go/ast/astutil"
+    18	)
+    19	
+    20	func init() {
+exec
+/bin/zsh -lc 'go test ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/4145/tools/redundantptr succeeded in 566ms:
+ok  	tools/redundantptr	0.476s
+exec
+/bin/zsh -lc "sed -n '1,180p' tools/fmtpercentv/fmtpercentv.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,180p' tools/sliceofpointers/sliceofpointers.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+// Copyright 2025 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package sliceofpointers is a custom linter to be used by
+// golangci-lint to find instances of `[]*string` and
+// slices of structs without pointers and report them.
+// See: https://github.com/google/go-github/issues/180
+package sliceofpointers
+
+import (
+	"go/ast"
+	"go/token"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+)
+
+func init() {
+ succeeded in 0ms:
+// Copyright 2025 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package fmtpercentv is a custom linter to be used by
+// golangci-lint to find instances of `%d` or `%s` in
+// format strings when `%v` would be more consistent.
+package fmtpercentv
+
+import (
+	"go/ast"
+	"go/token"
+	"strings"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+)
+
+func init() {
+exec
+/bin/zsh -lc "sed -n '1,180p' tools/structfield/structfield.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145exec
+/bin/zsh -lc "sed -n '1,180p' tools/extraneousnew/extraneousnew.go" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package extraneousnew is a custom linter to be used by
+// golangci-lint to find instances where the Go code could
+// replace extraneous and problematic usage of `new` or `&SomeStruct{}`
+// with an initialized pointer in very specific instances.
+// It promotes the idiomatic Go concept that the zero-value is useful.
+package extraneousnew
+
+import (
+	"go/ast"
+	"go/token"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+)
+
+ succeeded in 0ms:
+// Copyright 2025 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package structfield is a custom linter to be used by
+// golangci-lint to find instances where the Go field name
+// of a struct does not match the JSON or URL tag name.
+// It honors idiomatic Go initialisms and handles the
+// special case of `Github` vs `GitHub` as agreed upon
+// by the original author of the repo.
+// It also checks that fields with "omitempty" tags are reference types
+// for `json` struct tags and value types for `url` struct tags.
+package structfield
+
+import (
+	"fmt"
+	"go/ast"
+	"go/token"
+	"go/types"
+codex
+C1 is in the allowed file set, does not touch tests, and the module-local analyzer tests pass in the current tree. I’m going to write the hunt report now; at this point I don’t see a claim-level defect that meets the requested labels.
+exec
+/bin/zsh -lc "printf 'No findings.\\n' > /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/hunt-spec-round-1.md && sed -n '1,20p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4145 succeeded in 0ms:
+No findings.
+codex
+Wrote the hunt report to `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/hunt-spec-round-1.md` with:
+
+```text
+No findings.
+```
+
+I also verified the relevant analyzer tests from its module with `go test ./...` in `tools/redundantptr`; they pass.
+tokens used
+47,249
+Wrote the hunt report to `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4145/volley/hunt-spec-round-1.md` with:
+
+```text
+No findings.
+```
+
+I also verified the relevant analyzer tests from its module with `go test ./...` in `tools/redundantptr`; they pass.

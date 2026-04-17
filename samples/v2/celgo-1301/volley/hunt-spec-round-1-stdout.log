@@ -1,0 +1,598 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1301
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9b95-b73f-72e3-a7e0-08b0ad4f9246
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/1301/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/1301/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll inspect the goal, claims, allowed files, patch, and relevant tests/source, then write only the requested hunt-spec output file. No source edits.
+exec
+/bin/zsh -lc "sed -n '1,200p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+.gitignore
+common/env/BUILD.bazel
+common/env/env.go
+common/env/io.go
+common/env/testdata/extended_env.yaml
+ext/formatting.go
+ext/formatting_v2.go
+ext/strings.go
+repl/BUILD.bazel
+repl/commands.go
+repl/evaluator.go
+repl/parser/Commands.g4
+repl/parser/Commands.interp
+repl/parser/Commands.tokens
+repl/parser/CommandsLexer.interp
+repl/parser/CommandsLexer.tokens
+repl/parser/commands_base_listener.go
+repl/parser/commands_base_visitor.go
+repl/parser/commands_lexer.go
+repl/parser/commands_listener.go
+ succeeded in 0ms:
+# PR #1301 — Support shorthand types in env yaml and REPL 
+
+## PR body
+
+Upstream parser for shorthand type specifier `map<int, string>`. This is used for describing environments.
+
+Add support for parsing yaml environment configs using the string type specifier and update the REPL to use the new format.
+
+Also rework repl to track types in terms of the environment config
+TypeDesc. This removes many of the usages of deprecated APIs in the
+REPL.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C2 — Remove the duplicate env import alias
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:28
+**Change**: Delete the `envlib` alias import of `github.com/google/cel-go/common/env` and update the affected helper signatures and calls in this file to use the existing `env` import, including `runtimeTypeAgrees`, `typeAssignable`, `addLetVar`, `resolveFn`, `addLetFn`, `AddLetVar`, `AddLetFn`, `AddDeclVar`, `AddDeclFn`, `env.NewVariable`, and `env.SerializeTypeDesc`.
+**Goal link**: The goal says the REPL should track types in terms of environment config `TypeDesc`; using one package name for that type keeps the migration direct.
+**Justification**: The extra alias is accidental complexity from the first-pass migration and obscures that all TypeDesc conversion is coming from the same environment config package.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+diff --git a/.gitignore b/.gitignore
+index 2b38b6db..062e438e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,4 +10,7 @@ proto/checked.pb.go
+ proto/syntax.pb.go
+ *~
+ MODULE.bazel.lock
+-.ijwb/
+\ No newline at end of file
++.ijwb/
++*antlr*.jar
++.antlr/
++
+diff --git a/common/env/BUILD.bazel b/common/env/BUILD.bazel
+index b2e0c293..261da924 100644
+--- a/common/env/BUILD.bazel
++++ b/common/env/BUILD.bazel
+@@ -23,12 +23,14 @@ go_library(
+     name = "go_default_library",
+codex
+The first pass shows three accepted claims focused on `repl/evaluator.go` and `common/env/io.go`. I’m checking whether the named symbols and tests line up with those claims, especially the YAML loader and TypeDesc unmarshalling behavior.
+exec
+/bin/zsh -lc "sed -n '260,620p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
++	pos    int
++	length int
++}
++
++// ParseTypeDesc parses a TypeDesc from the type specifier format: "map<string, int>"
++func ParseTypeDesc(text string) (*TypeDesc, error) {
++	p := &typeDescParser{text: text, length: len(text)}
++	res, err := p.parseTypeElem()
++	if err != nil {
++		return nil, fmt.Errorf("failed to parse type %q: %v", text, err)
++	}
++	p.skipWhitespace()
++	if p.pos < p.length {
++		return nil, fmt.Errorf("unexpected character %q at position %d in %q", p.text[p.pos], p.pos, text)
++	}
++	return res, nil
++}
++
++func (p *typeDescParser) parseConcreteType() (*TypeDesc, error) {
++	id, err := p.parseNamespaceIdentifier()
+exec
+/bin/zsh -lc "sed -n '1,240p' common/env/io.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '880,980p' repl/evaluator.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1,80p' repl/evaluator.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+				status.WriteString("\\\n")
+			}
+		}
+		status.WriteString("\n#\n")
+	}
+
+	for _, lVar := range e.ctx.letVars {
+		if lVar.src == "" {
+			continue
+		}
+		lines := strings.Split(lVar.String(), "\n")
+		for i, l := range lines {
+			if i == 0 {
+				status.WriteString("# %let ")
+			} else {
+				status.WriteString("# ")
+			}
+			status.WriteString(l)
+			if i < len(lines)-1 {
+				status.WriteString("\\\n")
+ succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package env
+
+import (
+	"errors"
+	"fmt"
+
+ succeeded in 0ms:
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package repl defines a set of utilities for working with command line processing of CEL.
+package repl
+
+import (
+	"errors"
+	"fmt"
+exec
+/bin/zsh -lc "sed -n '1,260p' repl/evaluator_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1,260p' common/env/io_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package env
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+ succeeded in 0ms:
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package repl
+
+import (
+	"strings"
+	"testing"
+
+exec
+/bin/zsh -lc "rg -n \"envlib|ConfigFromYAML|yaml\\.Unmarshal|SerializeTypeDesc|runtimeTypeAgrees|typeAssignable|addLetVar|AddDeclFn|NewVariable\" repl/evaluator.go repl common env --glob '"'!**/*.sum'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 exited 2 in 0ms:
+rg: env: No such file or directory (os error 2)
+repl/evaluator.go:29:	envlib "github.com/google/cel-go/common/env"
+repl/evaluator.go:95:func runtimeTypeAgrees(env *cel.Env, val ref.Val, declType *envlib.TypeDesc) bool {
+repl/evaluator.go:104:func typeAssignable(env *cel.Env, rtType ref.Type, declType *envlib.TypeDesc) bool {
+repl/evaluator.go:122:		if !runtimeTypeAgrees(env, arg, params[i].typeHint) {
+repl/evaluator.go:138:		decl, err := envlib.NewVariable(
+repl/evaluator.go:148:		decl, err := envlib.NewVariable(p.identifier, p.typeHint).AsCELVariable(env.CELTypeProvider())
+repl/evaluator.go:167:	if !typeAssignable(env, ast.OutputType(), l.resultType) {
+repl/evaluator.go:195:			if !runtimeTypeAgrees(env, instance, l.receiver) {
+repl/evaluator.go:434:func (ctx *EvaluationContext) addLetVar(name string, expr string, typeHint *envlib.TypeDesc) {
+repl/evaluator.go:449:func (ctx *EvaluationContext) resolveFn(env *cel.Env, name string) (string, *envlib.TypeDesc) {
+repl/evaluator.go:486:func (ctx *EvaluationContext) addLetFn(env *cel.Env, name string, params []letFunctionParam, resultType *envlib.TypeDesc, expr string) {
+repl/evaluator.go:568:			if el.typeHint != nil && !typeAssignable(env, ast.OutputType(), el.typeHint) {
+repl/evaluator.go:576:			el.resultType = envlib.SerializeTypeDesc(ast.OutputType())
+repl/evaluator.go:605:func (e *Evaluator) AddLetVar(name string, expr string, typeHint *envlib.TypeDesc) error {
+repl/evaluator.go:609:	ctx.addLetVar(name, expr, typeHint)
+repl/evaluator.go:619:func (e *Evaluator) AddLetFn(name string, params []letFunctionParam, resultType *envlib.TypeDesc, expr string) error {
+repl/evaluator.go:634:func (e *Evaluator) AddDeclVar(name string, typeHint *envlib.TypeDesc) error {
+repl/evaluator.go:636:	ctx.addLetVar(name, "", typeHint)
+repl/evaluator.go:645:// AddDeclFn declares a function in the environment but doesn't register an expr with it.
+exec
+/bin/zsh -lc "rg -n \"parseYAMLConfig|ConfigFromYAML|ParseTypeDesc|TypeDesc|unsupported yaml|failed to parse type|configure \\(yaml\\)|test_env|extended_env|StringValue|map<|~T|~K\" . --glob '*_test.go' --glob '*.yaml'" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+./cel/cel_test.go:589:		TypeDescs(&fds),
+./cel/cel_test.go:626:		TypeDescs(fileCopy...),
+./cel/cel_test.go:629:		TypeDescs(pbFiles),
+./cel/cel_test.go:690:		TypeDescs(fileCopy...),
+./cel/env_test.go:362:			want: env.NewConfig("std env - with variable").AddVariables(env.NewVariable("var", env.NewTypeDesc("int"))),
+./cel/env_test.go:370:						[]*env.TypeDesc{env.NewTypeDesc("string")}, env.NewTypeDesc("string")),
+./cel/env_test.go:399:					env.NewMemberOverload("string_last", env.NewTypeDesc("string"), []*env.TypeDesc{}, env.NewTypeDesc("string")),
+./cel/env_test.go:418:				AddVariables(env.NewVariable("extra", env.NewTypeDesc("string"))),
+./cel/env_test.go:553:				AddVariables(env.NewVariable("single_int64", env.NewTypeDesc("int"))),
+./cel/env_test.go:583:				AddVariables(env.NewVariable("x", env.NewTypeDesc("int"))).
+./cel/env_test.go:586:						env.NewTypeDesc("int"),
+./cel/env_test.go:587:						[]*env.TypeDesc{env.NewTypeDesc("int")},
+./cel/env_test.go:588:						env.NewTypeDesc("int"),
+./cel/env_test.go:612:				AddVariables(env.NewVariable("foo.bar", env.NewTypeDesc("int"))),
+./cel/env_test.go:630:				AddVariables(env.NewVariable("foo.bar", env.NewTypeDesc("int"))),
+./cel/env_test.go:701:						env.NewTypeDesc("map", env.NewTypeDesc("string"), env.NewTypeDesc("string")))).
+./cel/env_test.go:748:						env.NewTypeDesc("map", env.NewTypeDesc("string"), env.NewTypeDesc("string")))).
+./cel/env_test.go:812:						env.NewTypeDesc("map", env.NewTypeDesc("string"), env.NewTypeDesc("string"))),
+./cel/env_test.go:868:						t, err := env.NewTypeDesc(typeName.(string)).AsCELType(e.CELTypeProvider())
+./cel/env_test.go:972:			conf: env.NewConfig("undefined variable type").AddVariables(env.NewVariable("undef", env.NewTypeDesc("undefined"))),
+exec
+/bin/zsh -lc "sed -n '240,380p' common/env/env_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1440,1505p' common/env/env_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '820,920p' repl/evaluator_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+	for i, gotOverload := range got.OverloadDecls() {
+		wantOverload := want.OverloadDecls()[i]
+		if gotOverload.ID() != wantOverload.ID() {
+			t.Errorf("got overload id: %s, wanted: %s", gotOverload.ID(), wantOverload.ID())
+		}
+		if gotOverload.IsMemberFunction() != wantOverload.IsMemberFunction() {
+			t.Errorf("got is member function %t, wanted %t", gotOverload.IsMemberFunction(), wantOverload.IsMemberFunction())
+		}
+		if len(gotOverload.ArgTypes()) != len(wantOverload.ArgTypes()) {
+			t.Fatalf("got arg count %d, wanted %d", len(gotOverload.ArgTypes()), len(wantOverload.ArgTypes()))
+		}
+		for i, p := range gotOverload.ArgTypes() {
+			wp := wantOverload.ArgTypes()[i]
+			if !p.IsExactType(wp) {
+				t.Errorf("got arg[%d] type %v, wanted %v", i, p, wp)
+			}
+		}
+		if len(gotOverload.TypeParams()) != len(wantOverload.TypeParams()) {
+			t.Fatalf("got type param count %d, wanted %d", len(gotOverload.TypeParams()), len(wantOverload.TypeParams()))
+		}
+ succeeded in 0ms:
+					identifier: "y",
+					typeHint:   mustParseType(t, "int"),
+					src:        "10",
+				},
+				&evalCmd{
+					expr: "x + y > 10 || y > 10",
+				},
+			},
+			wantText:  "",
+			wantExit:  false,
+			wantError: true,
+		},
+		{
+			name: "PartialEvalFiltered",
+			commands: []Cmder{
+				&simpleCmd{
+					cmd: "option",
+					args: []string{
+						"--enable_partial_eval",
+					},
+ succeeded in 0ms:
+			if len(got.Limits) != len(tc.want.Limits) {
+				t.Errorf("Limits count got %d, wanted %d", len(got.Limits), len(tc.want.Limits))
+			} else {
+				for i, l := range got.Limits {
+					wl := tc.want.Limits[i]
+					if l.Name != wl.Name {
+						t.Errorf("Limits[%d] got name %s, wanted %s", i, l.Name, wl.Name)
+					}
+					if l.Value != wl.Value {
+						t.Errorf("Limits[%d] got enabled %d, wanted %d", i, l.Value, wl.Value)
+					}
+				}
+			}
+			if len(got.Validators) != len(tc.want.Validators) {
+				t.Errorf("Validators count got %d, wanted %d", len(got.Validators), len(tc.want.Validators))
+			} else {
+				for i, f := range got.Validators {
+					wf := tc.want.Validators[i]
+					if f.Name != wf.Name {
+						t.Errorf("Validators[%d] got name %s, wanted %s", i, f.Name, wf.Name)
+exec
+/bin/zsh -lc 'rg -n "YAML|Configure|parseYAML|test_env|Config" repl/evaluator_test.go repl/commands_test.go repl/*.go common/env/env_test.go common/env/io_test.go' in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+common/env/io_test.go:123:func TestConfigToYAML(t *testing.T) {
+common/env/io_test.go:129:		confIn  *Config
+common/env/io_test.go:134:			confIn: NewConfig("foo").AddVariables(
+common/env/io_test.go:147:			b, err := ConfigToYAML(tc.confIn)
+common/env/io_test.go:149:				t.Fatalf("ConfigToYAML() = (err) %v", err)
+common/env/io_test.go:154:				t.Errorf("ConfigToYAML() has diff (+got -want):\n%s", diff)
+common/env/io_test.go:160:func TestYAMLRoundTrip(t *testing.T) {
+common/env/io_test.go:244:			c, err := ConfigFromYAML([]byte(tc.yamlIn))
+common/env/io_test.go:246:				t.Fatalf("ConfigFromYAML() = (err) %v, want nil", err)
+common/env/io_test.go:248:			b, err := ConfigToYAML(c)
+common/env/io_test.go:250:				t.Fatalf("ConfigToYAML() = (err) %v, wanted nil", err)
+common/env/io_test.go:253:				t.Errorf("ConfigToYAML() has diff (+got -want):\n%s", diff)
+common/env/env_test.go:35:func TestConfig(t *testing.T) {
+common/env/env_test.go:38:		want *Config
+common/env/env_test.go:42:			want: NewConfig("context-env").
+common/env/env_test.go:79:			want: NewConfig("extended-env").
+common/env/env_test.go:140:					SetConfig(map[string]any{"limit": 2}),
+common/env/env_test.go:145:			want: NewConfig("subset-env").
+common/env/env_test.go:178:			got := unmarshalYAML(t, data)
+common/env/env_test.go:261:					if !reflect.DeepEqual(f.Config, wf.Config) {
+exec
+/bin/zsh -lc "sed -n '1040,1270p' repl/evaluator_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+			},
+			wantText: `// Options
+%option --container 'google'
+
+// Functions
+%let fn() : int -> 2
+
+// Variables
+%let x = 1
+
+`,
+			wantExit:  false,
+			wantError: false,
+		},
+		{
+			name: "StatusYAML",
+			commands: []Cmder{
+				&simpleCmd{
+					cmd: "option",
+					args: []string{
+exec
+/bin/zsh -lc "rg -n \"\\byaml\\b\" repl/evaluator.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+40:	"go.yaml.in/yaml/v3"
+327:	// True if the option is captured by the environment yaml format.
+328:	yaml bool
+337:		"// %status --yaml"
+504:		contextOption{opt: opt, yaml: isYAML})
+734:		case "--yaml":
+759:		case "--yaml":
+844:// YAMLConfig returns a yaml-based CEL environment representing the current evaluator state.
+853:	data, err := yaml.Marshal(conf)
+861:		if !opt.yaml {
+921:	if err := yaml.Unmarshal(yamlSrc, &c); err != nil {
+922:		return "", fmt.Errorf("configure (yaml): %w", err)
+930:	// before the yaml environment. This is mainly because the yaml doesn't
+976:		return "", fmt.Errorf("configure: failed to apply yaml: %w", err)
+exec
+/bin/zsh -lc 'tmp=$(mktemp -d); cd "$tmp"; go mod init x >/dev/null; cat > x.go <<'"'EOF'
+package x
+import \"context\"
+func f(context context.Context, x *context.Context) {}
+EOF
+go test ./... 2>&1" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+go: creating new go.mod: module x
+?   	x	[no test files]
+exec
+/bin/zsh -lc "sed -n '80,180p' repl/evaluator.go && sed -n '420,500p' repl/evaluator.go && sed -n '540,660p' repl/evaluator.go && sed -n '1375,1400p' repl/evaluator.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+// letFunction coordinates let function data (type definition and CEL function implementation).
+type letFunction struct {
+	identifier string
+	src        string
+	resultType *env.TypeDesc
+	params     []letFunctionParam
+	receiver   *env.TypeDesc // if not nil indicates an instance function
+
+	// memoized results from building the expression AST and program
+	env   *cel.Env // the context env for repl evaluation
+	fnEnv *cel.Env // the env for implementing the extension fn
+	prog  cel.Program
+	impl  functions.FunctionOp
+}
+
+func runtimeTypeAgrees(env *cel.Env, val ref.Val, declType *envlib.TypeDesc) bool {
+	to, err := declType.AsCELType(env.CELTypeProvider())
+
+	if err != nil {
+		return val.Type().TypeName() == declType.TypeName
+exec
+/bin/zsh -lc "sed -n '800,865p' common/env/env.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+		typeName = fmt.Sprintf("%s(%s)", typeName, strings.Join(ps, ","))
+	}
+	return typeName
+}
+
+// Validate validates the type configuration is well-formed.
+func (td *TypeDesc) Validate() error {
+	if td == nil {
+		return errors.New("invalid type: nil")
+	}
+	if td.TypeName == "" {
+		return errors.New("invalid type: missing type name")
+	}
+	if td.IsTypeParam && len(td.Params) != 0 {
+		return errors.New("invalid type: param type cannot have parameters")
+	}
+	switch td.TypeName {
+	case "list":
+		if len(td.Params) != 1 {
+			return fmt.Errorf("invalid type: list expects 1 parameter, got %d", len(td.Params))
+exec
+/bin/zsh -lc 'rg -n "type TypeDesc|TypeName.*yaml" common/env/env.go' in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+324:	TypeName string `yaml:"type_name"`
+786:type TypeDesc struct {
+787:	TypeName    string      `yaml:"type_name"`
+exec
+/bin/zsh -lc "sed -n '780,805p' common/env/env.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+// NewTypeParam describe a type-param type.
+func NewTypeParam(paramName string) *TypeDesc {
+	return &TypeDesc{TypeName: paramName, IsTypeParam: true}
+}
+
+// TypeDesc represents the serializable format of a CEL *types.Type value.
+type TypeDesc struct {
+	TypeName    string      `yaml:"type_name"`
+	Params      []*TypeDesc `yaml:"params,omitempty"`
+	IsTypeParam bool        `yaml:"is_type_param,omitempty"`
+}
+
+// String implements the strings.Stringer interface method.
+func (td *TypeDesc) String() string {
+	ps := make([]string, len(td.Params))
+	for i, p := range td.Params {
+		ps[i] = p.String()
+	}
+	typeName := td.TypeName
+	if len(ps) != 0 {
+codex
+I found one concrete spec defect: the alias-removal claim overlooks local variables named `env`, which makes the literal replacement compile-breaking in several functions. I’m writing that as the hunt finding now.
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md && sed -n '1,120p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+## Finding F1 — Alias removal collides with local env variables
+**Severity**: blocker
+**Claim**: C2
+**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
+**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
+**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.
+apply_patch(auto_approved=true) exited 0 in 26ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+file update:
+diff --git a/samples/v2/celgo-1301/volley/hunt-spec-round-1.md b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..98340965a1a6ba6e84d2f0794d485ac1fd75bd16
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Alias removal collides with local env variables
++**Severity**: blocker
++**Claim**: C2
++**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
++**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
++**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.
+
+file update:
+diff --git a/samples/v2/celgo-1301/volley/hunt-spec-round-1.md b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..98340965a1a6ba6e84d2f0794d485ac1fd75bd16
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Alias removal collides with local env variables
++**Severity**: blocker
++**Claim**: C2
++**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
++**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
++**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.
+
+codex
+Wrote the findings file at [/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md).
+
+It contains one blocker against C2: removing the `envlib` alias is compile-breaking unless the spec also says to rename local `env *cel.Env` parameters that shadow the `common/env` import.
+file update:
+diff --git a/samples/v2/celgo-1301/volley/hunt-spec-round-1.md b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..98340965a1a6ba6e84d2f0794d485ac1fd75bd16
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Alias removal collides with local env variables
++**Severity**: blocker
++**Claim**: C2
++**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
++**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
++**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.
+
+tokens used
+50,073
+Wrote the findings file at [/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md).
+
+It contains one blocker against C2: removing the `envlib` alias is compile-breaking unless the spec also says to rename local `env *cel.Env` parameters that shadow the `common/env` import.

@@ -1,0 +1,24 @@
+# PR #24476 — test: fix Windows CI execution and resolve exposed platform failures
+
+## PR body
+
+## Summary
+
+This PR enables core package tests on Windows CI (fixing a PowerShell bug that was silently skipping them) and addresses the cross-platform test failures that were consequently uncovered, ensuring the test suite passes consistently on macOS, Linux, and Windows.
+
+## Details
+
+**1. CI Workflow Fixes (Windows)**
+* **Argument Splatting:** Quoted the `npm run test:ci --workspace` arguments in `.github/workflows/ci.yml`. Without quotes, PowerShell interpreted `@` (e.g., `@google/gemini-cli-core`) as a splatting operator and dropped the argument, causing tests to be silently skipped.
+* **Error Swallowing:** Added explicit `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }` checks after `npm` commands. PowerShell continues execution by default when an external command fails, meaning subsequent successful steps were previously overwriting the failure code and falsely reporting a green build.
+
+**2. Cross-Platform Test Fixes**
+To get the newly unskipped tests passing across all platforms, several types of adjustments were made:
+* **Path Resolution & Normalization:** Fixed assertions and mock setups across the test suite that implicitly assumed POSIX-style paths, updating them to handle Windows path separators and drive letters correctly.
+* **Symlink Handling (macOS):** Resolved test failures caused by macOS evaluating `/tmp` as a symlink to `/private/tmp`. Assertions were updated to use `resolveToRealPath()` so that expected output accurately mirrors runtime path evaluations.
+* **Mock Consistency:** Improved file system and path-related mocks (like `fs` and `value-resolver`) to behave reliably across OSes without relying on hardcoded, platform-specific path structures.
+
+**Note:** The Windows Sandbox tests have been temporarily disabled in this PR and will be properly addressed and re-enabled in a separate effort ([#24480](https://github.com/google-gemini/gemini-cli/pull/24480)).
+
+## Linked issues
+(none)

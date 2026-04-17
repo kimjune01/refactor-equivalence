@@ -1,0 +1,1620 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-24512
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a97-af3f-7232-8152-2a4978bf3245
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/24512/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/allowed-files.txt             # files the implementer may have changed
+npm run build                                         # full build, not just typecheck
+npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run this as a code review, not a fix pass. I’m going to inspect the supplied spec/artifacts, run the required build and test commands from the cleanroom, then write only the findings file.
+exec
+/bin/zsh -lc 'pwd && ls' in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/24512
+CONTRIBUTING.md
+Dockerfile
+FORGE_ALLOWED_FILES.txt
+FORGE_INPUT_DIFF.patch
+GEMINI.md
+GOAL.md
+LICENSE
+Makefile
+README.md
+ROADMAP.md
+SECURITY.md
+bundle
+docs
+esbuild.config.js
+eslint.config.js
+evals
+integration-tests
+node_modules
+package-lock.json
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+## Accepted Claims
+
+### C2 — Remove shadowed startup providers
+**File**: packages/cli/src/interactiveCli.tsx:106
+**Change**: In `AppWrapper`, remove the outer `MouseProvider` and `ScrollProvider` wrappers and their now-unused imports, leaving `TerminalProvider`, `OverflowProvider`, and the rest of the tree unchanged.
+**Goal link**: The goal adds an explicit mouse-mode toggle to manage scrollback behavior cleanly.
+**Justification**: `AppContainer` now owns the dynamic `MouseProvider` and `ScrollProvider` around `<App />`, so the startup-level providers are shadowed for the rendered UI and add an extra context layer that does not serve the new toggle behavior.
+
+### C3 — Drop the unused `isStatic` VirtualizedList prop
+**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
+**Change**: Remove `isStatic` from `VirtualizedListProps`, remove it from props destructuring, and simplify the observer guards from `!isStatic && !fixedItemHeight` to `!fixedItemHeight`.
+**Goal link**: The goal's static rendering behavior is driven by TerminalBuffer item classification and fixed-height list optimization.
+**Justification**: No production call site passes `isStatic`, while `renderStatic`, `isStaticItem`, and `fixedItemHeight` carry the active behavior, so this deletes dead configuration surface without changing rendering.
+
+### C4 — Remove duplicate inherited ScrollableList prop declarations
+**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
+**Change**: In `ScrollableListProps`, keep only `hasFocus` as the prop specific to `ScrollableList`; remove redeclarations of props still inherited from `VirtualizedListProps`, such as `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, and `fixedItemHeight`; and remove `isStatic` because C3 removes it from the underlying `VirtualizedListProps` surface entirely.
+**Goal link**: The goal adds TerminalBuffer options to the shared virtualized scrolling path.
+**Justification**: Keeping active options defined once in `VirtualizedListProps` makes the propagation from `ScrollableList` to `VirtualizedList` clearer, while deleting `isStatic` consistently from both prop surfaces removes dead configuration introduced by the first-pass refactor.
+**Hunt note**: Retained as narrowed for F2 because the claim no longer describes `isStatic` as inherited after C3; it explicitly removes `isStatic` from `ScrollableListProps` for the same dead-prop reason as C3.
+ succeeded in 0ms:
+packages/cli/src/config/config.ts
+packages/cli/src/config/settingsSchema.ts
+packages/cli/src/interactiveCli.tsx
+packages/cli/src/test-utils/mockConfig.ts
+packages/cli/src/test-utils/render.tsx
+packages/cli/src/ui/AppContainer.tsx
+packages/cli/src/ui/components/Composer.tsx
+packages/cli/src/ui/components/InputPrompt.tsx
+packages/cli/src/ui/components/MainContent.tsx
+packages/cli/src/ui/components/StatusRow.tsx
+packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
+packages/cli/src/ui/components/messages/ToolResultDisplay.tsx
+packages/cli/src/ui/components/shared/MaxSizedBox.tsx
+packages/cli/src/ui/components/shared/Scrollable.tsx
+packages/cli/src/ui/components/shared/ScrollableList.tsx
+packages/cli/src/ui/components/shared/VirtualizedList.tsx
+packages/cli/src/ui/contexts/UIStateContext.tsx
+packages/cli/src/ui/hooks/useAlternateBuffer.ts
+packages/cli/src/ui/hooks/useAnimatedScrollbar.ts
+packages/cli/src/ui/hooks/useBatchedScroll.ts
+ succeeded in 0ms:
+# PR #24512 — feat(ui): enable "TerminalBuffer" mode to solve flicker
+
+## PR body
+
+This PR introduces a new `TerminalBuffer` rendering mode to resolve UI flicker issues experienced in the traditional alternate buffer mode.
+
+### Key Changes
+*   **Terminal Buffer Mode:** Introduces `TerminalBuffer` for a smooth, flicker-free rendering experience by leveraging static rendering for history items.
+*   **Settings Updates:** Adds `renderProcess` and `terminalBuffer` configuration options to customize the rendering strategy.
+*   **Serializer Fixes:** Fixes the terminal serializer to correctly handle and preserve wide characters (multi-byte unicode) during rendering.
+*   **Mouse Mode Toggle:** Adds a new shortcut to toggle mouse mode explicitly, managing scrollback behaviour cleanly.
+*   **Debug Tooling:** Incorporates new commands for dumping frame data and recording sessions to aid UI development.
+
+### Motivation
+The standard Ink alternate buffer mode relies on full-screen rewrites which causes flicker, especially on slower terminal emulators. `TerminalBuffer` separates static content (chat history) from dynamic elements (input prompt, spinners), drastically reducing the screen area that needs redrawing.
+
+### Fixed Issues
+*   Fixes #14411
+*   Resolves general terminal rendering flicker in alternate buffer mode.
+
+codex
+The allowed set is narrow and the sharpened spec is mostly cleanup around TerminalBuffer providers/list props/comments. I’m starting the required full build and test now; while those run I’ll inspect the touched files and patch artifact for real behavior or shape regressions.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+diff --git a/packages/cli/src/config/config.ts b/packages/cli/src/config/config.ts
+index 37f1291475..c1ac3e57dd 100755
+--- a/packages/cli/src/config/config.ts
++++ b/packages/cli/src/config/config.ts
+@@ -1001,6 +1001,8 @@ export async function loadCliConfig(
+     trustedFolder,
+     useBackgroundColor: settings.ui?.useBackgroundColor,
+     useAlternateBuffer: settings.ui?.useAlternateBuffer,
++    useTerminalBuffer: settings.ui?.terminalBuffer,
++    useRenderProcess: settings.ui?.renderProcess,
+     useRipgrep: settings.tools?.useRipgrep,
+     enableInteractiveShell: settings.tools?.shell?.enableInteractiveShell,
+     shellBackgroundCompletionBehavior: settings.tools?.shell
+diff --git a/packages/cli/src/config/settingsSchema.ts b/packages/cli/src/config/settingsSchema.ts
+index 9b62c9d93f..01e248e797 100644
+--- a/packages/cli/src/config/settingsSchema.ts
++++ b/packages/cli/src/config/settingsSchema.ts
+@@ -743,6 +743,24 @@ const SETTINGS_SCHEMA = {
+           'Use an alternate screen buffer for the UI, preserving shell history.',
+         showInDialog: true,
+exec
+/bin/zsh -lc 'npm run build' in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc "rg -n \"MouseProvider|ScrollProvider|isStatic|isReady|Wait|MUST|ScrollableListProps|VirtualizedListProps|copyMode|ctrl\\+s|TerminalBuffer|terminalBuffer|renderProcess\" packages/cli/src packages/core/src/config/config.ts packages/cli/test-setup.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+packages/core/src/config/config.ts:651:  useTerminalBuffer?: boolean;
+packages/core/src/config/config.ts:871:  private readonly useTerminalBuffer: boolean;
+packages/core/src/config/config.ts:1214:    this.useTerminalBuffer = params.useTerminalBuffer ?? true;
+packages/core/src/config/config.ts:3243:  getUseTerminalBuffer(): boolean {
+packages/core/src/config/config.ts:3244:    return this.useTerminalBuffer;
+packages/cli/src/gemini_cleanup.test.tsx:330:      getUseTerminalBuffer: vi.fn(() => false),
+packages/cli/src/integration-tests/modelSteering.test.tsx:59:    // Wait for the model to call 'list_directory' (Confirming state)
+packages/cli/src/integration-tests/modelSteering.test.tsx:77:    // Wait for final completion
+packages/cli/src/interactiveCli.tsx:34:import { MouseProvider } from './ui/contexts/MouseContext.js';
+packages/cli/src/interactiveCli.tsx:44:import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+packages/cli/src/interactiveCli.tsx:106:            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+packages/cli/src/interactiveCli.tsx:108:                <ScrollProvider>
+packages/cli/src/interactiveCli.tsx:122:                </ScrollProvider>
+packages/cli/src/interactiveCli.tsx:124:            </MouseProvider>
+packages/cli/src/interactiveCli.tsx:132:    // Wait a moment for shpool to stabilize terminal size and state.
+packages/cli/src/interactiveCli.tsx:156:        useAlternateBuffer || config.getUseTerminalBuffer(),
+packages/cli/src/interactiveCli.tsx:159:      renderProcess: config.getUseRenderProcess(),
+packages/cli/src/interactiveCli.tsx:160:      terminalBuffer: config.getUseTerminalBuffer(),
+packages/cli/src/nonInteractiveCli.test.ts:1105:    // Wait a bit for setup to complete and listeners to be registered
+packages/cli/src/nonInteractiveCli.test.ts:1126:    // Wait, if handleError is called, we should check that.
+exec
+/bin/zsh -lc "npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512codex
+There are already several spec claims that appear not to have landed in the current tree: the startup providers and `isStatic` list props are still present. I’m waiting for build/test completion before deciding ordering, because a command failure would take F1 by the instructions.
+exec
+/bin/zsh -lc "nl -ba packages/cli/src/interactiveCli.tsx | sed -n '30,130p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+    30	import type { LoadedSettings } from './config/settings.js';
+    31	import { checkForUpdates } from './ui/utils/updateCheck.js';
+    32	import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+    33	import { SettingsContext } from './ui/contexts/SettingsContext.js';
+    34	import { MouseProvider } from './ui/contexts/MouseContext.js';
+    35	import { StreamingState } from './ui/types.js';
+    36	import { computeTerminalTitle } from './utils/windowTitle.js';
+    37	
+    38	import { SessionStatsProvider } from './ui/contexts/SessionContext.js';
+    39	import { VimModeProvider } from './ui/contexts/VimModeContext.js';
+    40	import { KeyMatchersProvider } from './ui/hooks/useKeyMatchers.js';
+    41	import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+    42	import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+    43	import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+    44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+    45	import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+    46	import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+    47	import { profiler } from './ui/components/DebugProfiler.js';
+    48	import { initializeConsoleStore } from './ui/hooks/useConsoleMessages.js';
+    49	
+exec
+/bin/zsh -lc "nl -ba packages/cli/src/ui/components/shared/VirtualizedList.tsx | sed -n '20,140p;440,485p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+    20	
+    21	import { type DOMElement, Box, ResizeObserver, StaticRender } from 'ink';
+    22	
+    23	export const SCROLL_TO_ITEM_END = Number.MAX_SAFE_INTEGER;
+    24	
+    25	export type VirtualizedListProps<T> = {
+    26	  data: T[];
+    27	  renderItem: (info: { item: T; index: number }) => React.ReactElement;
+    28	  estimatedItemHeight: (index: number) => number;
+    29	  keyExtractor: (item: T, index: number) => string;
+    30	  initialScrollIndex?: number;
+    31	  initialScrollOffsetInIndex?: number;
+    32	  scrollbarThumbColor?: string;
+    33	  renderStatic?: boolean;
+    34	  isStatic?: boolean;
+    35	  isStaticItem?: (item: T, index: number) => boolean;
+    36	  width?: number | string;
+    37	  overflowToBackbuffer?: boolean;
+    38	  scrollbar?: boolean;
+    39	  stableScrollback?: boolean;
+exec
+/bin/zsh -lc "nl -ba packages/cli/src/ui/components/shared/ScrollableList.tsx | sed -n '25,55p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+    25	import { useKeypress, type Key } from '../../hooks/useKeypress.js';
+    26	import { Command } from '../../key/keyMatchers.js';
+    27	import { useKeyMatchers } from '../../hooks/useKeyMatchers.js';
+    28	
+    29	const ANIMATION_FRAME_DURATION_MS = 33;
+    30	
+    31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+    32	  hasFocus: boolean;
+    33	  width?: string | number;
+    34	  scrollbar?: boolean;
+    35	  stableScrollback?: boolean;
+    36	  copyModeEnabled?: boolean;
+    37	  isStatic?: boolean;
+    38	  fixedItemHeight?: boolean;
+    39	}
+    40	
+    41	export type ScrollableListRef<T> = VirtualizedListRef<T>;
+    42	
+    43	function ScrollableList<T>(
+    44	  props: ScrollableListProps<T>,
+exec
+/bin/zsh -lc 'wc -l /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/diff-base-to-test.patch && tail -n 80 /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+    1366 /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/inputs/diff-base-to-test.patch
++  ScrollToBottom = 'scroll-to-bottom',
+ }
+ 
+ export interface AppEvents {
+@@ -32,6 +33,7 @@ export interface AppEvents {
+   [AppEvent.PasteTimeout]: never[];
+   [AppEvent.TerminalBackground]: [string];
+   [AppEvent.TransientMessage]: [TransientMessagePayload];
++  [AppEvent.ScrollToBottom]: never[];
+ }
+ 
+ export const appEvents = new EventEmitter<AppEvents>();
+diff --git a/packages/cli/test-setup.ts b/packages/cli/test-setup.ts
+index 850510cb14..1a0947b959 100644
+--- a/packages/cli/test-setup.ts
++++ b/packages/cli/test-setup.ts
+@@ -87,7 +87,8 @@ beforeEach(() => {
+ 
+       if (
+ succeeded in 27.85s:
+
+> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
+> node scripts/build.js
+
+
+> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 generate
+> node scripts/generate-git-commit-info.js
+
+fatal: not a git repository (or any of the parent directories): .git
+Building @google/gemini-cli-core...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+Running chrome devtools MCP bundling...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
+> node scripts/bundle-browser-mcp.mjs
+
+Successfully copied files.
+codex
+The first test invocation started while the build was still producing workspace outputs, so its package-resolution failures may be an artifact of overlap. I’m going to let the build finish, then rerun the required test command sequentially so the recorded result is fair.
+ exited 1 in 1m 09s:
+
+ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/a2a-server
+      Coverage enabled with v8
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 13 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/agent/executor.test.ts [ src/agent/executor.test.ts ]
+ FAIL  src/commands/memory.test.ts [ src/commands/memory.test.ts ]
+ FAIL  src/http/app.test.ts [ src/http/app.test.ts ]
+Error: Failed to resolve entry for package "@google/gemini-cli-core". The package may have incorrect main/module/exports specified in its package.json.
+  Plugin: vite:import-analysis
+  File: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/a2a-server/src/agent/executor.ts:20:7
+  7  |    GeminiEventType,
+  8  |    SimpleExtensionLoader
+  9  |  } from "@google/gemini-cli-core";
+     |          ^
+  10 |  import { v4 as uuidv4 } from "uuid";
+  11 |  import { logger } from "../utils/logger.js";
+ ❯ packageEntryFailure ../../node_modules/vite/dist/node/chunks/config.js:33435:32
+codex
+The build completed successfully. I’m rerunning both required commands sequentially into logs now so the findings file can include reliable exit codes and the tail-50 evidence the prompt asks for.
+exec
+/bin/zsh -lc "bash -lc 'set -o pipefail; npm run build 2>&1 | tee /tmp/hunt-code-build-24512.log; ec="'${PIPESTATUS[0]}; echo BUILD_EXIT:$ec | tee -a /tmp/hunt-code-build-24512.log; exit $ec'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 2.54s:
+
+> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 generate
+> node scripts/generate-git-commit-info.js
+
+fatal: not a git repository (or any of the parent directories): .git
+Building @google/gemini-cli-core...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+Running chrome devtools MCP bundling...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
+> node scripts/bundle-browser-mcp.mjs
+
+Successfully copied files.
+Copied documentation to dist/docs
+Building other workspaces in parallel...
+
+> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
+exec
+/bin/zsh -lc "bash -lc 'set -o pipefail; npm run test --workspaces --if-present -- --exclude '\\''**/sandboxManager.integration.test.ts'\\'' 2>&1 | tee /tmp/hunt-code-test-24512.log; ec="'${PIPESTATUS[0]}; echo TEST_EXIT:$ec | tee -a /tmp/hunt-code-test-24512.log; exit $ec'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512codex
+The sequential test run is now past the earlier package-resolution issue and is exercising the actual suites. I’m continuing to let it finish rather than using the earlier overlapping run as evidence.
+ exited 1 in 5m 52s:
+
+ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/a2a-server
+      Coverage enabled with v8
+
+ ✓ src/commands/command-registry.test.ts (6 tests) 3ms
+(node:77804) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77804) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 memory-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(node:77804) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 mcp-progress listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+ ✓ src/persistence/gcs.test.ts (12 tests) 12ms
+ ✓ src/commands/extensions.test.ts (8 tests) 3ms
+ ✓ src/commands/memory.test.ts (7 tests) 5ms
+ ✓ src/config/config.test.ts (25 tests) 11ms
+ ✓ src/config/settings.test.ts (3 tests) 6ms
+ ✓ src/commands/restore.test.ts (6 tests) 3ms
+ ✓ src/commands/init.test.ts (5 tests) 12ms
+ ✓ src/agent/task.test.ts (10 tests) 15ms
+ ✓ src/agent/task-event-driven.test.ts (15 tests) 23ms
+ ✓ src/http/endpoints.test.ts (5 tests) 26ms
+ ✓ src/agent/executor.test.ts (2 tests) 110ms
+codex
+The sequential registered test command failed after the CLI workspace, with 17 failing tests across UI truncation/overflow behavior and one model-steering integration failure. I’m writing the required hunt report now, including command tails and the unimplemented accepted-claim evidence from current source lines.
+exec
+/bin/zsh -lc 'tail -n 50 /tmp/hunt-code-build-24512.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+Running chrome devtools MCP bundling...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
+> node scripts/bundle-browser-mcp.mjs
+
+Successfully copied files.
+Copied documentation to dist/docs
+Building other workspaces in parallel...
+
+> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+
+> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
+> npm run build:client && tsc -p tsconfig.build.json
+
+
+exec
+/bin/zsh -lc 'tail -n 50 /tmp/hunt-code-test-24512.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc "nl -ba packages/cli/src/interactiveCli.tsx | sed -n '34,44p;102,124p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc "nl -ba packages/cli/src/ui/components/shared/ScrollableList.tsx | sed -n '31,39p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512exec
+/bin/zsh -lc "nl -ba packages/cli/src/ui/components/shared/VirtualizedList.tsx | sed -n '25,35p;119,128p;449,457p;470,479p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
+[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
+	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Experiments loaded {
+  experimentIds: [],
+  flags: []
+}
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+ succeeded in 0ms:
+    31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+    32	  hasFocus: boolean;
+    33	  width?: string | number;
+    34	  scrollbar?: boolean;
+    35	  stableScrollback?: boolean;
+    36	  copyModeEnabled?: boolean;
+    37	  isStatic?: boolean;
+    38	  fixedItemHeight?: boolean;
+    39	}
+ succeeded in 0ms:
+    34	import { MouseProvider } from './ui/contexts/MouseContext.js';
+    35	import { StreamingState } from './ui/types.js';
+    36	import { computeTerminalTitle } from './utils/windowTitle.js';
+    37	
+    38	import { SessionStatsProvider } from './ui/contexts/SessionContext.js';
+    39	import { VimModeProvider } from './ui/contexts/VimModeContext.js';
+    40	import { KeyMatchersProvider } from './ui/hooks/useKeyMatchers.js';
+    41	import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+    42	import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+    43	import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+    44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+   102	    return (
+   103	      <SettingsContext.Provider value={settings}>
+   104	        <KeyMatchersProvider value={matchers}>
+   105	          <KeypressProvider config={config}>
+   106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+   107	              <TerminalProvider>
+   108	                <ScrollProvider>
+   109	                  <OverflowProvider>
+   110	                    <SessionStatsProvider>
+ succeeded in 0ms:
+    25	export type VirtualizedListProps<T> = {
+    26	  data: T[];
+    27	  renderItem: (info: { item: T; index: number }) => React.ReactElement;
+    28	  estimatedItemHeight: (index: number) => number;
+    29	  keyExtractor: (item: T, index: number) => string;
+    30	  initialScrollIndex?: number;
+    31	  initialScrollOffsetInIndex?: number;
+    32	  scrollbarThumbColor?: string;
+    33	  renderStatic?: boolean;
+    34	  isStatic?: boolean;
+    35	  isStaticItem?: (item: T, index: number) => boolean;
+   119	  const {
+   120	    data,
+   121	    renderItem,
+   122	    estimatedItemHeight,
+   123	    keyExtractor,
+   124	    initialScrollIndex,
+   125	    initialScrollOffsetInIndex,
+   126	    renderStatic,
+   127	    isStatic,
+exec
+/bin/zsh -lc 'rg -n "Test Files  8 failed|17 failed|FAIL  src/ui|FAIL  src/integration|TEST_EXIT" /tmp/hunt-code-test-24512.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+3930: FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
+3964: FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
+3979: FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
+4020: FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should adjust maxHeight based on terminal rows
+4052: FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should use minimum maxHeight of 4
+4084: FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should toggle expansion when global Ctrl+O is handled
+4127: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
+4149: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for Edit tool using confirmationDetails
+4169: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for Rejected Edit tool
+4189: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for WriteFile tool
+4209: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for Rejected WriteFile tool
+4229: FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > Toggleable Diff View (Alternate Buffer) > shows diff content by default when NOT in alternate buffer mode
+4249: FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
+4268: FAIL  src/ui/components/messages/ToolMessage.test.tsx > <ToolMessage /> > Truncation > applies truncation for Kind.Agent when availableTerminalHeight is provided
+4305: FAIL  src/ui/components/messages/ToolOverflowConsistencyChecks.test.tsx > ToolOverflowConsistencyChecks: ToolGroupMessage and ToolResultDisplay synchronization > should ensure ToolGroupMessage correctly reports overflow in Standard mode
+4333: FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
+4355: FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the tail of the content when overflowDirection is top (string default)
+4377: Test Files  8 failed | 427 passed (435)
+4378:      Tests  17 failed | 6427 passed | 4 skipped (6448)
+5190:TEST_EXIT:1
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md && sed -n '1,40p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+## Build: PASS
+## Tests: FAIL
+
+## Finding F1 — Registered workspace tests fail
+**Severity**: blocker
+**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
+**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
+
+```text
+FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
+FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
+FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
+FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
+FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
+FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
+Test Files  8 failed | 427 passed (435)
+Tests  17 failed | 6427 passed | 4 skipped (6448)
+TEST_EXIT:1
+```
+
+Required command records:
+
+```text
+Build exit code: 0
+Test exit code: 1
+```
+
+Tail 50 lines of `npm run build`:
+
+```text
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+Running chrome devtools MCP bundling...
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
+> node scripts/bundle-browser-mcp.mjs
+
+Successfully copied files.
+Copied documentation to dist/docs
+Building other workspaces in parallel...
+
+> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+
+> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
+> npm run build:client && tsc -p tsconfig.build.json
+
+
+> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+
+> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build
+> npm run build:dev
+
+
+> @google/gemini-cli-test-utils@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+
+> @google/gemini-cli-a2a-server@0.36.0-nightly.20260317.2f90b4653 build
+> node ../../scripts/build_package.js
+
+
+> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build:dev
+> node esbuild.js
+
+
+> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build:client
+> node esbuild.client.js
+
+Successfully copied files.
+Successfully copied files.
+[watch] build started
+Successfully copied files.
+Successfully copied files.
+[watch] build finished
+BUILD_EXIT:0
+```
+
+Tail 50 lines of `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`:
+
+```text
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
+[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
+	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Experiments loaded {
+  experimentIds: [],
+  flags: []
+}
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
+Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
+
+ ✓ src/agent.integration.test.ts (5 tests) 586ms
+   ✓ GeminiCliAgent Integration > resumes a session  528ms
+
+ Test Files  4 passed (4)
+      Tests  16 passed (16)
+   Start at  01:46:16
+   Duration  2.10s (transform 631ms, setup 0ms, collect 5.37s, tests 818ms, environment 0ms, prepare 176ms)
+
+
+> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 test
+> vitest run --exclude **/sandboxManager.integration.test.ts
+
+
+ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/vscode-ide-companion
+
+ ✓ src/open-files-manager.test.ts (17 tests) 12ms
+ ✓ src/extension.test.ts (11 tests) 17ms
+ ✓ src/ide-server.test.ts (13 tests | 1 skipped) 47ms
+
+ Test Files  3 passed (3)
+      Tests  40 passed | 1 skipped (41)
+   Start at  01:46:19
+   Duration  1.50s (transform 646ms, setup 0ms, collect 2.63s, tests 75ms, environment 0ms, prepare 126ms)
+
+TEST_EXIT:1
+```
+
+**Fix**: Restore the expected standard-mode overflow/truncation and refresh behavior, then rerun the full registered workspace test command until it exits 0.
+
+## Finding F2 — Startup MouseProvider/ScrollProvider cleanup was not applied
+**Severity**: warning
+**File**: packages/cli/src/interactiveCli.tsx:34
+**What**: Accepted claim C2 says `AppWrapper` must remove the outer `MouseProvider` and `ScrollProvider` wrappers and their imports because `AppContainer` owns the dynamic providers. The current file still imports and renders both providers:
+
+```text
+34	import { MouseProvider } from './ui/contexts/MouseContext.js';
+44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+107	              <TerminalProvider>
+108	                <ScrollProvider>
+...
+122	                </ScrollProvider>
+123	              </TerminalProvider>
+124	            </MouseProvider>
+```
+
+**Fix**: Remove the startup-level `MouseProvider` and `ScrollProvider` wrappers and unused imports, leaving the rest of the provider tree intact.
+
+## Finding F3 — Dead `isStatic` VirtualizedList prop remains
+**Severity**: warning
+**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
+**What**: Accepted claim C3 says to remove `isStatic` from `VirtualizedListProps`, stop destructuring it, and simplify observer guards to `!fixedItemHeight`. The current file still exposes and uses `isStatic`:
+
+```text
+34	  isStatic?: boolean;
+127	    isStatic,
+449	        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
+456	        if (!isStatic && !fixedItemHeight) {
+```
+
+**Fix**: Remove `isStatic` from the prop surface/destructuring and simplify the guards to depend only on `fixedItemHeight`.
+
+## Finding F4 — ScrollableList still redeclares inherited props
+**Severity**: warning
+**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
+**What**: Accepted claim C4 says `ScrollableListProps` should keep only `hasFocus` as the prop specific to `ScrollableList`, and remove redeclarations of inherited `VirtualizedListProps` including `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, `isStatic`, and `fixedItemHeight`. The current interface still redeclares them:
+
+```text
+31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+32	  hasFocus: boolean;
+33	  width?: string | number;
+34	  scrollbar?: boolean;
+35	  stableScrollback?: boolean;
+36	  copyModeEnabled?: boolean;
+37	  isStatic?: boolean;
+38	  fixedItemHeight?: boolean;
+39	}
+```
+
+**Fix**: Remove the duplicate inherited declarations and remove `isStatic` in line with C3.
+
+## Finding F5 — Draft readiness comment remains unchanged
+**Severity**: warning
+**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:470
+**What**: Accepted claim C5 says to replace the draft multi-line readiness comment with a concise invariant. The current comment still contains the draft "Wait" and repeated "MUST" language:
+
+```text
+470	  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+471	  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+472	  // Wait, if it's not static and no width we need to wait for measure.
+473	  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+474	  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+475	  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
+```
+
+**Fix**: Replace the draft commentary with the concise invariant described in C5.
+apply_patch(auto_approved=true) exited 0 in 28ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc4543462fb729592017915368e50932cfc3da23
+--- /dev/null
++++ b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+@@ -0,0 +1,205 @@
++## Build: PASS
++## Tests: FAIL
++
++## Finding F1 — Registered workspace tests fail
++**Severity**: blocker
++**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
++**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
++
++```text
++FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
++FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
++FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
++FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
++FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
++FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
++Test Files  8 failed | 427 passed (435)
++Tests  17 failed | 6427 passed | 4 skipped (6448)
++TEST_EXIT:1
++```
++
++Required command records:
++
++```text
++Build exit code: 0
++Test exit code: 1
++```
++
++Tail 50 lines of `npm run build`:
++
++```text
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++Running chrome devtools MCP bundling...
++
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
++> node scripts/bundle-browser-mcp.mjs
++
++Successfully copied files.
++Copied documentation to dist/docs
++Building other workspaces in parallel...
++
++> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:client && tsc -p tsconfig.build.json
++
++
++> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:dev
++
++
++> @google/gemini-cli-test-utils@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-a2a-server@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build:dev
++> node esbuild.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build:client
++> node esbuild.client.js
++
++Successfully copied files.
++Successfully copied files.
++[watch] build started
++Successfully copied files.
++Successfully copied files.
++[watch] build finished
++BUILD_EXIT:0
++```
++
++Tail 50 lines of `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`:
++
++```text
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
++	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Experiments loaded {
++  experimentIds: [],
++  flags: []
++}
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
++(Use `node --trace-warnings ...` to show where the warning was created)
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++ ✓ src/agent.integration.test.ts (5 tests) 586ms
++   ✓ GeminiCliAgent Integration > resumes a session  528ms
++
++ Test Files  4 passed (4)
++      Tests  16 passed (16)
++   Start at  01:46:16
++   Duration  2.10s (transform 631ms, setup 0ms, collect 5.37s, tests 818ms, environment 0ms, prepare 176ms)
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 test
++> vitest run --exclude **/sandboxManager.integration.test.ts
++
++
++ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/vscode-ide-companion
++
++ ✓ src/open-files-manager.test.ts (17 tests) 12ms
++ ✓ src/extension.test.ts (11 tests) 17ms
++ ✓ src/ide-server.test.ts (13 tests | 1 skipped) 47ms
++
++ Test Files  3 passed (3)
++      Tests  40 passed | 1 skipped (41)
++   Start at  01:46:19
++   Duration  1.50s (transform 646ms, setup 0ms, collect 2.63s, tests 75ms, environment 0ms, prepare 126ms)
++
++TEST_EXIT:1
++```
++
++**Fix**: Restore the expected standard-mode overflow/truncation and refresh behavior, then rerun the full registered workspace test command until it exits 0.
++
++## Finding F2 — Startup MouseProvider/ScrollProvider cleanup was not applied
++**Severity**: warning
++**File**: packages/cli/src/interactiveCli.tsx:34
++**What**: Accepted claim C2 says `AppWrapper` must remove the outer `MouseProvider` and `ScrollProvider` wrappers and their imports because `AppContainer` owns the dynamic providers. The current file still imports and renders both providers:
++
++```text
++34	import { MouseProvider } from './ui/contexts/MouseContext.js';
++44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
++106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
++107	              <TerminalProvider>
++108	                <ScrollProvider>
++...
++122	                </ScrollProvider>
++123	              </TerminalProvider>
++124	            </MouseProvider>
++```
++
++**Fix**: Remove the startup-level `MouseProvider` and `ScrollProvider` wrappers and unused imports, leaving the rest of the provider tree intact.
++
++## Finding F3 — Dead `isStatic` VirtualizedList prop remains
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
++**What**: Accepted claim C3 says to remove `isStatic` from `VirtualizedListProps`, stop destructuring it, and simplify observer guards to `!fixedItemHeight`. The current file still exposes and uses `isStatic`:
++
++```text
++34	  isStatic?: boolean;
++127	    isStatic,
++449	        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++456	        if (!isStatic && !fixedItemHeight) {
++```
++
++**Fix**: Remove `isStatic` from the prop surface/destructuring and simplify the guards to depend only on `fixedItemHeight`.
++
++## Finding F4 — ScrollableList still redeclares inherited props
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
++**What**: Accepted claim C4 says `ScrollableListProps` should keep only `hasFocus` as the prop specific to `ScrollableList`, and remove redeclarations of inherited `VirtualizedListProps` including `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, `isStatic`, and `fixedItemHeight`. The current interface still redeclares them:
++
++```text
++31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
++32	  hasFocus: boolean;
++33	  width?: string | number;
++34	  scrollbar?: boolean;
++35	  stableScrollback?: boolean;
++36	  copyModeEnabled?: boolean;
++37	  isStatic?: boolean;
++38	  fixedItemHeight?: boolean;
++39	}
++```
++
++**Fix**: Remove the duplicate inherited declarations and remove `isStatic` in line with C3.
++
++## Finding F5 — Draft readiness comment remains unchanged
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:470
++**What**: Accepted claim C5 says to replace the draft multi-line readiness comment with a concise invariant. The current comment still contains the draft "Wait" and repeated "MUST" language:
++
++```text
++470	  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
++471	  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
++472	  // Wait, if it's not static and no width we need to wait for measure.
++473	  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
++474	  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
++475	  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++```
++
++**Fix**: Replace the draft commentary with the concise invariant described in C5.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc4543462fb729592017915368e50932cfc3da23
+--- /dev/null
++++ b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+@@ -0,0 +1,205 @@
++## Build: PASS
++## Tests: FAIL
++
++## Finding F1 — Registered workspace tests fail
++**Severity**: blocker
++**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
++**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
++
++```text
++FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
++FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
++FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
++FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
++FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
++FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
++Test Files  8 failed | 427 passed (435)
++Tests  17 failed | 6427 passed | 4 skipped (6448)
++TEST_EXIT:1
++```
++
++Required command records:
++
++```text
++Build exit code: 0
++Test exit code: 1
++```
++
++Tail 50 lines of `npm run build`:
++
++```text
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++Running chrome devtools MCP bundling...
++
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
++> node scripts/bundle-browser-mcp.mjs
++
++Successfully copied files.
++Copied documentation to dist/docs
++Building other workspaces in parallel...
++
++> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:client && tsc -p tsconfig.build.json
++
++
++> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:dev
++
++
++> @google/gemini-cli-test-utils@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-a2a-server@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build:dev
++> node esbuild.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build:client
++> node esbuild.client.js
++
++Successfully copied files.
++Successfully copied files.
++[watch] build started
++Successfully copied files.
++Successfully copied files.
++[watch] build finished
++BUILD_EXIT:0
++```
++
++Tail 50 lines of `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`:
++
++```text
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
++	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Experiments loaded {
++  experimentIds: [],
++  flags: []
++}
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
++(Use `node --trace-warnings ...` to show where the warning was created)
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++ ✓ src/agent.integration.test.ts (5 tests) 586ms
++   ✓ GeminiCliAgent Integration > resumes a session  528ms
++
++ Test Files  4 passed (4)
++      Tests  16 passed (16)
++   Start at  01:46:16
++   Duration  2.10s (transform 631ms, setup 0ms, collect 5.37s, tests 818ms, environment 0ms, prepare 176ms)
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 test
++> vitest run --exclude **/sandboxManager.integration.test.ts
++
++
++ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/vscode-ide-companion
++
++ ✓ src/open-files-manager.test.ts (17 tests) 12ms
++ ✓ src/extension.test.ts (11 tests) 17ms
++ ✓ src/ide-server.test.ts (13 tests | 1 skipped) 47ms
++
++ Test Files  3 passed (3)
++      Tests  40 passed | 1 skipped (41)
++   Start at  01:46:19
++   Duration  1.50s (transform 646ms, setup 0ms, collect 2.63s, tests 75ms, environment 0ms, prepare 126ms)
++
++TEST_EXIT:1
++```
++
++**Fix**: Restore the expected standard-mode overflow/truncation and refresh behavior, then rerun the full registered workspace test command until it exits 0.
++
++## Finding F2 — Startup MouseProvider/ScrollProvider cleanup was not applied
++**Severity**: warning
++**File**: packages/cli/src/interactiveCli.tsx:34
++**What**: Accepted claim C2 says `AppWrapper` must remove the outer `MouseProvider` and `ScrollProvider` wrappers and their imports because `AppContainer` owns the dynamic providers. The current file still imports and renders both providers:
++
++```text
++34	import { MouseProvider } from './ui/contexts/MouseContext.js';
++44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
++106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
++107	              <TerminalProvider>
++108	                <ScrollProvider>
++...
++122	                </ScrollProvider>
++123	              </TerminalProvider>
++124	            </MouseProvider>
++```
++
++**Fix**: Remove the startup-level `MouseProvider` and `ScrollProvider` wrappers and unused imports, leaving the rest of the provider tree intact.
++
++## Finding F3 — Dead `isStatic` VirtualizedList prop remains
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
++**What**: Accepted claim C3 says to remove `isStatic` from `VirtualizedListProps`, stop destructuring it, and simplify observer guards to `!fixedItemHeight`. The current file still exposes and uses `isStatic`:
++
++```text
++34	  isStatic?: boolean;
++127	    isStatic,
++449	        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++456	        if (!isStatic && !fixedItemHeight) {
++```
++
++**Fix**: Remove `isStatic` from the prop surface/destructuring and simplify the guards to depend only on `fixedItemHeight`.
++
++## Finding F4 — ScrollableList still redeclares inherited props
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
++**What**: Accepted claim C4 says `ScrollableListProps` should keep only `hasFocus` as the prop specific to `ScrollableList`, and remove redeclarations of inherited `VirtualizedListProps` including `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, `isStatic`, and `fixedItemHeight`. The current interface still redeclares them:
++
++```text
++31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
++32	  hasFocus: boolean;
++33	  width?: string | number;
++34	  scrollbar?: boolean;
++35	  stableScrollback?: boolean;
++36	  copyModeEnabled?: boolean;
++37	  isStatic?: boolean;
++38	  fixedItemHeight?: boolean;
++39	}
++```
++
++**Fix**: Remove the duplicate inherited declarations and remove `isStatic` in line with C3.
++
++## Finding F5 — Draft readiness comment remains unchanged
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:470
++**What**: Accepted claim C5 says to replace the draft multi-line readiness comment with a concise invariant. The current comment still contains the draft "Wait" and repeated "MUST" language:
++
++```text
++470	  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
++471	  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
++472	  // Wait, if it's not static and no width we need to wait for measure.
++473	  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
++474	  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
++475	  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++```
++
++**Fix**: Replace the draft commentary with the concise invariant described in C5.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24512 succeeded in 0ms:
+## Build: PASS
+## Tests: FAIL
+
+## Finding F1 — Registered workspace tests fail
+**Severity**: blocker
+**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
+**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
+
+```text
+FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
+FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
+FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
+FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
+FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
+FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
+Test Files  8 failed | 427 passed (435)
+Tests  17 failed | 6427 passed | 4 skipped (6448)
+TEST_EXIT:1
+```
+
+file update:
+diff --git a/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc4543462fb729592017915368e50932cfc3da23
+--- /dev/null
++++ b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+@@ -0,0 +1,205 @@
++## Build: PASS
++## Tests: FAIL
++
++## Finding F1 — Registered workspace tests fail
++**Severity**: blocker
++**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
++**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
++
++```text
++FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
++FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
++FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
++FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
++FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
++FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
++Test Files  8 failed | 427 passed (435)
++Tests  17 failed | 6427 passed | 4 skipped (6448)
++TEST_EXIT:1
++```
++
++Required command records:
++
++```text
++Build exit code: 0
++Test exit code: 1
++```
++
++Tail 50 lines of `npm run build`:
++
++```text
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++Running chrome devtools MCP bundling...
++
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
++> node scripts/bundle-browser-mcp.mjs
++
++Successfully copied files.
++Copied documentation to dist/docs
++Building other workspaces in parallel...
++
++> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:client && tsc -p tsconfig.build.json
++
++
++> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:dev
++
++
++> @google/gemini-cli-test-utils@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-a2a-server@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build:dev
++> node esbuild.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build:client
++> node esbuild.client.js
++
++Successfully copied files.
++Successfully copied files.
++[watch] build started
++Successfully copied files.
++Successfully copied files.
++[watch] build finished
++BUILD_EXIT:0
++```
++
++Tail 50 lines of `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`:
++
++```text
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
++	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Experiments loaded {
++  experimentIds: [],
++  flags: []
++}
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
++(Use `node --trace-warnings ...` to show where the warning was created)
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++ ✓ src/agent.integration.test.ts (5 tests) 586ms
++   ✓ GeminiCliAgent Integration > resumes a session  528ms
++
++ Test Files  4 passed (4)
++      Tests  16 passed (16)
++   Start at  01:46:16
++   Duration  2.10s (transform 631ms, setup 0ms, collect 5.37s, tests 818ms, environment 0ms, prepare 176ms)
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 test
++> vitest run --exclude **/sandboxManager.integration.test.ts
++
++
++ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/vscode-ide-companion
++
++ ✓ src/open-files-manager.test.ts (17 tests) 12ms
++ ✓ src/extension.test.ts (11 tests) 17ms
++ ✓ src/ide-server.test.ts (13 tests | 1 skipped) 47ms
++
++ Test Files  3 passed (3)
++      Tests  40 passed | 1 skipped (41)
++   Start at  01:46:19
++   Duration  1.50s (transform 646ms, setup 0ms, collect 2.63s, tests 75ms, environment 0ms, prepare 126ms)
++
++TEST_EXIT:1
++```
++
++**Fix**: Restore the expected standard-mode overflow/truncation and refresh behavior, then rerun the full registered workspace test command until it exits 0.
++
++## Finding F2 — Startup MouseProvider/ScrollProvider cleanup was not applied
++**Severity**: warning
++**File**: packages/cli/src/interactiveCli.tsx:34
++**What**: Accepted claim C2 says `AppWrapper` must remove the outer `MouseProvider` and `ScrollProvider` wrappers and their imports because `AppContainer` owns the dynamic providers. The current file still imports and renders both providers:
++
++```text
++34	import { MouseProvider } from './ui/contexts/MouseContext.js';
++44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
++106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
++107	              <TerminalProvider>
++108	                <ScrollProvider>
++...
++122	                </ScrollProvider>
++123	              </TerminalProvider>
++124	            </MouseProvider>
++```
++
++**Fix**: Remove the startup-level `MouseProvider` and `ScrollProvider` wrappers and unused imports, leaving the rest of the provider tree intact.
++
++## Finding F3 — Dead `isStatic` VirtualizedList prop remains
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
++**What**: Accepted claim C3 says to remove `isStatic` from `VirtualizedListProps`, stop destructuring it, and simplify observer guards to `!fixedItemHeight`. The current file still exposes and uses `isStatic`:
++
++```text
++34	  isStatic?: boolean;
++127	    isStatic,
++449	        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++456	        if (!isStatic && !fixedItemHeight) {
++```
++
++**Fix**: Remove `isStatic` from the prop surface/destructuring and simplify the guards to depend only on `fixedItemHeight`.
++
++## Finding F4 — ScrollableList still redeclares inherited props
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
++**What**: Accepted claim C4 says `ScrollableListProps` should keep only `hasFocus` as the prop specific to `ScrollableList`, and remove redeclarations of inherited `VirtualizedListProps` including `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, `isStatic`, and `fixedItemHeight`. The current interface still redeclares them:
++
++```text
++31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
++32	  hasFocus: boolean;
++33	  width?: string | number;
++34	  scrollbar?: boolean;
++35	  stableScrollback?: boolean;
++36	  copyModeEnabled?: boolean;
++37	  isStatic?: boolean;
++38	  fixedItemHeight?: boolean;
++39	}
++```
++
++**Fix**: Remove the duplicate inherited declarations and remove `isStatic` in line with C3.
++
++## Finding F5 — Draft readiness comment remains unchanged
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:470
++**What**: Accepted claim C5 says to replace the draft multi-line readiness comment with a concise invariant. The current comment still contains the draft "Wait" and repeated "MUST" language:
++
++```text
++470	  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
++471	  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
++472	  // Wait, if it's not static and no width we need to wait for measure.
++473	  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
++474	  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
++475	  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++```
++
++**Fix**: Replace the draft commentary with the concise invariant described in C5.
+
+codex
+Wrote the adversarial review findings to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md)
+
+Summary: build passes, registered workspace tests fail with exit code 1, so F1 is a blocker. I also recorded warnings for the accepted cleanup claims that were not applied in the current source (`MouseProvider`/`ScrollProvider`, `isStatic`, duplicate `ScrollableList` props, and the draft readiness comment).
+file update:
+diff --git a/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc4543462fb729592017915368e50932cfc3da23
+--- /dev/null
++++ b/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md
+@@ -0,0 +1,205 @@
++## Build: PASS
++## Tests: FAIL
++
++## Finding F1 — Registered workspace tests fail
++**Severity**: blocker
++**File**: packages/cli/src/ui/AppContainer.test.tsx:3964
++**What**: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'` exits 1. The CLI workspace has 8 failed test files and 17 failed tests, including the model steering integration test, standard-mode refresh/clear behavior, folder trust overflow hints, dense tool diff rendering, shell/tool truncation, and tool overflow direction checks. Representative failures from the log:
++
++```text
++FAIL  src/integration-tests/modelSteering.test.tsx > Model Steering Integration > should steer the model using a hint during a tool turn
++FAIL  src/ui/AppContainer.test.tsx > AppContainer State Management > Submission Handling > resets expansion state on submission when not in alternate buffer
++FAIL  src/ui/components/FolderTrustDialog.test.tsx > FolderTrustDialog > should truncate discovery results when they exceed maxDiscoveryHeight
++FAIL  src/ui/components/messages/DenseToolMessage.test.tsx > DenseToolMessage > renders correctly for file diff results with stats
++FAIL  src/ui/components/messages/ShellToolMessage.test.tsx > <ShellToolMessage /> > Height Constraints > fully expands in standard mode when availableTerminalHeight is undefined
++FAIL  src/ui/components/messages/ToolResultDisplayOverflow.test.tsx > ToolResultDisplay Overflow > shows the head of the content when overflowDirection is bottom (string)
++Test Files  8 failed | 427 passed (435)
++Tests  17 failed | 6427 passed | 4 skipped (6448)
++TEST_EXIT:1
++```
++
++Required command records:
++
++```text
++Build exit code: 0
++Test exit code: 1
++```
++
++Tail 50 lines of `npm run build`:
++
++```text
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++Running chrome devtools MCP bundling...
++
++> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 bundle:browser-mcp
++> node scripts/bundle-browser-mcp.mjs
++
++Successfully copied files.
++Copied documentation to dist/docs
++Building other workspaces in parallel...
++
++> @google/gemini-cli-sdk@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:client && tsc -p tsconfig.build.json
++
++
++> @google/gemini-cli@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build
++> npm run build:dev
++
++
++> @google/gemini-cli-test-utils@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> @google/gemini-cli-a2a-server@0.36.0-nightly.20260317.2f90b4653 build
++> node ../../scripts/build_package.js
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 build:dev
++> node esbuild.js
++
++
++> @google/gemini-cli-devtools@0.36.0-nightly.20260317.2f90b4653 build:client
++> node esbuild.client.js
++
++Successfully copied files.
++Successfully copied files.
++[watch] build started
++Successfully copied files.
++Successfully copied files.
++[watch] build finished
++BUILD_EXIT:0
++```
++
++Tail 50 lines of `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`:
++
++```text
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > resumes a session
++[Routing] Selected model: gemini-2.0-flash (Source: agent-router/override, Latency: 0ms)
++	[Routing] Reasoning: Routing bypassed by forced model directive. Using: gemini-2.0-flash
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Experiments loaded {
++  experimentIds: [],
++  flags: []
++}
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++(node:86136) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 model-changed listeners added to [CoreEventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
++(Use `node --trace-warnings ...` to show where the warning was created)
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++stdout | src/agent.integration.test.ts > GeminiCliAgent Integration > propagates errors from dynamic instructions
++Ignore file not found: /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/sdk/.geminiignore, continue without it.
++
++ ✓ src/agent.integration.test.ts (5 tests) 586ms
++   ✓ GeminiCliAgent Integration > resumes a session  528ms
++
++ Test Files  4 passed (4)
++      Tests  16 passed (16)
++   Start at  01:46:16
++   Duration  2.10s (transform 631ms, setup 0ms, collect 5.37s, tests 818ms, environment 0ms, prepare 176ms)
++
++
++> gemini-cli-vscode-ide-companion@0.36.0-nightly.20260317.2f90b4653 test
++> vitest run --exclude **/sandboxManager.integration.test.ts
++
++
++ RUN  v3.2.4 /private/tmp/refactor-eq-workdir/cleanroom-v2/24512/packages/vscode-ide-companion
++
++ ✓ src/open-files-manager.test.ts (17 tests) 12ms
++ ✓ src/extension.test.ts (11 tests) 17ms
++ ✓ src/ide-server.test.ts (13 tests | 1 skipped) 47ms
++
++ Test Files  3 passed (3)
++      Tests  40 passed | 1 skipped (41)
++   Start at  01:46:19
++   Duration  1.50s (transform 646ms, setup 0ms, collect 2.63s, tests 75ms, environment 0ms, prepare 126ms)
++
++TEST_EXIT:1
++```
++
++**Fix**: Restore the expected standard-mode overflow/truncation and refresh behavior, then rerun the full registered workspace test command until it exits 0.
++
++## Finding F2 — Startup MouseProvider/ScrollProvider cleanup was not applied
++**Severity**: warning
++**File**: packages/cli/src/interactiveCli.tsx:34
++**What**: Accepted claim C2 says `AppWrapper` must remove the outer `MouseProvider` and `ScrollProvider` wrappers and their imports because `AppContainer` owns the dynamic providers. The current file still imports and renders both providers:
++
++```text
++34	import { MouseProvider } from './ui/contexts/MouseContext.js';
++44	import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
++106	            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
++107	              <TerminalProvider>
++108	                <ScrollProvider>
++...
++122	                </ScrollProvider>
++123	              </TerminalProvider>
++124	            </MouseProvider>
++```
++
++**Fix**: Remove the startup-level `MouseProvider` and `ScrollProvider` wrappers and unused imports, leaving the rest of the provider tree intact.
++
++## Finding F3 — Dead `isStatic` VirtualizedList prop remains
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
++**What**: Accepted claim C3 says to remove `isStatic` from `VirtualizedListProps`, stop destructuring it, and simplify observer guards to `!fixedItemHeight`. The current file still exposes and uses `isStatic`:
++
++```text
++34	  isStatic?: boolean;
++127	    isStatic,
++449	        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++456	        if (!isStatic && !fixedItemHeight) {
++```
++
++**Fix**: Remove `isStatic` from the prop surface/destructuring and simplify the guards to depend only on `fixedItemHeight`.
++
++## Finding F4 — ScrollableList still redeclares inherited props
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
++**What**: Accepted claim C4 says `ScrollableListProps` should keep only `hasFocus` as the prop specific to `ScrollableList`, and remove redeclarations of inherited `VirtualizedListProps` including `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, `isStatic`, and `fixedItemHeight`. The current interface still redeclares them:
++
++```text
++31	interface ScrollableListProps<T> extends VirtualizedListProps<T> {
++32	  hasFocus: boolean;
++33	  width?: string | number;
++34	  scrollbar?: boolean;
++35	  stableScrollback?: boolean;
++36	  copyModeEnabled?: boolean;
++37	  isStatic?: boolean;
++38	  fixedItemHeight?: boolean;
++39	}
++```
++
++**Fix**: Remove the duplicate inherited declarations and remove `isStatic` in line with C3.
++
++## Finding F5 — Draft readiness comment remains unchanged
++**Severity**: warning
++**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:470
++**What**: Accepted claim C5 says to replace the draft multi-line readiness comment with a concise invariant. The current comment still contains the draft "Wait" and repeated "MUST" language:
++
++```text
++470	  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
++471	  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
++472	  // Wait, if it's not static and no width we need to wait for measure.
++473	  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
++474	  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
++475	  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++```
++
++**Fix**: Replace the draft commentary with the concise invariant described in C5.
+
+tokens used
+216,830
+Wrote the adversarial review findings to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24512/gates/hunt-code-round-1.md)
+
+Summary: build passes, registered workspace tests fail with exit code 1, so F1 is a blocker. I also recorded warnings for the accepted cleanup claims that were not applied in the current source (`MouseProvider`/`ScrollProvider`, `isStatic`, duplicate `ScrollableList` props, and the draft readiness comment).

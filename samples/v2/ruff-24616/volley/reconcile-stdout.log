@@ -1,0 +1,337 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24616
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9af2-e96f-7bd0-943a-56158611c2fa
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll reconcile the two markdown specs directly and write only the next-round markdown file. I’m going to read the existing claims and hunt findings first, then patch the spec without touching repository code.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24616exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24616 succeeded in 0ms:
+## Finding F1 — Parser test config omits required dependency shape
+**Severity**: warning
+**Claim**: C3
+**What**: The claim says to replace parser unit tests with a "small local `TestConfig`" that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`, but it does not say that the local config must deserialize `[project] dependencies`. Without that field shape, `has_dependencies` cannot preserve the parser-time rejection for multiple dependency sections.
+**Evidence**: `crates/mdtest/src/parser.rs:861` deserializes each TOML config into the generic config type, `crates/mdtest/src/parser.rs:863` gates the duplicate-dependency error on `config.has_dependencies()`, and the test at `crates/mdtest/src/parser.rs:2108` asserts the exact duplicate-dependencies error for two `[project] dependencies` blocks.
+**Fix**: Clarify C3 to require a test-only config with a `project: Option<TestProject>` field and `TestProject { dependencies: Option<Vec<String>> }` (with the same serde kebab-case behavior needed by the test), and implement `has_dependencies` from that field.
+
+## Finding F2 — Dependency boundary cleanup is underspecified
+**Severity**: warning
+**Claim**: C1
+**What**: C1's justification says moving the ty database out of `mdtest` removes ty-only dependencies from the shared crate, but the claim only describes source moves. It does not specify the required `Cargo.toml` follow-through: ty database dependencies must move out of normal `mdtest` dependencies, while ty-powered mdtest unit tests still need access to them as test-only dependencies.
+**Evidence**: `crates/mdtest/Cargo.toml:25` through `crates/mdtest/Cargo.toml:28` currently list `ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core` as normal dependencies. The mdtest test modules still use those APIs at `crates/mdtest/src/assertion.rs:491` through `crates/mdtest/src/assertion.rs:494` and `crates/mdtest/src/matcher.rs:431` through `crates/mdtest/src/matcher.rs:434`.
+**Fix**: Narrow C1 to explicitly move ty-specific runtime dependencies from `mdtest` to `ty_test`, and keep any ty crates needed solely by mdtest unit tests under `mdtest` dev-dependencies. If normal dependencies are intentionally left unchanged, remove the "removes accidental ty-only dependencies" justification.
+
+## Finding F3 — MdtestConfig trait location is ambiguous
+**Severity**: warning
+**Claim**: C2
+**What**: C2 targets `crates/mdtest/src/config.rs` and says mdtest should be left with "only the generic `MdtestConfig` trait", but that trait is not in `config.rs`; it is currently part of the parser API. An implementer could move the trait into `config.rs` while moving ty's `MarkdownTestConfig` out, changing the public API path unnecessarily.
+**Evidence**: `MdtestConfig` is declared at `crates/mdtest/src/parser.rs:25`, and the parser API uses it directly at `crates/mdtest/src/parser.rs:34`.
+**Fix**: Clarify that C2 moves only ty's concrete config types out of `mdtest`; the generic trait should remain at `mdtest::parser::MdtestConfig` unless the spec explicitly accepts an API-path change.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Move ty-specific database support out of the shared mdtest API
+**File**: `crates/mdtest/src/db.rs`:24
+**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`.
+**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
+**Justification**: Keeping ty's semantic database out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only dependencies from the shared crate.
+
+### C2 — Move ty markdown configuration out of mdtest
+**File**: `crates/mdtest/src/config.rs`:22
+**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with only the generic `MdtestConfig` trait and a minimal test-only config for its internal parser tests.
+**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
+**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
+
+### C3 — Stop using ty configuration in parser unit tests
+**File**: `crates/mdtest/src/parser.rs`:976
+**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`.
+**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
+**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
+
+codex
+The hunt only raised warnings, no blockers, so the accepted set can survive with narrower wording. I’m updating C1, C2, and C3 to include the missing constraints and adding the required retention notes.
+exec
+/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley' in /tmp/refactor-eq-workdir/cleanroom-v2/24616 succeeded in 0ms:
+total 288
+-rw-r--r--@ 1 junekim  staff  67391 Apr 17 03:18 hunt-spec-round-1-stdout.log
+-rw-r--r--@ 1 junekim  staff   3126 Apr 17 03:18 hunt-spec-round-1.md
+-rw-r--r--@ 1 junekim  staff   8199 Apr 17 03:18 reconcile-stdout.log
+-rw-r--r--@ 1 junekim  staff   4322 Apr 17 03:15 round-1-claims.md
+-rw-r--r--@ 1 junekim  staff  51684 Apr 17 03:15 round-1-codex-stdout.log
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md
+## Accepted Claims
+
+### C1 — Move ty-specific database support out of the shared mdtest API
+**File**: `crates/mdtest/src/db.rs`:24
+**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
+**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
+**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
+**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
+
+### C2 — Move ty markdown configuration out of mdtest
+**File**: `crates/mdtest/src/config.rs`:22
+**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
+**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
+**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
+**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
+
+### C3 — Stop using ty configuration in parser unit tests
+**File**: `crates/mdtest/src/parser.rs`:976
+**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
+**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
+**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
+**Hunt note**: Retained as narrowed for F1 because the local test config now explicitly preserves the `[project] dependencies` shape used by `has_dependencies` and duplicate-dependency parser errors.
+
+### C4 — Make TestFile private to the ty runner
+**File**: `crates/mdtest/src/lib.rs`:98
+**Change**: Move the public `TestFile` struct into `crates/ty_test/src/lib.rs` next to `run_test`, and update the `mdtest::{Failures, FileFailures, TestFile, ...}` import to stop re-exporting or importing `TestFile` from `mdtest`.
+**Goal link**: The goal describes `mdtest` as the home for shared assertion, diagnostic, matcher, and parser code, while `TestFile` is only runner state used by ty's mdtest execution.
+**Justification**: Keeping this runner-only wrapper private to `ty_test` trims the shared crate API and avoids exposing a type that does not serve Ruff's future separate mdtest runner.
+
+## Rejected
+
+- Remove the unrelated `.github/pr-assignee-pools.toml`, typing conformance, Ruff lint, ty static, and schema changes from the artifact: these are outside the mdtest extraction goal, but most of those files are not source refactor targets for this task and the request is to propose behavior-preserving refactor claims rather than rewrite the draft patch contents.
+- Rename `mdtest::db::Db` to `TestDb` in place without moving the ty semantic implementation: this would improve naming but keep the accidental ty dependency inside the shared crate, so it would not actually satisfy the goal's boundary clarification.
+- Make `mdtest::matcher::Matcher` public to let downstream crates reuse lower-level matching methods: this would expand the new public API and is not required by the stated extraction, which only needs `match_file` as the shared behavior.
+- Remove `MdtestConfig::has_dependencies` and let ty enforce the single-dependency-section rule after parsing: this would move an existing parser-time validation into a runner-specific layer and could change error timing and messages for invalid markdown tests.
+- Change `OutputFormat::write_error` and `write_inconsistency` to return formatted strings instead of printing GitHub annotations directly: this crosses observable output behavior for CI annotations and is not necessary to express the mdtest crate split.
+apply_patch(auto_approved=true) exited 0 in 11ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/ruff-24616/volley/round-2-claims.md b/samples/v2/ruff-24616/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3478e02fcf976948f57cadcac2b410045bf2402c
+--- /dev/null
++++ b/samples/v2/ruff-24616/volley/round-2-claims.md
+@@ -0,0 +1,36 @@
++## Accepted Claims
++
++### C1 — Move ty-specific database support out of the shared mdtest API
++**File**: `crates/mdtest/src/db.rs`:24
++**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
++**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
++**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
++**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
++
++### C2 — Move ty markdown configuration out of mdtest
++**File**: `crates/mdtest/src/config.rs`:22
++**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
++**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
++**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
++**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
++
++### C3 — Stop using ty configuration in parser unit tests
++**File**: `crates/mdtest/src/parser.rs`:976
++**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
++**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
++**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
++**Hunt note**: Retained as narrowed for F1 because the local test config now explicitly preserves the `[project] dependencies` shape used by `has_dependencies` and duplicate-dependency parser errors.
++
++### C4 — Make TestFile private to the ty runner
++**File**: `crates/mdtest/src/lib.rs`:98
++**Change**: Move the public `TestFile` struct into `crates/ty_test/src/lib.rs` next to `run_test`, and update the `mdtest::{Failures, FileFailures, TestFile, ...}` import to stop re-exporting or importing `TestFile` from `mdtest`.
++**Goal link**: The goal describes `mdtest` as the home for shared assertion, diagnostic, matcher, and parser code, while `TestFile` is only runner state used by ty's mdtest execution.
++**Justification**: Keeping this runner-only wrapper private to `ty_test` trims the shared crate API and avoids exposing a type that does not serve Ruff's future separate mdtest runner.
++
++## Rejected
++
++- Remove the unrelated `.github/pr-assignee-pools.toml`, typing conformance, Ruff lint, ty static, and schema changes from the artifact: these are outside the mdtest extraction goal, but most of those files are not source refactor targets for this task and the request is to propose behavior-preserving refactor claims rather than rewrite the draft patch contents.
++- Rename `mdtest::db::Db` to `TestDb` in place without moving the ty semantic implementation: this would improve naming but keep the accidental ty dependency inside the shared crate, so it would not actually satisfy the goal's boundary clarification.
++- Make `mdtest::matcher::Matcher` public to let downstream crates reuse lower-level matching methods: this would expand the new public API and is not required by the stated extraction, which only needs `match_file` as the shared behavior.
++- Remove `MdtestConfig::has_dependencies` and let ty enforce the single-dependency-section rule after parsing: this would move an existing parser-time validation into a runner-specific layer and could change error timing and messages for invalid markdown tests.
++- Change `OutputFormat::write_error` and `write_inconsistency` to return formatted strings instead of printing GitHub annotations directly: this crosses observable output behavior for CI annotations and is not necessary to express the mdtest crate split.
+
+file update:
+diff --git a/samples/v2/ruff-24616/volley/round-2-claims.md b/samples/v2/ruff-24616/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3478e02fcf976948f57cadcac2b410045bf2402c
+--- /dev/null
++++ b/samples/v2/ruff-24616/volley/round-2-claims.md
+@@ -0,0 +1,36 @@
++## Accepted Claims
++
++### C1 — Move ty-specific database support out of the shared mdtest API
++**File**: `crates/mdtest/src/db.rs`:24
++**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
++**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
++**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
++**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
++
++### C2 — Move ty markdown configuration out of mdtest
++**File**: `crates/mdtest/src/config.rs`:22
++**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
++**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
++**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
++**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
++
++### C3 — Stop using ty configuration in parser unit tests
++**File**: `crates/mdtest/src/parser.rs`:976
++**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
++**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
++**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
++**Hunt note**: Retained as narrowed for F1 because the local test config now explicitly preserves the `[project] dependencies` shape used by `has_dependencies` and duplicate-dependency parser errors.
++
++### C4 — Make TestFile private to the ty runner
++**File**: `crates/mdtest/src/lib.rs`:98
++**Change**: Move the public `TestFile` struct into `crates/ty_test/src/lib.rs` next to `run_test`, and update the `mdtest::{Failures, FileFailures, TestFile, ...}` import to stop re-exporting or importing `TestFile` from `mdtest`.
++**Goal link**: The goal describes `mdtest` as the home for shared assertion, diagnostic, matcher, and parser code, while `TestFile` is only runner state used by ty's mdtest execution.
++**Justification**: Keeping this runner-only wrapper private to `ty_test` trims the shared crate API and avoids exposing a type that does not serve Ruff's future separate mdtest runner.
++
++## Rejected
++
++- Remove the unrelated `.github/pr-assignee-pools.toml`, typing conformance, Ruff lint, ty static, and schema changes from the artifact: these are outside the mdtest extraction goal, but most of those files are not source refactor targets for this task and the request is to propose behavior-preserving refactor claims rather than rewrite the draft patch contents.
++- Rename `mdtest::db::Db` to `TestDb` in place without moving the ty semantic implementation: this would improve naming but keep the accidental ty dependency inside the shared crate, so it would not actually satisfy the goal's boundary clarification.
++- Make `mdtest::matcher::Matcher` public to let downstream crates reuse lower-level matching methods: this would expand the new public API and is not required by the stated extraction, which only needs `match_file` as the shared behavior.
++- Remove `MdtestConfig::has_dependencies` and let ty enforce the single-dependency-section rule after parsing: this would move an existing parser-time validation into a runner-specific layer and could change error timing and messages for invalid markdown tests.
++- Change `OutputFormat::write_error` and `write_inconsistency` to return formatted strings instead of printing GitHub annotations directly: this crosses observable output behavior for CI annotations and is not necessary to express the mdtest crate split.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24616 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Move ty-specific database support out of the shared mdtest API
+**File**: `crates/mdtest/src/db.rs`:24
+**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
+**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
+**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
+**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
+
+### C2 — Move ty markdown configuration out of mdtest
+**File**: `crates/mdtest/src/config.rs`:22
+**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
+**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
+**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
+**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
+
+### C3 — Stop using ty configuration in parser unit tests
+**File**: `crates/mdtest/src/parser.rs`:976
+**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
+**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
+file update:
+diff --git a/samples/v2/ruff-24616/volley/round-2-claims.md b/samples/v2/ruff-24616/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3478e02fcf976948f57cadcac2b410045bf2402c
+--- /dev/null
++++ b/samples/v2/ruff-24616/volley/round-2-claims.md
+@@ -0,0 +1,36 @@
++## Accepted Claims
++
++### C1 — Move ty-specific database support out of the shared mdtest API
++**File**: `crates/mdtest/src/db.rs`:24
++**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
++**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
++**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
++**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
++
++### C2 — Move ty markdown configuration out of mdtest
++**File**: `crates/mdtest/src/config.rs`:22
++**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
++**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
++**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
++**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
++
++### C3 — Stop using ty configuration in parser unit tests
++**File**: `crates/mdtest/src/parser.rs`:976
++**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
++**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
++**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
++**Hunt note**: Retained as narrowed for F1 because the local test config now explicitly preserves the `[project] dependencies` shape used by `has_dependencies` and duplicate-dependency parser errors.
++
++### C4 — Make TestFile private to the ty runner
++**File**: `crates/mdtest/src/lib.rs`:98
++**Change**: Move the public `TestFile` struct into `crates/ty_test/src/lib.rs` next to `run_test`, and update the `mdtest::{Failures, FileFailures, TestFile, ...}` import to stop re-exporting or importing `TestFile` from `mdtest`.
++**Goal link**: The goal describes `mdtest` as the home for shared assertion, diagnostic, matcher, and parser code, while `TestFile` is only runner state used by ty's mdtest execution.
++**Justification**: Keeping this runner-only wrapper private to `ty_test` trims the shared crate API and avoids exposing a type that does not serve Ruff's future separate mdtest runner.
++
++## Rejected
++
++- Remove the unrelated `.github/pr-assignee-pools.toml`, typing conformance, Ruff lint, ty static, and schema changes from the artifact: these are outside the mdtest extraction goal, but most of those files are not source refactor targets for this task and the request is to propose behavior-preserving refactor claims rather than rewrite the draft patch contents.
++- Rename `mdtest::db::Db` to `TestDb` in place without moving the ty semantic implementation: this would improve naming but keep the accidental ty dependency inside the shared crate, so it would not actually satisfy the goal's boundary clarification.
++- Make `mdtest::matcher::Matcher` public to let downstream crates reuse lower-level matching methods: this would expand the new public API and is not required by the stated extraction, which only needs `match_file` as the shared behavior.
++- Remove `MdtestConfig::has_dependencies` and let ty enforce the single-dependency-section rule after parsing: this would move an existing parser-time validation into a runner-specific layer and could change error timing and messages for invalid markdown tests.
++- Change `OutputFormat::write_error` and `write_inconsistency` to return formatted strings instead of printing GitHub annotations directly: this crosses observable output behavior for CI annotations and is not necessary to express the mdtest crate split.
+
+codex
+Done. Wrote the reconciled markdown spec to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md)
+file update:
+diff --git a/samples/v2/ruff-24616/volley/round-2-claims.md b/samples/v2/ruff-24616/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3478e02fcf976948f57cadcac2b410045bf2402c
+--- /dev/null
++++ b/samples/v2/ruff-24616/volley/round-2-claims.md
+@@ -0,0 +1,36 @@
++## Accepted Claims
++
++### C1 — Move ty-specific database support out of the shared mdtest API
++**File**: `crates/mdtest/src/db.rs`:24
++**Change**: Replace the exported `pub struct Db` semantic database in `mdtest` with a mdtest-local test database named `TestDb` that is only used by `mdtest` unit tests, and move the current ty semantic database implementation and its public setup methods to `ty_test` callers in `crates/ty_test/src/lib.rs` and `crates/ty_test/src/external_dependencies.rs`. Move ty-specific runtime dependencies (`ty_module_resolver`, `ty_python_semantic`, `ty_vendored`, and `ty_python_core`) out of `mdtest`'s normal dependencies and into `ty_test`; keep any ty crates needed solely by `mdtest` unit tests as `mdtest` dev-dependencies.
++**Goal link**: The goal says the new crate should hold shared mdtest machinery and use `TestDb` for mdtest's own matcher/parser tests instead of depending on the real ty database.
++**Justification**: Keeping ty's semantic database and runtime-only ty crate dependencies out of `mdtest` makes the crate boundary express the extraction directly and removes accidental ty-only normal dependencies from the shared crate.
++**Hunt note**: Retained as narrowed for F2 because the claim now requires the Cargo dependency boundary cleanup while preserving test-only ty access through dev-dependencies.
++
++### C2 — Move ty markdown configuration out of mdtest
++**File**: `crates/mdtest/src/config.rs`:22
++**Change**: Move `MarkdownTestConfig`, `Environment`, `Analysis`, `Log`, `SystemKind`, and `Project` into `ty_test` as ty's concrete `MdtestConfig` implementation, leaving `mdtest` with the generic `MdtestConfig` trait at its existing parser API path (`mdtest::parser::MdtestConfig`) and a minimal test-only config for its internal parser tests.
++**Goal link**: The goal says the parser is generic over `MdtestConfig` so Ruff can provide a separate config struct.
++**Justification**: Removing ty-specific TOML schema from the shared crate reduces API surface and makes the generic parser/config split explicit instead of encoding ty as the default mdtest configuration.
++**Hunt note**: Retained as narrowed for F3 because the concrete ty config types move out, while the generic trait remains at the existing `mdtest::parser::MdtestConfig` API path.
++
++### C3 — Stop using ty configuration in parser unit tests
++**File**: `crates/mdtest/src/parser.rs`:976
++**Change**: In the `#[cfg(test)]` module, replace `use crate::config::MarkdownTestConfig` and the `parse::<MarkdownTestConfig>` helper with a small local `TestConfig` that derives `Default`, `Clone`, and `Deserialize` and implements `MdtestConfig::has_dependencies`. The test-only config must preserve the dependency-section shape needed by parser tests: include `project: Option<TestProject>`, include `TestProject { dependencies: Option<Vec<String>> }`, and use the same serde naming behavior required to deserialize the existing `[project] dependencies` TOML in duplicate-dependency tests.
++**Goal link**: The goal calls out mdtest-local test support independent of the ty test config type.
++**Justification**: Parser tests should validate the generic parser contract, and using a local `TestConfig` removes a needless dependency on ty's concrete configuration without changing parser behavior.
++**Hunt note**: Retained as narrowed for F1 because the local test config now explicitly preserves the `[project] dependencies` shape used by `has_dependencies` and duplicate-dependency parser errors.
++
++### C4 — Make TestFile private to the ty runner
++**File**: `crates/mdtest/src/lib.rs`:98
++**Change**: Move the public `TestFile` struct into `crates/ty_test/src/lib.rs` next to `run_test`, and update the `mdtest::{Failures, FileFailures, TestFile, ...}` import to stop re-exporting or importing `TestFile` from `mdtest`.
++**Goal link**: The goal describes `mdtest` as the home for shared assertion, diagnostic, matcher, and parser code, while `TestFile` is only runner state used by ty's mdtest execution.
++**Justification**: Keeping this runner-only wrapper private to `ty_test` trims the shared crate API and avoids exposing a type that does not serve Ruff's future separate mdtest runner.
++
++## Rejected
++
++- Remove the unrelated `.github/pr-assignee-pools.toml`, typing conformance, Ruff lint, ty static, and schema changes from the artifact: these are outside the mdtest extraction goal, but most of those files are not source refactor targets for this task and the request is to propose behavior-preserving refactor claims rather than rewrite the draft patch contents.
++- Rename `mdtest::db::Db` to `TestDb` in place without moving the ty semantic implementation: this would improve naming but keep the accidental ty dependency inside the shared crate, so it would not actually satisfy the goal's boundary clarification.
++- Make `mdtest::matcher::Matcher` public to let downstream crates reuse lower-level matching methods: this would expand the new public API and is not required by the stated extraction, which only needs `match_file` as the shared behavior.
++- Remove `MdtestConfig::has_dependencies` and let ty enforce the single-dependency-section rule after parsing: this would move an existing parser-time validation into a runner-specific layer and could change error timing and messages for invalid markdown tests.
++- Change `OutputFormat::write_error` and `write_inconsistency` to return formatted strings instead of printing GitHub annotations directly: this crosses observable output behavior for CI annotations and is not necessary to express the mdtest crate split.
+
+tokens used
+8,823
+Done. Wrote the reconciled markdown spec to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24616/volley/round-2-claims.md)

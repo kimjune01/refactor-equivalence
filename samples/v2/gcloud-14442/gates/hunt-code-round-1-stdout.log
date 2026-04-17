@@ -1,0 +1,709 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-14442
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c19-f4f7-7e63-8a8f-729d11adec3f
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/14442/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt             # files the implementer may have changed
+go build ./...                                         # full build, not just typecheck
+go test ./... -count=1 -short                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run this as a review-only pass in the cleanroom repo, then write the required findings file. I’m going to read the allowed set/spec context first and then execute the mandated build and test commands.
+exec
+/bin/zsh -lc 'pwd && cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/14442exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/14442
+firestore/client.go
+firestore/pipeline.go
+firestore/pipeline_aggregate.go
+firestore/pipeline_constant.go
+firestore/pipeline_expression.go
+firestore/pipeline_field.go
+firestore/pipeline_filter_condition.go
+firestore/pipeline_function.go
+firestore/pipeline_result.go
+firestore/pipeline_snapshot.go
+firestore/pipeline_source.go
+firestore/query.go
+vertexai/internal/version.go
+ succeeded in 0ms:
+# PR #14442 — chore(firestore): update experimental warnings for pipeline features
+
+## PR body
+
+This PR updates the documentation for Firestore Pipeline features in the Go SDK regarding their experimental status.
+I have removed the general "Experimental" warning from most pipeline-related APIs that are moving out of preview. However, I have retained or restored the full experimental warning for specific features that are still in Public Preview and subject to breaking changes.
+**Features retaining/restoring experimental warning:**
+- `Search`, `Update`, and `Delete` pipeline stages in `pipeline.go`.
+- `SearchOption`, `UpdateOption`, and `DeleteOption` interfaces and their implementations in `pipeline.go`.
+- `DocumentMatches` and `GeoDistance` functions in `pipeline_function.go`.
+- `GeoDistance` method in `pipeline_expression.go` (both interface and implementation).
+- `Score`
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Restore Score experimental warning
+**File**: firestore/pipeline_function.go:1005
+**Change**: Add the same two-line Firestore Pipelines experimental warning used on `DocumentMatches` and `GeoDistance` to the `Score` function doc comment immediately before `func Score() Expression`.
+**Goal link**: The goal explicitly lists `Score` among the features that must retain or restore the full experimental warning.
+**Justification**: Restoring the warning makes the documentation match the stated Public Preview boundary while keeping the change doc-only and behavior-preserving.
+
+## Rejected
+
+- Re-add the general Firestore Pipelines experimental warning to all pipeline APIs that lost it: contradicts the goal, which says most pipeline-related APIs are moving out of preview and should no longer carry the general warning.
+- Change `vertexai/internal/version.go` back from `0.18.0` to `0.19.0`: unrelated to the Firestore pipeline documentation goal and potentially observable through generated client headers, so it is not a behavior-preserving refactor claim.
+- Add an experimental warning to `RawOptions` in `firestore/pipeline.go`: although `RawOptions` implements `SearchOption`, `UpdateOption`, and `DeleteOption`, it also applies to many non-preview pipeline stages, so marking it experimental would overstate the goal's targeted preview boundary.
+- Add doc comments or experimental warnings to private `funcSearchOption`, `funcUpdateOption`, and their constructors in `firestore/pipeline.go`: these are unexported implementation details, and the exported option factories already carry the retained warnings requested by the goal.
+- Remove the experimental warning from `(*baseExpression).GeoDistance` in `firestore/pipeline_expression.go`: the goal specifically calls out the `GeoDistance` method in both the interface and implementation as still requiring the warning.
+codex
+The goal/spec is narrow: this should be a doc-only Firestore pipeline warning change, with one accepted claim specifically requiring `Score` to keep the experimental warning. I’m running the full build and registered test command now, capturing the tails and exit codes for the report.
+exec
+/bin/zsh -lc 'go test ./... -count=1 -short' in /tmp/refactor-eq-workdir/cleanroom-v2/14442exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 811ms:
+
+ succeeded in 7.29s:
+?   	cloud.google.com/go	[no test files]
+ok  	cloud.google.com/go/civil	0.289s
+ok  	cloud.google.com/go/httpreplay	2.589s
+?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
+ok  	cloud.google.com/go/httpreplay/internal/proxy	2.067s
+ok  	cloud.google.com/go/internal	0.521s
+ok  	cloud.google.com/go/internal/btree	1.476s
+ok  	cloud.google.com/go/internal/detect	0.961s
+ok  	cloud.google.com/go/internal/fields	0.291s
+ok  	cloud.google.com/go/internal/leakcheck	5.427s
+ok  	cloud.google.com/go/internal/optional	3.353s
+ok  	cloud.google.com/go/internal/pretty	2.681s
+ok  	cloud.google.com/go/internal/protostruct	2.929s
+?   	cloud.google.com/go/internal/pubsub	[no test files]
+ok  	cloud.google.com/go/internal/testutil	3.185s
+ok  	cloud.google.com/go/internal/trace	1.581s
+ok  	cloud.google.com/go/internal/tracecontext	1.821s
+ok  	cloud.google.com/go/internal/uid	1.150s
+ok  	cloud.google.com/go/internal/version	3.251s
+ok  	cloud.google.com/go/rpcreplay	3.578s
+exec
+/bin/zsh -lc "rg -n \"Score\\(|DocumentMatches\\(|GeoDistance\\(|Search\\(|Update\\(|Delete\\(|Experimental|Firestore Pipelines\" firestore/pipeline*.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14442exec
+/bin/zsh -lc "sed -n '960,1035p' firestore/pipeline_function.go && sed -n '1,220p' firestore/pipeline.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+firestore/pipeline_function.go:974://		Search(WithSearchQuery(DocumentMatches("waffles OR pancakes")))
+firestore/pipeline_function.go:978:// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+firestore/pipeline_function.go:980:func DocumentMatches(query string) BooleanExpression {
+firestore/pipeline_function.go:991://		Search(
+firestore/pipeline_function.go:993://			WithSearchSort(Ascending(GeoDistance("location", &latlng.LatLng{Latitude: 37.0, Longitude: -122.0}))),
+firestore/pipeline_function.go:999:// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+firestore/pipeline_function.go:1001:func GeoDistance(field any, location *latlng.LatLng) Expression {
+firestore/pipeline_function.go:1013://		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
+firestore/pipeline_function.go:1014:func Score() Expression {
+firestore/pipeline_stage.go:620:				queryExpr = DocumentMatches(qv)
+firestore/pipeline_function_test.go:1275:			expr: DocumentMatches("waffles"),
+firestore/pipeline_function_test.go:1287:			expr: GeoDistance("location", &latlng.LatLng{Latitude: 37.0, Longitude: -122.0}),
+firestore/pipeline_function_test.go:1300:			expr: Score(),
+firestore/pipeline_function_test.go:1309:			expr: FieldOf("location").GeoDistance(&latlng.LatLng{Latitude: 37.0, Longitude: -122.0}),
+firestore/pipeline_expression.go:557:	//		Search(
+firestore/pipeline_expression.go:559:	//			WithSearchSort(Ascending(FieldOf("location").GeoDistance(&latlng.LatLng{Latitude: 37.0, Longitude: -122.0}))),
+firestore/pipeline_expression.go:562:	// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+firestore/pipeline_expression.go:564:	GeoDistance(location *latlng.LatLng) Expression
+firestore/pipeline_expression.go:842:// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+firestore/pipeline_expression.go:844:func (b *baseExpression) GeoDistance(location *latlng.LatLng) Expression {
+ succeeded in 0ms:
+}
+
+// Rand returns a pseudo-random floating point number, chosen uniformly between 0.0 (inclusive) and 1.0 (exclusive).
+func Rand() Expression {
+	return newBaseFunction("rand", nil)
+}
+
+// DocumentMatches creates a boolean expression that performs a full-text search on all indexed search fields in the document.
+//
+// This Expression can only be used within a Search stage.
+//
+// Example:
+//
+//	client.Pipeline().Collection("restaurants").
+//		Search(WithSearchQuery(DocumentMatches("waffles OR pancakes")))
+//
+// - query: Define the search query using the search domain-specific language (DSL).
+//
+// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+// regardless of any other documented package stability guarantees.
+codex
+Build passed, tests passed, and the first source scan already shows the accepted `Score` warning claim was not applied. I’m checking whether there is any baseline material available on disk for out-of-scope or behavior-drift checks before I write the findings file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+diff --git a/firestore/client.go b/firestore/client.go
+index 1f898635dc..ab3347bb7d 100644
+--- a/firestore/client.go
++++ b/firestore/client.go
+@@ -183,9 +183,6 @@ func withRequestParamsHeader(ctx context.Context, requestParams string) context.
+ }
+ 
+ // Pipeline creates a PipelineSource to start building a Firestore pipeline.
+-//
+-// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+-// regardless of any other documented package stability guarantees.
+ func (c *Client) Pipeline() *PipelineSource {
+ 	return &PipelineSource{client: c}
+ }
+diff --git a/firestore/pipeline.go b/firestore/pipeline.go
+index e60bcc847e..a2852e140e 100644
+--- a/firestore/pipeline.go
++++ b/firestore/pipeline.go
+@@ -44,9 +44,6 @@ var (
+ // NOTE: The chained stages do not prescribe exactly how Firestore will execute the pipeline.
+exec
+/bin/zsh -lc "find . -maxdepth 2 -name .git -o -name '*.patch' -o -name '*baseline*' -o -name '*HEAD*' | sort" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+./FORGE_INPUT_DIFF.patch
+exec
+/bin/zsh -lc "find /tmp/refactor-eq-workdir -maxdepth 4 \\( -name '14442' -o -name '*baseline*' -o -name '*cleanroom*' \\) -print | sort" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 1.18s:
+/tmp/refactor-eq-workdir/bb-codex-24489/memory-tests/baselines.json
+/tmp/refactor-eq-workdir/cleanroom-fastapi
+/tmp/refactor-eq-workdir/cleanroom-v2
+/tmp/refactor-eq-workdir/cleanroom-v2/14442
+/tmp/refactor-eq-workdir/fluentui-v2-wt-35965/node_modules/.bin/baseline-browser-mapping
+/tmp/refactor-eq-workdir/fluentui-v2-wt-35988/node_modules/.bin/baseline-browser-mapping
+/tmp/refactor-eq-workdir/fluentui/.github/workflows/vrt-baseline.yml
+exec
+/bin/zsh -lc "rg -n '"'^diff --git '"' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+FORGE_INPUT_DIFF.patch:1:diff --git a/firestore/client.go b/firestore/client.go
+FORGE_INPUT_DIFF.patch:15:diff --git a/firestore/pipeline.go b/firestore/pipeline.go
+FORGE_INPUT_DIFF.patch:600:diff --git a/firestore/pipeline_aggregate.go b/firestore/pipeline_aggregate.go
+FORGE_INPUT_DIFF.patch:750:diff --git a/firestore/pipeline_constant.go b/firestore/pipeline_constant.go
+FORGE_INPUT_DIFF.patch:791:diff --git a/firestore/pipeline_expression.go b/firestore/pipeline_expression.go
+FORGE_INPUT_DIFF.patch:834:diff --git a/firestore/pipeline_field.go b/firestore/pipeline_field.go
+FORGE_INPUT_DIFF.patch:848:diff --git a/firestore/pipeline_filter_condition.go b/firestore/pipeline_filter_condition.go
+FORGE_INPUT_DIFF.patch:1115:diff --git a/firestore/pipeline_function.go b/firestore/pipeline_function.go
+FORGE_INPUT_DIFF.patch:2224:diff --git a/firestore/pipeline_result.go b/firestore/pipeline_result.go
+FORGE_INPUT_DIFF.patch:2308:diff --git a/firestore/pipeline_snapshot.go b/firestore/pipeline_snapshot.go
+FORGE_INPUT_DIFF.patch:2381:diff --git a/firestore/pipeline_source.go b/firestore/pipeline_source.go
+FORGE_INPUT_DIFF.patch:2545:diff --git a/firestore/query.go b/firestore/query.go
+FORGE_INPUT_DIFF.patch:2569:diff --git a/vertexai/internal/version.go b/vertexai/internal/version.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:1:diff --git a/firestore/client.go b/firestore/client.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:15:diff --git a/firestore/pipeline.go b/firestore/pipeline.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:600:diff --git a/firestore/pipeline_aggregate.go b/firestore/pipeline_aggregate.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:750:diff --git a/firestore/pipeline_constant.go b/firestore/pipeline_constant.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:791:diff --git a/firestore/pipeline_expression.go b/firestore/pipeline_expression.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:834:diff --git a/firestore/pipeline_field.go b/firestore/pipeline_field.go
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/diff-base-to-test.patch:848:diff --git a/firestore/pipeline_filter_condition.go b/firestore/pipeline_filter_condition.go
+exec
+/bin/zsh -lc "nl -ba firestore/pipeline_function.go | sed -n '1004,1018p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+  1004	
+  1005	// Score creates an expression that evaluates to the search score that reflects the topicality of the document to all of the text
+  1006	// predicates (for example: DocumentMatches) in the search query.
+  1007	//
+  1008	// This Expression can only be used within a Search stage.
+  1009	//
+  1010	// Example:
+  1011	//
+  1012	//	client.Pipeline().Collection("restaurants").
+  1013	//		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
+  1014	func Score() Expression {
+  1015		return newBaseFunction("score", nil)
+  1016	}
+codex
+The diff artifacts only touch the allowed file set, and I don’t see test-file edits in those artifacts. The remaining actionable finding is the missing `Score` experimental warning, with exact current-line evidence from the source.
+exec
+/bin/zsh -lc 'ls -la /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates && test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md; echo $?' in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 0ms:
+total 40
+drwxr-xr-x@  4 junekim  staff    128 Apr 17 08:40 .
+drwxr-xr-x@ 19 junekim  staff    608 Apr 17 08:37 ..
+-rw-r--r--@  1 junekim  staff  18446 Apr 17 08:41 hunt-code-round-1-stdout.log
+-rw-r--r--@  1 junekim  staff      0 Apr 17 08:40 merged-install.log
+1
+exec
+/bin/zsh -lc 'go build ./... > /tmp/gcloud-14442-go-build.out 2>&1; code=$?; printf '"'exit_code=%s\\n' \""'$code" > /tmp/gcloud-14442-go-build.record; tail -50 /tmp/gcloud-14442-go-build.out >> /tmp/gcloud-14442-go-build.record; cat /tmp/gcloud-14442-go-build.record' in /tmp/refactor-eq-workdir/cleanroom-v2/14442exec
+/bin/zsh -lc 'go test ./... -count=1 -short > /tmp/gcloud-14442-go-test.out 2>&1; code=$?; printf '"'exit_code=%s\\n' \""'$code" > /tmp/gcloud-14442-go-test.record; tail -50 /tmp/gcloud-14442-go-test.out >> /tmp/gcloud-14442-go-test.record; cat /tmp/gcloud-14442-go-test.record' in /tmp/refactor-eq-workdir/cleanroom-v2/14442 succeeded in 382ms:
+exit_code=0
+ succeeded in 6.95s:
+exit_code=0
+?   	cloud.google.com/go	[no test files]
+ok  	cloud.google.com/go/civil	0.210s
+ok  	cloud.google.com/go/httpreplay	1.145s
+?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
+ok  	cloud.google.com/go/httpreplay/internal/proxy	0.216s
+ok  	cloud.google.com/go/internal	0.629s
+ok  	cloud.google.com/go/internal/btree	1.522s
+ok  	cloud.google.com/go/internal/detect	1.205s
+ok  	cloud.google.com/go/internal/fields	0.378s
+ok  	cloud.google.com/go/internal/leakcheck	6.080s
+ok  	cloud.google.com/go/internal/optional	1.490s
+ok  	cloud.google.com/go/internal/pretty	1.599s
+ok  	cloud.google.com/go/internal/protostruct	2.198s
+?   	cloud.google.com/go/internal/pubsub	[no test files]
+ok  	cloud.google.com/go/internal/testutil	1.941s
+ok  	cloud.google.com/go/internal/trace	1.372s
+ok  	cloud.google.com/go/internal/tracecontext	1.768s
+ok  	cloud.google.com/go/internal/uid	0.476s
+ok  	cloud.google.com/go/internal/version	2.083s
+codex
+I’m writing the review artifact now. It will mark build/tests as passing, then record the missing accepted warning as F1 with the exact current `Score` lines and the mandated command exit codes/tails.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+## Build: PASS
+## Tests: PASS
+
+## Finding F1 — Score is still missing the required experimental warning
+**Severity**: warning
+**File**: firestore/pipeline_function.go:1014
+**What**: The accepted claim C1 requires `Score` to carry the same two-line Firestore Pipelines experimental warning used by `DocumentMatches` and `GeoDistance`, because the goal explicitly lists `Score` among features that must retain/restore the Public Preview warning. The current doc comment reaches the example and then immediately declares the function, so the warning was not applied:
+
+```go
+  1005	// Score creates an expression that evaluates to the search score that reflects the topicality of the document to all of the text
+  1006	// predicates (for example: DocumentMatches) in the search query.
+  1007	//
+  1008	// This Expression can only be used within a Search stage.
+  1009	//
+  1010	// Example:
+  1011	//
+  1012	//	client.Pipeline().Collection("restaurants").
+  1013	//		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
+  1014	func Score() Expression {
+  1015		return newBaseFunction("score", nil)
+  1016	}
+```
+
+**Fix**: Add the two-line experimental warning immediately before `func Score() Expression`, matching `DocumentMatches` and `GeoDistance`:
+
+```go
+// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
+// regardless of any other documented package stability guarantees.
+```
+
+## Command Records
+
+`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt`
+
+```text
+firestore/client.go
+firestore/pipeline.go
+firestore/pipeline_aggregate.go
+firestore/pipeline_constant.go
+firestore/pipeline_expression.go
+firestore/pipeline_field.go
+firestore/pipeline_filter_condition.go
+firestore/pipeline_function.go
+firestore/pipeline_result.go
+firestore/pipeline_snapshot.go
+firestore/pipeline_source.go
+firestore/query.go
+vertexai/internal/version.go
+```
+
+`go build ./...`
+
+```text
+exit_code=0
+tail -50:
+(no output)
+```
+
+`go test ./... -count=1 -short`
+
+```text
+exit_code=0
+tail -50:
+?   	cloud.google.com/go	[no test files]
+ok  	cloud.google.com/go/civil	0.210s
+ok  	cloud.google.com/go/httpreplay	1.145s
+?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
+ok  	cloud.google.com/go/httpreplay/internal/proxy	0.216s
+ok  	cloud.google.com/go/internal	0.629s
+ok  	cloud.google.com/go/internal/btree	1.522s
+ok  	cloud.google.com/go/internal/detect	1.205s
+ok  	cloud.google.com/go/internal/fields	0.378s
+ok  	cloud.google.com/go/internal/leakcheck	6.080s
+ok  	cloud.google.com/go/internal/optional	1.490s
+ok  	cloud.google.com/go/internal/pretty	1.599s
+ok  	cloud.google.com/go/internal/protostruct	2.198s
+?   	cloud.google.com/go/internal/pubsub	[no test files]
+ok  	cloud.google.com/go/internal/testutil	1.941s
+ok  	cloud.google.com/go/internal/trace	1.372s
+ok  	cloud.google.com/go/internal/tracecontext	1.768s
+ok  	cloud.google.com/go/internal/uid	0.476s
+ok  	cloud.google.com/go/internal/version	2.083s
+ok  	cloud.google.com/go/rpcreplay	2.108s
+?   	cloud.google.com/go/rpcreplay/proto/intstore	[no test files]
+?   	cloud.google.com/go/rpcreplay/proto/rpcreplay	[no test files]
+?   	cloud.google.com/go/third_party/pkgsite	[no test files]
+```
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/gcloud-14442/gates/hunt-code-round-1.md b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c48ff3f2050248df03df473e6290817d7ed6660
+--- /dev/null
++++ b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+@@ -0,0 +1,87 @@
++## Build: PASS
++## Tests: PASS
++
++## Finding F1 — Score is still missing the required experimental warning
++**Severity**: warning
++**File**: firestore/pipeline_function.go:1014
++**What**: The accepted claim C1 requires `Score` to carry the same two-line Firestore Pipelines experimental warning used by `DocumentMatches` and `GeoDistance`, because the goal explicitly lists `Score` among features that must retain/restore the Public Preview warning. The current doc comment reaches the example and then immediately declares the function, so the warning was not applied:
++
++```go
++  1005	// Score creates an expression that evaluates to the search score that reflects the topicality of the document to all of the text
++  1006	// predicates (for example: DocumentMatches) in the search query.
++  1007	//
++  1008	// This Expression can only be used within a Search stage.
++  1009	//
++  1010	// Example:
++  1011	//
++  1012	//	client.Pipeline().Collection("restaurants").
++  1013	//		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
++  1014	func Score() Expression {
++  1015		return newBaseFunction("score", nil)
++  1016	}
++```
++
++**Fix**: Add the two-line experimental warning immediately before `func Score() Expression`, matching `DocumentMatches` and `GeoDistance`:
++
++```go
++// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
++// regardless of any other documented package stability guarantees.
++```
++
++## Command Records
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt`
++
++```text
++firestore/client.go
++firestore/pipeline.go
++firestore/pipeline_aggregate.go
++firestore/pipeline_constant.go
++firestore/pipeline_expression.go
++firestore/pipeline_field.go
++firestore/pipeline_filter_condition.go
++firestore/pipeline_function.go
++firestore/pipeline_result.go
++firestore/pipeline_snapshot.go
++firestore/pipeline_source.go
++firestore/query.go
++vertexai/internal/version.go
++```
++
++`go build ./...`
++
++```text
++exit_code=0
++tail -50:
++(no output)
++```
++
++`go test ./... -count=1 -short`
++
++```text
++exit_code=0
++tail -50:
++?   	cloud.google.com/go	[no test files]
++ok  	cloud.google.com/go/civil	0.210s
++ok  	cloud.google.com/go/httpreplay	1.145s
++?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
++ok  	cloud.google.com/go/httpreplay/internal/proxy	0.216s
++ok  	cloud.google.com/go/internal	0.629s
++ok  	cloud.google.com/go/internal/btree	1.522s
++ok  	cloud.google.com/go/internal/detect	1.205s
++ok  	cloud.google.com/go/internal/fields	0.378s
++ok  	cloud.google.com/go/internal/leakcheck	6.080s
++ok  	cloud.google.com/go/internal/optional	1.490s
++ok  	cloud.google.com/go/internal/pretty	1.599s
++ok  	cloud.google.com/go/internal/protostruct	2.198s
++?   	cloud.google.com/go/internal/pubsub	[no test files]
++ok  	cloud.google.com/go/internal/testutil	1.941s
++ok  	cloud.google.com/go/internal/trace	1.372s
++ok  	cloud.google.com/go/internal/tracecontext	1.768s
++ok  	cloud.google.com/go/internal/uid	0.476s
++ok  	cloud.google.com/go/internal/version	2.083s
++ok  	cloud.google.com/go/rpcreplay	2.108s
++?   	cloud.google.com/go/rpcreplay/proto/intstore	[no test files]
++?   	cloud.google.com/go/rpcreplay/proto/rpcreplay	[no test files]
++?   	cloud.google.com/go/third_party/pkgsite	[no test files]
++```
+
+file update:
+diff --git a/samples/v2/gcloud-14442/gates/hunt-code-round-1.md b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c48ff3f2050248df03df473e6290817d7ed6660
+--- /dev/null
++++ b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+@@ -0,0 +1,87 @@
++## Build: PASS
++## Tests: PASS
++
++## Finding F1 — Score is still missing the required experimental warning
++**Severity**: warning
++**File**: firestore/pipeline_function.go:1014
++**What**: The accepted claim C1 requires `Score` to carry the same two-line Firestore Pipelines experimental warning used by `DocumentMatches` and `GeoDistance`, because the goal explicitly lists `Score` among features that must retain/restore the Public Preview warning. The current doc comment reaches the example and then immediately declares the function, so the warning was not applied:
++
++```go
++  1005	// Score creates an expression that evaluates to the search score that reflects the topicality of the document to all of the text
++  1006	// predicates (for example: DocumentMatches) in the search query.
++  1007	//
++  1008	// This Expression can only be used within a Search stage.
++  1009	//
++  1010	// Example:
++  1011	//
++  1012	//	client.Pipeline().Collection("restaurants").
++  1013	//		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
++  1014	func Score() Expression {
++  1015		return newBaseFunction("score", nil)
++  1016	}
++```
++
++**Fix**: Add the two-line experimental warning immediately before `func Score() Expression`, matching `DocumentMatches` and `GeoDistance`:
++
++```go
++// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
++// regardless of any other documented package stability guarantees.
++```
++
++## Command Records
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt`
++
++```text
++firestore/client.go
++firestore/pipeline.go
++firestore/pipeline_aggregate.go
++firestore/pipeline_constant.go
++firestore/pipeline_expression.go
++firestore/pipeline_field.go
++firestore/pipeline_filter_condition.go
++firestore/pipeline_function.go
++firestore/pipeline_result.go
++firestore/pipeline_snapshot.go
++firestore/pipeline_source.go
++firestore/query.go
++vertexai/internal/version.go
++```
++
++`go build ./...`
++
++```text
++exit_code=0
++tail -50:
++(no output)
++```
++
++`go test ./... -count=1 -short`
++
++```text
++exit_code=0
++tail -50:
++?   	cloud.google.com/go	[no test files]
++ok  	cloud.google.com/go/civil	0.210s
++ok  	cloud.google.com/go/httpreplay	1.145s
++?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
++ok  	cloud.google.com/go/httpreplay/internal/proxy	0.216s
++ok  	cloud.google.com/go/internal	0.629s
++ok  	cloud.google.com/go/internal/btree	1.522s
++ok  	cloud.google.com/go/internal/detect	1.205s
++ok  	cloud.google.com/go/internal/fields	0.378s
++ok  	cloud.google.com/go/internal/leakcheck	6.080s
++ok  	cloud.google.com/go/internal/optional	1.490s
++ok  	cloud.google.com/go/internal/pretty	1.599s
++ok  	cloud.google.com/go/internal/protostruct	2.198s
++?   	cloud.google.com/go/internal/pubsub	[no test files]
++ok  	cloud.google.com/go/internal/testutil	1.941s
++ok  	cloud.google.com/go/internal/trace	1.372s
++ok  	cloud.google.com/go/internal/tracecontext	1.768s
++ok  	cloud.google.com/go/internal/uid	0.476s
++ok  	cloud.google.com/go/internal/version	2.083s
++ok  	cloud.google.com/go/rpcreplay	2.108s
++?   	cloud.google.com/go/rpcreplay/proto/intstore	[no test files]
++?   	cloud.google.com/go/rpcreplay/proto/rpcreplay	[no test files]
++?   	cloud.google.com/go/third_party/pkgsite	[no test files]
++```
+
+codex
+Review complete. I wrote the findings to:
+
+[`hunt-code-round-1.md`](/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md)
+
+Results:
+
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: PASS, exit code 0
+- Finding F1: warning for the accepted claim not applied. `Score()` in [`pipeline_function.go`](/tmp/refactor-eq-workdir/cleanroom-v2/14442/firestore/pipeline_function.go):1014 is still missing the required experimental warning.
+
+No source files were edited.
+file update:
+diff --git a/samples/v2/gcloud-14442/gates/hunt-code-round-1.md b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c48ff3f2050248df03df473e6290817d7ed6660
+--- /dev/null
++++ b/samples/v2/gcloud-14442/gates/hunt-code-round-1.md
+@@ -0,0 +1,87 @@
++## Build: PASS
++## Tests: PASS
++
++## Finding F1 — Score is still missing the required experimental warning
++**Severity**: warning
++**File**: firestore/pipeline_function.go:1014
++**What**: The accepted claim C1 requires `Score` to carry the same two-line Firestore Pipelines experimental warning used by `DocumentMatches` and `GeoDistance`, because the goal explicitly lists `Score` among features that must retain/restore the Public Preview warning. The current doc comment reaches the example and then immediately declares the function, so the warning was not applied:
++
++```go
++  1005	// Score creates an expression that evaluates to the search score that reflects the topicality of the document to all of the text
++  1006	// predicates (for example: DocumentMatches) in the search query.
++  1007	//
++  1008	// This Expression can only be used within a Search stage.
++  1009	//
++  1010	// Example:
++  1011	//
++  1012	//	client.Pipeline().Collection("restaurants").
++  1013	//		Search(WithSearchQuery("waffles"), WithSearchSort(Descending(Score())))
++  1014	func Score() Expression {
++  1015		return newBaseFunction("score", nil)
++  1016	}
++```
++
++**Fix**: Add the two-line experimental warning immediately before `func Score() Expression`, matching `DocumentMatches` and `GeoDistance`:
++
++```go
++// Experimental: Firestore Pipelines is currently in preview and is subject to potential breaking changes in future versions,
++// regardless of any other documented package stability guarantees.
++```
++
++## Command Records
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/inputs/allowed-files.txt`
++
++```text
++firestore/client.go
++firestore/pipeline.go
++firestore/pipeline_aggregate.go
++firestore/pipeline_constant.go
++firestore/pipeline_expression.go
++firestore/pipeline_field.go
++firestore/pipeline_filter_condition.go
++firestore/pipeline_function.go
++firestore/pipeline_result.go
++firestore/pipeline_snapshot.go
++firestore/pipeline_source.go
++firestore/query.go
++vertexai/internal/version.go
++```
++
++`go build ./...`
++
++```text
++exit_code=0
++tail -50:
++(no output)
++```
++
++`go test ./... -count=1 -short`
++
++```text
++exit_code=0
++tail -50:
++?   	cloud.google.com/go	[no test files]
++ok  	cloud.google.com/go/civil	0.210s
++ok  	cloud.google.com/go/httpreplay	1.145s
++?   	cloud.google.com/go/httpreplay/cmd/httpr	[no test files]
++ok  	cloud.google.com/go/httpreplay/internal/proxy	0.216s
++ok  	cloud.google.com/go/internal	0.629s
++ok  	cloud.google.com/go/internal/btree	1.522s
++ok  	cloud.google.com/go/internal/detect	1.205s
++ok  	cloud.google.com/go/internal/fields	0.378s
++ok  	cloud.google.com/go/internal/leakcheck	6.080s
++ok  	cloud.google.com/go/internal/optional	1.490s
++ok  	cloud.google.com/go/internal/pretty	1.599s
++ok  	cloud.google.com/go/internal/protostruct	2.198s
++?   	cloud.google.com/go/internal/pubsub	[no test files]
++ok  	cloud.google.com/go/internal/testutil	1.941s
++ok  	cloud.google.com/go/internal/trace	1.372s
++ok  	cloud.google.com/go/internal/tracecontext	1.768s
++ok  	cloud.google.com/go/internal/uid	0.476s
++ok  	cloud.google.com/go/internal/version	2.083s
++ok  	cloud.google.com/go/rpcreplay	2.108s
++?   	cloud.google.com/go/rpcreplay/proto/intstore	[no test files]
++?   	cloud.google.com/go/rpcreplay/proto/rpcreplay	[no test files]
++?   	cloud.google.com/go/third_party/pkgsite	[no test files]
++```
+
+tokens used
+22,013
+Review complete. I wrote the findings to:
+
+[`hunt-code-round-1.md`](/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14442/gates/hunt-code-round-1.md)
+
+Results:
+
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: PASS, exit code 0
+- Finding F1: warning for the accepted claim not applied. `Score()` in [`pipeline_function.go`](/tmp/refactor-eq-workdir/cleanroom-v2/14442/firestore/pipeline_function.go):1014 is still missing the required experimental warning.
+
+No source files were edited.

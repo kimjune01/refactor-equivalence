@@ -1,0 +1,73 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/client/client_impl.go /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/client/client_impl.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/client/client_impl.go	2026-04-14 04:24:08
++++ /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/client/client_impl.go	2026-04-17 02:47:31
+@@ -237,9 +237,6 @@
+ 	var nextCursor string
+ 	remaining := limit
+ 
+-	// Check hasDiscussionsEnabled on first request only
+-	firstPage := true
+-
+ 	for {
+ 		perPage := remaining
+ 		if perPage > 100 {
+@@ -252,10 +249,9 @@
+ 			return nil, err
+ 		}
+ 
+-		if firstPage && !data.Repository.HasDiscussionsEnabled {
++		if !data.Repository.HasDiscussionsEnabled {
+ 			return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
+ 		}
+-		firstPage = false
+ 
+ 		totalCount = data.Repository.Discussions.TotalCount
+ 		for _, n := range data.Repository.Discussions.Nodes {
+@@ -345,10 +341,10 @@
+ 	}
+ 	qualifiers = append(qualifiers, fmt.Sprintf("sort:%s-%s", orderField, orderDir))
+ 
+-	searchQuery := strings.Join(qualifiers, " ")
+ 	if filters.Keywords != "" {
+-		searchQuery += " " + filters.Keywords
++		qualifiers = append(qualifiers, filters.Keywords)
+ 	}
++	searchQuery := strings.Join(qualifiers, " ")
+ 
+ 	query := fmt.Sprintf(`query DiscussionSearch($query: String!, $first: Int!, $after: String) {
+ 		search(query: $query, type: DISCUSSION, first: $first, after: $after) {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/list/list.go /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/list/list.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/list/list.go	2026-04-14 04:24:08
++++ /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/list/list.go	2026-04-17 02:47:31
+@@ -274,17 +274,14 @@
+ }
+ 
+ func noResults(repo ghrepo.Interface, state string) error {
+-	stateQualifier := ""
+-	switch state {
+-	case "open":
+-		stateQualifier = " open"
+-	case "closed":
+-		stateQualifier = " closed"
+-	}
+-	return cmdutil.NewNoResultsError(fmt.Sprintf("no%s discussions match your search in %s", stateQualifier, ghrepo.FullName(repo)))
++	return cmdutil.NewNoResultsError(fmt.Sprintf("no%s discussions match your search in %s", stateQualifier(state), ghrepo.FullName(repo)))
+ }
+ 
+ func listHeader(repoName string, count, total int, state string) string {
++	return fmt.Sprintf("Showing %d of %d%s discussions in %s", count, total, stateQualifier(state), repoName)
++}
++
++func stateQualifier(state string) string {
+ 	stateQualifier := ""
+ 	switch state {
+ 	case "open":
+@@ -292,7 +289,7 @@
+ 	case "closed":
+ 		stateQualifier = " closed"
+ 	}
+-	return fmt.Sprintf("Showing %d of %d%s discussions in %s", count, total, stateQualifier, repoName)
++	return stateQualifier
+ }
+ 
+ func printDiscussions(opts *ListOptions, discussions []client.Discussion, totalCount int) {

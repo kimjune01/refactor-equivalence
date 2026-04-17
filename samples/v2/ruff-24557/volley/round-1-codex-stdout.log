@@ -1,0 +1,926 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24557
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ae4-0b0b-7831-971c-31e1bce1cf29
+--------
+user
+# Volley — goal-anchored refactor spec
+
+You are sharpening a refactor spec into specific, testable claims against a concrete goal. Do not edit code. Produce a markdown document.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md` — concatenation of: linked issue(s) title + body (if any), PR title, PR body. This is what the PR is *trying* to accomplish.
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch` — the first-pass implementation that made tests pass. A working draft, not the final shape.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` — source files changed from C_base to C_test (post-exclusion). You may only propose edits to files in this set.
+- **Cleanroom source tree** rooted at `/tmp/refactor-eq-workdir/cleanroom-v2/24557/` — the repo at C_test. You may grep it for patterns, imports, and idioms.
+
+Read all inputs. You may grep the wider codebase.
+
+## Task
+
+Produce a sharpened list of **prescriptive, bounded refactor claims** that, if applied, would move the artifact closer to a cleaner expression of the goal — without changing behavior.
+
+"Closer to the goal" means:
+- The implementation expresses the intent of the goal more directly (less accidental structure, fewer indirections that don't serve the goal).
+- The code is more idiomatic to the surrounding codebase at C_test.
+- Accidental complexity added during the first-pass (helper duplication, stray dead code, over-abstracted for one call site, unnecessary state) is removed.
+
+Each claim must be:
+- **Specific**: names a file, a function/block, and the change.
+- **Bounded**: one independent change, applicable without forward reference to later claims.
+- **Testable against the existing suite**: behavior preserved; the full test suite at C_test continues to pass.
+- **Justified against the goal**: one sentence on *which goal aspect* this clarifies and *why* it reduces complexity.
+- **Within scope**: only touches files in `allowed-files.txt`; never any `*.test.ts`, `*.test.tsx`, or other test files.
+
+**Empty Accepted Claims is permitted.** If the artifact is already a clean expression of the goal and no prescriptive changes are warranted, say so explicitly. Do not invent claims.
+
+List rejected candidate claims with reasons (e.g., "would cross a public API boundary", "out of allowed edit set", "would change observable behavior in test X").
+
+## Output
+
+Write to `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md`, where N is passed in the task environment.
+
+Format:
+
+```
+## Accepted Claims
+
+### C1 — <title>
+**File**: <path>:<line>
+**Change**: <prescriptive description>
+**Goal link**: <which aspect of the goal this clarifies>
+**Justification**: <one sentence>
+
+### C2 — ...
+
+## Rejected
+
+- <claim candidate>: <reason>
+```
+
+No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the goal, patch, and allowed file list first, then inspect only the relevant source areas so the claims are grounded in the actual C_test tree.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+# PR #24557 — Add inline snapshots to mdtest
+
+## PR body
+
+## Summary
+
+This PR adds support for inline snapshots to mdtests.
+
+The design differs from what was discussed in https://github.com/astral-sh/ty/issues/195:
+
+* There's no `cargo insta` integration because it's unclear to me how that would work. 
+* Diagnostic snapshotting is selective. Diagnostics that should be snapshotted must be marked with a `# snapshot: <code?>` comment. I think this design is superior because:
+  * The test fails if there's a `diagnostic` block without any `# snapshot:` comment (is now unused)
+  * The test can automatically insert the `diagnostic` block if there's at least one `# snapshot:` comment
+  * Unlike with external snapshots, it allows asserting a single diagnostic in an existing test case without snapshotting many unrelated diagnostics too.
+* Each file has its own `diagnostic` block (favors proximity)
+
+Future extension:
+
+* Add a mode to capture all diagnostics if we see the need for it
+exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+Cargo.lock
+crates/ruff_index/src/slice.rs
+crates/ty_python_semantic/Cargo.toml
+crates/ty_python_semantic/tests/mdtest.rs
+crates/ty_static/src/env_vars.rs
+crates/ty_test/Cargo.toml
+crates/ty_test/src/lib.rs
+crates/ty_test/src/matcher.rs
+crates/ty_test/src/parser.rs
+crates/ty_test/src/pragma_comments.rs
+ succeeded in 0ms:
+diff --git a/Cargo.lock b/Cargo.lock
+index 62a205395b..af77f19aef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4666,7 +4666,6 @@ dependencies = [
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_site_packages",
+- "ty_static",
+  "ty_test",
+  "ty_vendored",
+ ]
+@@ -4762,6 +4761,7 @@ dependencies = [
+  "rustc-stable-hash",
+  "salsa",
+  "serde",
++ "similar 3.1.0",
+  "smallvec",
+  "tempfile",
+  "thiserror 2.0.18",
+codex
+The patch touches the mdtest runner, parser, matcher, a new pragma comment helper, and a small indexed-slice addition. I’m going to read those changed files at C_test now, especially around the snapshot update and matching paths, before deciding whether any cleanup claims are warranted.
+exec
+/bin/zsh -lc "sed -n '1,260p' crates/ty_test/src/lib.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '260,760p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+use crate::config::Log;
+use crate::db::Db;
+use crate::matcher::Failure;
+use crate::parser::{BacktickOffsets, CodeBlock, EmbeddedFileSourceMap};
+use anyhow::anyhow;
+use camino::Utf8Path;
+use colored::Colorize;
+use config::SystemKind;
+use parser as test_parser;
+use ruff_db::Db as _;
+use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig};
+use ruff_db::files::{File, FileRootKind, system_path_to_file};
+use ruff_db::panic::{PanicError, catch_unwind};
+use ruff_db::parsed::parsed_module;
+use ruff_db::source::line_index;
+use ruff_db::system::{DbWithWritableSystem as _, SystemPath, SystemPathBuf};
+use ruff_db::testing::{setup_logging, setup_logging_with_filter};
+use ruff_diagnostics::Applicability;
+use ruff_source_file::{LineIndex, OneIndexed};
+use ruff_text_size::{Ranged, TextRange};
+ succeeded in 0ms:
+ 
+             let _ = writeln!(assertion, "\n{}", "-".repeat(50));
+         }
+     }
+ 
++    if !markdown_edits.is_empty() {
++        try_apply_markdown_edits(absolute_fixture_path, source, markdown_edits);
++    }
++
+     assert!(!any_failures, "{}", &assertion);
+ 
+     Ok(())
+@@ -193,18 +221,25 @@ impl OutputFormat {
+         assertion_buf: &mut String,
+         file: &str,
+         line: OneIndexed,
+-        failure: impl Display,
++        failure: &Failure,
+     ) {
+         match self {
+exec
+/bin/zsh -lc "sed -n '1,260p' crates/ty_test/src/matcher.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,280p' crates/ty_test/src/parser.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+//! Match [`Diagnostic`]s against assertions and produce test failure
+//! messages for any mismatches.
+
+use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::ops::Range;
+use std::sync::LazyLock;
+
+use colored::Colorize;
+use path_slash::PathExt;
+use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
+use ruff_db::files::File;
+use ruff_db::parsed::parsed_module;
+use ruff_db::source::{SourceText, line_index, source_text};
+use ruff_source_file::{LineIndex, OneIndexed};
+use smallvec::SmallVec;
+
+use crate::db::Db;
+use crate::diagnostic::SortedDiagnostics;
+use crate::pragma_comments::{
+ succeeded in 0ms:
+use std::{
+    borrow::Cow,
+    collections::hash_map::Entry,
+    fmt::{Formatter, LowerHex, Write},
+    hash::Hash,
+};
+
+use anyhow::bail;
+use ruff_db::system::{SystemPath, SystemPathBuf};
+use rustc_hash::FxHashMap;
+
+use crate::config::MarkdownTestConfig;
+use ruff_index::{IndexVec, newtype_index};
+use ruff_python_ast::PySourceType;
+use ruff_python_trivia::Cursor;
+use ruff_source_file::{LineIndex, LineRanges, OneIndexed};
+use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
+use rustc_stable_hash::{FromStableHash, SipHasher128Hash, StableSipHasher128};
+
+/// Parse the Markdown `source` as a test suite with given `title`.
+exec
+/bin/zsh -lc "sed -n '260,620p' crates/ty_test/src/parser.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '760,1260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+///    13   c = 3    # Relative line number: 3
+///    14   ```
+///
+/// We want to reconstruct the absolute line number (left) from relative
+/// line numbers. The information we have is the start line and the line
+/// count of each code block:
+///
+///    - Block 1: (start =  5, count = 2)
+///    - Block 2: (start = 12, count = 1)
+///
+/// For example, if we see a relative line number of 3, we see that it is
+/// larger than the line count of the first block, so we subtract the line
+/// count of the first block, and then add the new relative line number (1)
+/// to the absolute start line of the second block (12), resulting in an
+/// absolute line number of 13.
+pub(crate) struct EmbeddedFileSourceMap {
+    start_line_and_line_count: Vec<(usize, usize)>,
+}
+
+impl EmbeddedFileSourceMap {
+ succeeded in 0ms:
+             salsa::attach(db, || {
+-                messages.extend(format!("{backtrace:#}").split('\n').map(String::from));
++                messages.extend(format!("{backtrace:#}").split('\n').map(Failure::new));
+             });
+         }
+ 
+         by_line.push(OneIndexed::from_zero_indexed(0), messages);
+ 
+         FileFailures {
+-            backtick_offsets: self.test_file.backtick_offsets.clone(),
++            backtick_offsets: self.test_file.to_code_block_backtick_offsets(),
+             by_line,
+         }
+     }
+diff --git a/crates/ty_test/src/matcher.rs b/crates/ty_test/src/matcher.rs
+index ab42e4406e..5e465a4cf1 100644
+--- a/crates/ty_test/src/matcher.rs
++++ b/crates/ty_test/src/matcher.rs
+@@ -13,19 +13,22 @@ use ruff_db::files::File;
+ use ruff_db::parsed::parsed_module;
+exec
+/bin/zsh -lc "sed -n '260,620p' crates/ty_test/src/matcher.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,260p' crates/ty_test/src/pragma_comments.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+        /// `@Todo` variants that are hardcoded and always display their message,
+        /// even in release mode.
+        const PRESERVED_TODO_VARIANTS: &[&str] = &[
+            "@Todo(StarredExpression)",
+            "@Todo(typing.Unpack)",
+            "@Todo(TypeVarTuple)",
+        ];
+
+        static TODO_METADATA_REGEX: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"@Todo\([^)]*\)").unwrap());
+
+        TODO_METADATA_REGEX.replace_all(ty, |caps: &regex::Captures| {
+            let matched = caps.get(0).unwrap().as_str();
+            if PRESERVED_TODO_VARIANTS.contains(&matched) {
+                matched.to_string()
+            } else {
+                "@Todo".to_string()
+            }
+        })
+    }
+ succeeded in 0ms:
+//! Parse type and type-error assertions in Python comment form.
+//!
+//! Parses comments of the form `# revealed: SomeType` and `# error: 8 [rule-code] "message text"`.
+//! In the latter case, the `8` is a column number, and `"message text"` asserts that the full
+//! diagnostic message contains the text `"message text"`; all three are optional (`# error:` will
+//! match any error.)
+//!
+//! Assertion comments may be placed at end-of-line:
+//!
+//! ```py
+//! x: int = "foo"  # error: [invalid-assignment]
+//! ```
+//!
+//! Or as a full-line comment on the preceding line:
+//!
+//! ```py
+//! # error: [invalid-assignment]
+//! x: int = "foo"
+//! ```
+//!
+exec
+/bin/zsh -lc "sed -n '260,620p' crates/ty_test/src/pragma_comments.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '620,1040p' crates/ty_test/src/parser.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+                            }
+                            _ => {
+                                if !HTML_COMMENT_ALLOWLIST.contains(&html_comment) {
+                                    bail!(
+                                        "Unknown HTML comment `{html_comment}` -- possibly a typo? \
+                                (Add to `HTML_COMMENT_ALLOWLIST` if this is a false positive)"
+                                    );
+                                }
+                            }
+                        }
+
+                        self.cursor.skip_bytes(position + HTML_COMMENT_END.len());
+                    } else {
+                        bail!("Unterminated HTML comment.");
+                    }
+                }
+
+                '#' => {
+                    self.explicit_path = None;
+                    self.preceding_blank_lines = 0;
+ succeeded in 0ms:
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Revealed(expected_type) => {
+                write!(f, "revealed: {expected_type}")
+            }
+            Self::Error(assertion) => write!(f, "error: {assertion}"),
+        }
+    }
+}
+
+impl<'a> UnparsedAssertion<'a> {
+    /// Returns `Some(_)` if the comment starts with `# error:` or `# revealed:`,
+    /// indicating that it is a assertion comment.
+    fn from_comment(comment_body: &'a str) -> Option<Self> {
+        let (keyword, body) = comment_body.split_once(':')?;
+        let keyword = keyword.trim();
+
+        let keyword = keyword.trim();
+
+        // Support other pragma comments coming after `error` or `revealed`, e.g.
+exec
+/bin/zsh -lc "sed -n '620,1040p' crates/ty_test/src/matcher.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+                0,
+            )],
+        );
+
+        assert_fail(
+            result,
+            &[(
+                0,
+                &[
+                    "unmatched assertion: revealed: Foo",
+                    r#"unexpected error: 1 [not-revealed-type] "`Foo`""#,
+                ],
+            )],
+        );
+    }
+
+    #[test]
+    fn revealed_wrong_message() {
+        let result = get_result(
+            "x # revealed: Foo",
+exec
+/bin/zsh -lc "sed -n '1,120p' crates/ruff_index/src/slice.rs && sed -n '1,80p' crates/ty_python_semantic/tests/mdtest.rs && sed -n '60,95p' crates/ty_static/src/env_vars.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+use crate::Idx;
+use crate::vec::IndexVec;
+use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
+use std::ops::{Index, IndexMut, Range};
+
+/// A view into contiguous `T`s, indexed by `I` rather than by `usize`.
+#[derive(PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct IndexSlice<I, T> {
+    index: PhantomData<I>,
+    pub raw: [T],
+}
+
+impl<I: Idx, T> IndexSlice<I, T> {
+    #[inline]
+    pub const fn empty() -> &'static Self {
+        Self::from_raw(&[])
+    }
+
+codex
+A few cleanup candidates are emerging: one obvious duplicate trim in pragma parsing, one unused lifetime left in matcher after the snapshot return-type change, and one `unwrap()` in inline snapshot parsing where the parser can keep returning a normal mdtest error. I’m checking usage patterns and line numbers now so the output can be prescriptive and bounded.
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '780,825p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/pragma_comments.rs | sed -n '245,285p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "rg \"last_mut\\(\" crates/ty_test crates/ruff_index -n" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/matcher.rs | sed -n '315,345p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   245	
+   246	/// A single assertion comment.
+   247	///
+   248	/// This type represents an *attempted* assertion comment, but not necessarily a *valid* assertion comment.
+   249	/// Parsing is done lazily in `matcher.rs`; this allows us to emit nicer error messages
+   250	/// in the event of an invalid comment.
+   251	#[derive(Debug)]
+   252	pub(crate) enum UnparsedAssertion<'a> {
+   253	    /// A `# revealed:` assertion.
+   254	    Revealed(&'a str),
+   255	    /// An `# error:` assertion.
+   256	    Error(&'a str),
+   257	}
+   258	
+   259	impl std::fmt::Display for UnparsedAssertion<'_> {
+   260	    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+   261	        match self {
+   262	            Self::Revealed(expected_type) => {
+   263	                write!(f, "revealed: {expected_type}")
+   264	            }
+ succeeded in 0ms:
+   780	
+   781	        Ok(())
+   782	    }
+   783	
+   784	    fn process_code_block(
+   785	        &mut self,
+   786	        lang: &'s str,
+   787	        code: &'s str,
+   788	        backtick_offsets: BacktickOffsets,
+   789	    ) -> anyhow::Result<()> {
+   790	        // We never pop the implicit root section.
+   791	        let section = self.stack.top();
+   792	        let test_name = self.sections[section].title;
+   793	
+   794	        if lang == "toml" {
+   795	            return self.process_config_block(code);
+   796	        }
+   797	
+   798	        if lang == "ignore" {
+   799	            return Ok(());
+ succeeded in 0ms:
+crates/ty_test/src/parser.rs:937:        let Some(file) = self.files.last_mut() else {
+crates/ty_test/src/parser.rs:950:        let code_block = file.code_blocks.last_mut().unwrap();
+crates/ruff_index/src/slice.rs:54:    pub const fn last_mut(&mut self) -> Option<&mut T> {
+crates/ruff_index/src/slice.rs:55:        self.raw.last_mut()
+ succeeded in 0ms:
+   315	        Self {
+   316	            line_index: line_index(db, file),
+   317	            source: source_text(db, file),
+   318	        }
+   319	    }
+   320	
+   321	    /// Check a slice of [`Diagnostic`]s against a slice of
+   322	    /// [`UnparsedAssertion`]s.
+   323	    ///
+   324	    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
+   325	    /// assertions.
+   326	    fn match_line<'a, 'b>(
+   327	        &self,
+   328	        diagnostics: &'a [&'a Diagnostic],
+   329	        pragmas: &LinePragmaComments,
+   330	    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
+   331	    where
+   332	        'b: 'a,
+   333	    {
+   334	        let mut failures = vec![];
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '205,230p;820,895p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   205	impl OutputFormat {
+   206	    const fn is_cli(self) -> bool {
+   207	        matches!(self, OutputFormat::Cli)
+   208	    }
+   209	
+   210	    /// Write a test error in the appropriate format.
+   211	    ///
+   212	    /// For CLI format, errors are appended to `assertion_buf` so they appear
+   213	    /// in the assertion-failure message.
+   214	    ///
+   215	    /// For GitHub format, errors are printed directly to stdout so that GitHub
+   216	    /// Actions can detect them as workflow commands. Workflow commands must
+   217	    /// appear at the beginning of a line in stdout to be parsed by GitHub.
+   218	    #[expect(clippy::print_stdout)]
+   219	    fn write_error(
+   220	        self,
+   221	        assertion_buf: &mut String,
+   222	        file: &str,
+   223	        line: OneIndexed,
+   224	        failure: &Failure,
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '930,965p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   930	    }
+   931	
+   932	    fn process_inline_snapshot(
+   933	        &mut self,
+   934	        code: &'s str,
+   935	        offsets: BacktickOffsets,
+   936	    ) -> anyhow::Result<()> {
+   937	        let Some(file) = self.files.last_mut() else {
+   938	            bail!(
+   939	                "Inline diagnostics block must follow a checkable Python file in the same section."
+   940	            );
+   941	        };
+   942	
+   943	        if !file.is_checkable() {
+   944	            bail!(
+   945	                "Inline diagnostics block must follow a checkable Python file block in the same section but it follows a {} block.",
+   946	                file.lang
+   947	            );
+   948	        }
+   949	
+exec
+/bin/zsh -lc "rg \"render_diff|with_diff|diff\\(\" -n crates/ty_test/src" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/lib.rs:234:                if let Some((expected, actual)) = failure.diff() {
+crates/ty_test/src/lib.rs:235:                    let _ = render_diff(assertion_buf, actual, expected);
+crates/ty_test/src/lib.rs:787:        .show_fix_diff(true)
+crates/ty_test/src/lib.rs:918:                    )).with_diff(snapshot_code_block.expected.to_string(), actual)],
+crates/ty_test/src/lib.rs:930:fn render_diff(f: &mut dyn std::fmt::Write, expected: &str, actual: &str) -> std::fmt::Result {
+crates/ty_test/src/lib.rs:936:    let mut unified = diff.unified_diff();
+crates/ty_test/src/matcher.rs:74:    pub(super) fn diff(&self) -> Option<(&str, &str)> {
+crates/ty_test/src/matcher.rs:80:    pub(super) fn with_diff(mut self, expected: String, actual: String) -> Self {
+exec
+/bin/zsh -lc 'rg "MDTEST_UPDATE_SNAPSHOTS|snapshot:" -n crates/ty_test crates/ty_python_semantic/resources/mdtest | head -80' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/lib.rs:49:const MDTEST_UPDATE_SNAPSHOTS: &str = "MDTEST_UPDATE_SNAPSHOTS";
+crates/ty_test/src/lib.rs:814:    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
+crates/ty_test/src/lib.rs:897:                        "Add a `diagnostics` block for this `# snapshot` assertion, or set `{MDTEST_UPDATE_SNAPSHOTS}` to insert one automatically",
+crates/ty_test/src/lib.rs:917:                        "inline diagnostics snapshot are out of date; set `{MDTEST_UPDATE_SNAPSHOTS}` to update the `diagnostics` block",
+crates/ty_test/README.md:178:`MDTEST_UPDATE_SNAPSHOTS` set. For example:
+crates/ty_test/README.md:181:MDTEST_UPDATE_SNAPSHOTS=1 cargo test -p ty_python_semantic --test mdtest -- diagnostics/missing_argument.md
+crates/ty_test/README.md:187:MDTEST_UPDATE_SNAPSHOTS=1 MDTEST_TEST_FILTER="Missing argument diagnostics" cargo test -p ty_python_semantic --test mdtest -- --nocapture
+exec
+/bin/zsh -lc "sed -n '150,210p' crates/ty_test/README.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '228,238p;910,940p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   228	                let _ = writeln!(
+   229	                    assertion_buf,
+   230	                    "  {file_line} {message}",
+   231	                    file_line = format!("{file}:{line}").cyan(),
+   232	                    message = failure.message()
+   233	                );
+   234	                if let Some((expected, actual)) = failure.diff() {
+   235	                    let _ = render_diff(assertion_buf, actual, expected);
+   236	                }
+   237	            }
+   238	            OutputFormat::GitHub => {
+   910	                range: snapshot_code_block.range(),
+   911	                replacement: format!("```diagnostics\n{actual}\n```"),
+   912	            });
+   913	        } else {
+   914	            failures.push(
+   915	                failure_line,
+   916	                vec![Failure::new(format_args!(
+   917	                        "inline diagnostics snapshot are out of date; set `{MDTEST_UPDATE_SNAPSHOTS}` to update the `diagnostics` block",
+   918	                    )).with_diff(snapshot_code_block.expected.to_string(), actual)],
+ succeeded in 0ms:
+```py
+# snapshot
+x: int = "a"  # error: [invalid-assignment]
+
+# snapshot
+reveal_type(x)  # revealed: int
+```
+
+Some explanatory prose can go here.
+
+```diagnostics
+error[invalid-assignment]: Object of type `Literal["a"]` is not assignable to `int`
+ --> src/mdtest_snippet.py:2:10
+  |
+2 | x: int = "a"  # error: [invalid-assignment]
+  |          ^^^
+
+info: Revealed type is `int`
+ --> src/mdtest_snippet.py:5:13
+  |
+exec
+/bin/zsh -lc "rg \"fn last\\(|fn last_mut\\(\" -n crates/ruff_index/src" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc 'rg "snapshot" crates/ty_test/src -n' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ruff_index/src/slice.rs:49:    pub const fn last(&self) -> Option<&T> {
+crates/ruff_index/src/slice.rs:54:    pub const fn last_mut(&mut self) -> Option<&mut T> {
+ succeeded in 0ms:
+crates/ty_test/src/parser.rs:144:    pub(super) fn should_snapshot_diagnostics(&self) -> bool {
+crates/ty_test/src/parser.rs:229:    /// The expected snapshot content.
+crates/ty_test/src/parser.rs:232:    /// The range of the inline snapshot block, including both fences.
+crates/ty_test/src/parser.rs:396:            inline_snapshot_block: None,
+crates/ty_test/src/parser.rs:428:    /// The code block's associated inline snapshot block (where inline snapshots are stored).
+crates/ty_test/src/parser.rs:429:    inline_snapshot_block: Option<InlineSnapshotBlock<'s>>,
+crates/ty_test/src/parser.rs:441:    pub(crate) fn inline_snapshot_block(&self) -> Option<&InlineSnapshotBlock<'s>> {
+crates/ty_test/src/parser.rs:442:        self.inline_snapshot_block.as_ref()
+crates/ty_test/src/parser.rs:576:        const SECTION_CONFIG_SNAPSHOT: &str = "snapshot-diagnostics";
+crates/ty_test/src/parser.rs:803:            return self.process_inline_snapshot(code, backtick_offsets);
+crates/ty_test/src/parser.rs:867:                        inline_snapshot_block: None,
+crates/ty_test/src/parser.rs:932:    fn process_inline_snapshot(
+crates/ty_test/src/parser.rs:953:            code_block.inline_snapshot_block.as_ref().is_none(),
+crates/ty_test/src/parser.rs:958:        code_block.inline_snapshot_block = Some(InlineSnapshotBlock {
+crates/ty_test/src/parser.rs:1012:    /// A directive to enable snapshotting diagnostics.
+crates/ty_test/src/parser.rs:1023:            MdtestDirective::SnapshotDiagnostics => f.write_str("snapshotting diagnostics"),
+crates/ty_test/src/parser.rs:1059:    use insta::assert_snapshot;
+crates/ty_test/src/parser.rs:1110:        assert_snapshot!(test.name(), @"file.md (a8decfe8bd23e259)");
+crates/ty_test/src/parser.rs:1138:        assert_snapshot!(test.name(), @"file.md (a8decfe8bd23e259)");
+crates/ty_test/src/parser.rs:1189:        assert_snapshot!(test1.name(), @"file.md - One (9f620a533a21278)");
+exec
+/bin/zsh -lc 'rg "absolute_fixture_path|snapshot_path" -n crates/ty_test/src/lib.rs' in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '800,822p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+57:    absolute_fixture_path: &Utf8Path,
+60:    snapshot_path: &Utf8Path,
+89:            absolute_fixture_path,
+91:            snapshot_path,
+186:        try_apply_markdown_edits(absolute_fixture_path, source, markdown_edits);
+290:    absolute_fixture_path: &Utf8Path,
+292:    snapshot_path: &Utf8Path,
+336:        let lockfile_path = absolute_fixture_path.with_extension("lock");
+651:                snapshot_path => snapshot_path,
+964:    absolute_fixture_path: &Utf8Path,
+978:    if let Err(err) = std::fs::write(absolute_fixture_path, updated) {
+ succeeded in 0ms:
+   800	        if index > 0 {
+   801	            writeln!(rendered).unwrap();
+   802	        }
+   803	        write!(rendered, "{}", render_diagnostic(db, diag)).unwrap();
+   804	    }
+   805	    rendered.trim_end_matches('\n').to_string()
+   806	}
+   807	
+   808	fn is_update_inline_snapshots_enabled() -> bool {
+   809	    #[cfg(test)]
+   810	    if let Some(is_enabled) = snapshot_update_mode_override() {
+   811	        return is_enabled;
+   812	    }
+   813	
+   814	    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
+   815	}
+   816	
+   817	#[cfg(test)]
+   818	fn snapshot_update_mode_override() -> Option<bool> {
+   819	    None
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '286,305p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "rg \"let keyword = keyword.trim\\(\\);\" -n crates/ty_test/src/pragma_comments.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+275:        let keyword = keyword.trim();
+277:        let keyword = keyword.trim();
+ succeeded in 0ms:
+   286	}
+   287	
+   288	fn run_test(
+   289	    db: &mut db::Db,
+   290	    absolute_fixture_path: &Utf8Path,
+   291	    relative_fixture_path: &Utf8Path,
+   292	    snapshot_path: &Utf8Path,
+   293	    test: &parser::MarkdownTest,
+   294	) -> Result<(TestOutcome, Vec<MarkdownEdit>), Failures> {
+   295	    // Initialize the system and remove all files and directories to reset the system to a clean state.
+   296	    match test.configuration().system.unwrap_or_default() {
+   297	        SystemKind::InMemory => {
+   298	            db.use_in_memory_system();
+   299	        }
+   300	        SystemKind::Os => {
+   301	            let dir = tempfile::TempDir::new().expect("Creating a temporary directory to succeed");
+   302	            let root_path = dir
+   303	                .path()
+   304	                .canonicalize()
+   305	                .expect("Canonicalizing to succeed");
+codex
+I have enough context. I’m going to write the claims document only, with accepted claims limited to cleanup that should be behavior-preserving and rejected items called out where they either change observable output or are outside the edit set.
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md && sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+
+exec
+/bin/zsh -lc 'ls -la /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+total 64
+drwxr-xr-x@  3 junekim  staff     96 Apr 17 03:02 .
+drwxr-xr-x@ 19 junekim  staff    608 Apr 17 03:02 ..
+-rw-r--r--@  1 junekim  staff  30406 Apr 17 03:03 round-1-codex-stdout.log
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md
+## Accepted Claims
+
+### C1 — Remove duplicate keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+### C4 — Replace inline snapshot parser unwrap with a normal parse error
+**File**: `crates/ty_test/src/parser.rs`:950
+**Change**: In `Parser::process_inline_snapshot`, replace `file.code_blocks.last_mut().unwrap()` with a `let Some(code_block) = file.code_blocks.last_mut() else { bail!(...) };` branch that reports that an inline diagnostics block must follow a checkable Python file block.
+**Goal link**: This keeps the new `diagnostics` block parsing path expressed as mdtest validation instead of relying on an internal panic.
+**Justification**: Valid mdtests still reach the same code block, while the parser remains consistent with surrounding `bail!`-based error handling and avoids an unnecessary panic in the inline snapshot feature path.
+
+### C5 — Refresh stale `match_line` documentation
+**File**: `crates/ty_test/src/matcher.rs`:321
+**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
+**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
+**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
+
+## Rejected
+
+- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
+- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
+- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
+- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+apply_patch(auto_approved=true) exited 0 in 13ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-1-claims.md b/samples/v2/ruff-24557/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8786e6bc42e3203f660c442d17f42634d8d5701f
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-1-claims.md
+@@ -0,0 +1,38 @@
++## Accepted Claims
++
++### C1 — Remove duplicate keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C4 — Replace inline snapshot parser unwrap with a normal parse error
++**File**: `crates/ty_test/src/parser.rs`:950
++**Change**: In `Parser::process_inline_snapshot`, replace `file.code_blocks.last_mut().unwrap()` with a `let Some(code_block) = file.code_blocks.last_mut() else { bail!(...) };` branch that reports that an inline diagnostics block must follow a checkable Python file block.
++**Goal link**: This keeps the new `diagnostics` block parsing path expressed as mdtest validation instead of relying on an internal panic.
++**Justification**: Valid mdtests still reach the same code block, while the parser remains consistent with surrounding `bail!`-based error handling and avoids an unnecessary panic in the inline snapshot feature path.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-1-claims.md b/samples/v2/ruff-24557/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8786e6bc42e3203f660c442d17f42634d8d5701f
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-1-claims.md
+@@ -0,0 +1,38 @@
++## Accepted Claims
++
++### C1 — Remove duplicate keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C4 — Replace inline snapshot parser unwrap with a normal parse error
++**File**: `crates/ty_test/src/parser.rs`:950
++**Change**: In `Parser::process_inline_snapshot`, replace `file.code_blocks.last_mut().unwrap()` with a `let Some(code_block) = file.code_blocks.last_mut() else { bail!(...) };` branch that reports that an inline diagnostics block must follow a checkable Python file block.
++**Goal link**: This keeps the new `diagnostics` block parsing path expressed as mdtest validation instead of relying on an internal panic.
++**Justification**: Valid mdtests still reach the same code block, while the parser remains consistent with surrounding `bail!`-based error handling and avoids an unnecessary panic in the inline snapshot feature path.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove duplicate keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-1-claims.md b/samples/v2/ruff-24557/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8786e6bc42e3203f660c442d17f42634d8d5701f
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-1-claims.md
+@@ -0,0 +1,38 @@
++## Accepted Claims
++
++### C1 — Remove duplicate keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C4 — Replace inline snapshot parser unwrap with a normal parse error
++**File**: `crates/ty_test/src/parser.rs`:950
++**Change**: In `Parser::process_inline_snapshot`, replace `file.code_blocks.last_mut().unwrap()` with a `let Some(code_block) = file.code_blocks.last_mut() else { bail!(...) };` branch that reports that an inline diagnostics block must follow a checkable Python file block.
++**Goal link**: This keeps the new `diagnostics` block parsing path expressed as mdtest validation instead of relying on an internal panic.
++**Justification**: Valid mdtests still reach the same code block, while the parser remains consistent with surrounding `bail!`-based error handling and avoids an unnecessary panic in the inline snapshot feature path.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+codex
+Done.
+file update:
+diff --git a/samples/v2/ruff-24557/volley/round-1-claims.md b/samples/v2/ruff-24557/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8786e6bc42e3203f660c442d17f42634d8d5701f
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/round-1-claims.md
+@@ -0,0 +1,38 @@
++## Accepted Claims
++
++### C1 — Remove duplicate keyword trimming
++**File**: `crates/ty_test/src/pragma_comments.rs`:277
++**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
++**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
++**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
++
++### C2 — Drop unused matcher lifetime parameter
++**File**: `crates/ty_test/src/matcher.rs`:326
++**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
++**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
++**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
++
++### C3 — Remove inert snapshot update override hook
++**File**: `crates/ty_test/src/lib.rs`:808
++**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
++**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
++**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
++
++### C4 — Replace inline snapshot parser unwrap with a normal parse error
++**File**: `crates/ty_test/src/parser.rs`:950
++**Change**: In `Parser::process_inline_snapshot`, replace `file.code_blocks.last_mut().unwrap()` with a `let Some(code_block) = file.code_blocks.last_mut() else { bail!(...) };` branch that reports that an inline diagnostics block must follow a checkable Python file block.
++**Goal link**: This keeps the new `diagnostics` block parsing path expressed as mdtest validation instead of relying on an internal panic.
++**Justification**: Valid mdtests still reach the same code block, while the parser remains consistent with surrounding `bail!`-based error handling and avoids an unnecessary panic in the inline snapshot feature path.
++
++### C5 — Refresh stale `match_line` documentation
++**File**: `crates/ty_test/src/matcher.rs`:321
++**Change**: Update the doc comment above `Matcher::match_line` so it describes matching a line's diagnostics against `LinePragmaComments` and returning matched diagnostics for inline snapshots, rather than describing only a slice of `UnparsedAssertion`s and unmatched values.
++**Goal link**: This clarifies the goal's selective diagnostic snapshotting behavior at the point where assertions are matched and snapshot diagnostics are collected.
++**Justification**: The current comment describes the pre-refactor assertion-only API, so correcting it removes misleading documentation without changing behavior.
++
++## Rejected
++
++- Swap the arguments in `OutputFormat::write_error` when calling `render_diff`: this likely fixes the displayed expected/actual diff direction, but it changes observable failure output and is therefore not a behavior-preserving refactor claim.
++- Delete `IndexSlice::last` and `IndexSlice::last_mut` from `crates/ruff_index/src/slice.rs`: `IndexVec::last_mut` is used by the new inline diagnostics parser, and removing the helper would require replacing a public crate API addition rather than simplifying the mdtest implementation in place.
++- Move the `MDTEST_UPDATE_SNAPSHOTS` constant into `ty_static::EnvVars`: the artifact intentionally removed mdtest-only environment variables from `ty_static`, and moving this one there would cross back into the shared static crate without reducing inline snapshot complexity.
++- Convert `matcher::match_file` and `Matcher::match_line` to return borrowed diagnostics instead of cloned `Diagnostic` values: this could reduce allocations, but it would change several function signatures and lifetime relationships across `matcher.rs` and `lib.rs`, making it a broader API refactor than needed for the goal.
+
+tokens used
+66,794
+Done.

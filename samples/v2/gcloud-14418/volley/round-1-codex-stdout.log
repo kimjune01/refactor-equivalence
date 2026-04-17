@@ -1,0 +1,727 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/14418
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9bf9-1eaf-79b1-bbf1-adf5b2d75444
+--------
+user
+# Volley — goal-anchored refactor spec
+
+You are sharpening a refactor spec into specific, testable claims against a concrete goal. Do not edit code. Produce a markdown document.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/goal/GOAL.md` — concatenation of: linked issue(s) title + body (if any), PR title, PR body. This is what the PR is *trying* to accomplish.
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/inputs/diff-base-to-test.patch` — the first-pass implementation that made tests pass. A working draft, not the final shape.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/inputs/allowed-files.txt` — source files changed from C_base to C_test (post-exclusion). You may only propose edits to files in this set.
+- **Cleanroom source tree** rooted at `/tmp/refactor-eq-workdir/cleanroom-v2/14418/` — the repo at C_test. You may grep it for patterns, imports, and idioms.
+
+Read all inputs. You may grep the wider codebase.
+
+## Task
+
+Produce a sharpened list of **prescriptive, bounded refactor claims** that, if applied, would move the artifact closer to a cleaner expression of the goal — without changing behavior.
+
+"Closer to the goal" means:
+- The implementation expresses the intent of the goal more directly (less accidental structure, fewer indirections that don't serve the goal).
+- The code is more idiomatic to the surrounding codebase at C_test.
+- Accidental complexity added during the first-pass (helper duplication, stray dead code, over-abstracted for one call site, unnecessary state) is removed.
+
+Each claim must be:
+- **Specific**: names a file, a function/block, and the change.
+- **Bounded**: one independent change, applicable without forward reference to later claims.
+- **Testable against the existing suite**: behavior preserved; the full test suite at C_test continues to pass.
+- **Justified against the goal**: one sentence on *which goal aspect* this clarifies and *why* it reduces complexity.
+- **Within scope**: only touches files in `allowed-files.txt`; never any `*.test.ts`, `*.test.tsx`, or other test files.
+
+**Empty Accepted Claims is permitted.** If the artifact is already a clean expression of the goal and no prescriptive changes are warranted, say so explicitly. Do not invent claims.
+
+List rejected candidate claims with reasons (e.g., "would cross a public API boundary", "out of allowed edit set", "would change observable behavior in test X").
+
+## Output
+
+Write to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley/round-1-claims.md`, where N is passed in the task environment.
+
+Format:
+
+```
+## Accepted Claims
+
+### C1 — <title>
+**File**: <path>:<line>
+**Change**: <prescriptive description>
+**Goal link**: <which aspect of the goal this clarifies>
+**Justification**: <one sentence>
+
+### C2 — ...
+
+## Rejected
+
+- <claim candidate>: <reason>
+```
+
+No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the goal, draft patch, allowed edit list, and relevant source before writing the claims document. I’ll only create the requested markdown output, with no code changes.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+# PR #14418 — feat(spanner): complete location-aware routing resilience and observability
+
+## PR body
+
+## Summary
+
+  This change expands the location-aware routing path in the Spanner Go client with endpoint lifecycle management,
+  stronger endpoint health handling, retry-aware exclusion, latency-aware replica selection, and route-selection tracing.
+
+  ## What Changed
+
+  - enabled location-aware routing automatically for experimental-host configurations while preserving env-var override
+    behavior
+  - added endpoint cache support for GetIfPresent, Evict, and DefaultChannel
+  - switched endpoint health evaluation to real gRPC connectivity state, including transient-failure detection
+  - added an endpoint lifecycle manager with:
+      - background probing
+      - idle eviction
+      - endpoint recreation requests
+      - recent transient-failure eviction tracking
+exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+spanner/channel_finder.go
+spanner/client.go
+spanner/endpoint_client_cache.go
+spanner/endpoint_exclusion.go
+spanner/endpoint_lifecycle_manager.go
+spanner/key_range_cache.go
+spanner/latency_tracker.go
+spanner/location_aware_client.go
+spanner/location_endpoint.go
+spanner/location_router.go
+spanner/replica_selector.go
+spanner/request_id_header.go
+spanner/testdata/location/finder_test.textproto
+spanner/testdata/location/range_cache_test.textproto
+ succeeded in 0ms:
+diff --git a/spanner/channel_finder.go b/spanner/channel_finder.go
+index a1705a59ed..29ddd04602 100644
+--- a/spanner/channel_finder.go
++++ b/spanner/channel_finder.go
+@@ -20,6 +20,7 @@ import (
+ 	"context"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
+ )
+@@ -43,6 +44,27 @@ func (f *channelFinder) useDeterministicRandom() {
+ 	f.rangeCache.useDeterministicRandom()
+ }
+ 
++func (f *channelFinder) setLifecycleManager(lifecycleManager *endpointLifecycleManager) {
++	if f == nil {
++		return
++	}
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 648ms:
+internal/generated/snippets/resourcemanager/apiv3/FoldersClient/SearchFolders/main.go
+internal/generated/snippets/dataproc/apiv1/NodeGroupControllerClient/CreateNodeGroup/main.go
+functions/apiv2beta/functionspb/functions_grpc.pb.go
+functions/apiv2beta/functionspb/functions.pb.go
+functions/apiv2beta/gapic_metadata.json
+functions/apiv2beta/function_client_example_go123_test.go
+functions/apiv2beta/auxiliary_go123.go
+functions/apiv2beta/function_client_example_test.go
+functions/apiv2beta/version.go
+functions/go.mod
+internal/generated/snippets/webrisk/apiv1beta1/WebRiskServiceV1Beta1Client/SearchHashes/main.go
+internal/generated/snippets/maps/fleetengine/delivery/apiv1/Client/ListTasks/main.go
+internal/generated/snippets/webrisk/apiv1beta1/WebRiskServiceV1Beta1Client/ComputeThreatListDiff/main.go
+internal/generated/snippets/datastream/apiv1/Client/GetConnectionProfile/main.go
+internal/generated/snippets/webrisk/apiv1/Client/ListOperations/main.go
+internal/generated/snippets/webrisk/apiv1beta1/WebRiskServiceV1Beta1Client/SearchUris/main.go
+internal/generated/snippets/maps/fleetengine/delivery/apiv1/Client/DeleteTask/main.go
+internal/generated/snippets/dataflow/apiv1beta3/JobsV1Beta3Client/GetJob/main.go
+internal/generated/snippets/beyondcorp/appconnectors/apiv1/Client/GetOperation/main.go
+internal/generated/snippets/parallelstore/apiv1beta/Client/ListLocations/main.go
+exec
+/bin/zsh -lc "sed -n '1,280p' spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '1,240p' spanner/endpoint_client_cache.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '1,280p' spanner/endpoint_lifecycle_manager.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '1,260p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"bytes"
+ succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+ succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+ succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+codex
+I’ve got the changed surface: this is all within Spanner location-aware routing, endpoint cache/lifecycle, retry exclusion, latency selection, and tracing. I’m checking the concrete implementations now so claims are grounded in actual line-level opportunities rather than broad cleanup wishes.
+exec
+/bin/zsh -lc "sed -n '280,620p' spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+			}
+			addresses[tablet.serverAddress] = struct{}{}
+		}
+		group.mu.Unlock()
+	}
+	return addresses
+}
+
+func (c *keyRangeCache) shrinkTo(newSize int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if newSize <= 0 {
+		c.clearLocked()
+		return
+	}
+	if newSize >= len(c.ranges) {
+		return
+	}
+
+exec
+/bin/zsh -lc "sed -n '260,620p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '240,520p' spanner/endpoint_lifecycle_manager.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+}
+
+func (c *locationAwareSpannerClient) Read(ctx context.Context, req *spannerpb.ReadRequest, opts ...gax.CallOption) (*spannerpb.ResultSet, error) {
+	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
+	ep := c.router.prepareReadRequestWithExclusions(ctx, req, excludedEndpoints)
+	client := c.clientForEndpoint(ep)
+	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Read", ep, client == c.defaultClient, true)
+	resp, err := client.Read(ctx, req, opts...)
+	if err != nil {
+		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+		return nil, err
+	}
+	c.router.observeResultSet(resp)
+	if txMeta := resp.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+		if isReadOnlyBegin, readOnlyStrong := readOnlyBeginFromSelector(req.GetTransaction()); isReadOnlyBegin {
+			c.router.trackReadOnlyTransaction(string(txMeta.GetId()), readOnlyStrong)
+		} else if isReadWriteBeginFromSelector(req.GetTransaction()) {
+			c.router.setTransactionAffinity(string(txMeta.GetId()), c.affinityTrackingEndpoint(ep))
+		}
+	}
+ succeeded in 0ms:
+	}
+
+	addresses := make([]string, 0, len(m.endpoints))
+	for address, state := range m.endpoints {
+		if !state.needsCreate {
+			continue
+		}
+		state.needsCreate = false
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+func (m *endpointLifecycleManager) probeManagedEndpoints() {
+	if m == nil {
+		return
+	}
+
+	for _, address := range m.managedAddresses() {
+		m.probe(address)
+exec
+/bin/zsh -lc "sed -n '1,260p' spanner/location_router.go && sed -n '1,240p' spanner/replica_selector.go && sed -n '1,220p' spanner/endpoint_exclusion.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+exec
+/bin/zsh -lc "sed -n '520,820p' spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+		return nil
+	}
+	group, ok := c.groups[groupIn.GetGroupUid()]
+	if !ok {
+		group = &cachedGroup{groupUID: groupIn.GetGroupUid(), leaderIdx: -1, refs: 1}
+		c.groups[group.groupUID] = group
+	} else {
+		group.refs++
+	}
+	group.update(groupIn)
+	return group
+}
+
+func (c *keyRangeCache) refGroup(group *cachedGroup) *cachedGroup {
+	if group != nil {
+		group.refs++
+	}
+	return group
+}
+
+exec
+/bin/zsh -lc "sed -n '1,260p' spanner/location_endpoint.go && sed -n '1,220p' spanner/latency_tracker.go && sed -n '1,180p' spanner/request_id_header.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+exec
+/bin/zsh -lc "nl -ba spanner/endpoint_lifecycle_manager.go | sed -n '1,380p' && nl -ba spanner/key_range_cache.go | sed -n '1,760p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+     1	/*
+     2	Copyright 2026 Google LLC
+     3	
+     4	Licensed under the Apache License, Version 2.0 (the "License");
+     5	you may not use this file except in compliance with the License.
+     6	You may obtain a copy of the License at
+     7	
+     8	    http://www.apache.org/licenses/LICENSE-2.0
+     9	
+    10	Unless required by applicable law or agreed to in writing, software
+    11	distributed under the License is distributed on an "AS IS" BASIS,
+    12	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    13	See the License for the specific language governing permissions and
+    14	limitations under the License.
+    15	*/
+    16	
+    17	package spanner
+    18	
+    19	import (
+    20		"context"
+exec
+/bin/zsh -lc "rg -n \"recordEndpointLatency|recordEndpointError|onFirstResponse|setReplicaSelector|newPowerOfTwoReplicaSelector|lifecycleEvictionReasonStale|isManaged\\(|wasRecentlyEvictedTransientFailure|GetIfPresent|DefaultChannel|IsTransientFailure|shouldProcessUpdate|updateAsync|isMaterialUpdate\" spanner" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+spanner/replica_selector.go:34:func newPowerOfTwoReplicaSelector() *powerOfTwoReplicaSelector {
+spanner/replica_selector.go:35:	return newPowerOfTwoReplicaSelectorWithRandom(rand.Intn)
+spanner/replica_selector.go:38:func newPowerOfTwoReplicaSelectorWithRandom(randomIntn func(int) int) *powerOfTwoReplicaSelector {
+spanner/finder_golden_test.go:67:func (e *finderGoldenEndpoint) IsTransientFailure() bool {
+spanner/finder_golden_test.go:92:func (c *finderGoldenEndpointCache) DefaultChannel() channelEndpoint {
+spanner/finder_golden_test.go:107:func (c *finderGoldenEndpointCache) GetIfPresent(address string) channelEndpoint {
+spanner/location_aware_client_test.go:193:func (*mockEndpoint) IsTransientFailure() bool {
+spanner/location_aware_client_test.go:235:func (c *mockEndpointCache) GetIfPresent(address string) channelEndpoint {
+spanner/location_aware_client_test.go:254:func (c *mockEndpointCache) DefaultChannel() channelEndpoint { return c.defaultEndpoint }
+spanner/location_aware_client_test.go:321:func TestLocationAwareSpannerClient_UsesCacheDefaultChannelForAffinityFallback(t *testing.T) {
+spanner/location_aware_client_test.go:328:	if lac.defaultAffinityEndpoint != epCache.DefaultChannel() {
+spanner/location_aware_client_test.go:462:		return router.lifecycleManager.isManaged("replica-1:443")
+spanner/location_aware_client_test.go:495:		return router.lifecycleManager.isManaged("replica-2:443") &&
+spanner/location_aware_client_test.go:496:			epCache.GetIfPresent("replica-2:443") != nil
+spanner/location_aware_client_test.go:1267:func (c *mockCloseCache) GetIfPresent(string) channelEndpoint         { return nil }
+spanner/location_aware_client_test.go:1269:func (c *mockCloseCache) DefaultChannel() channelEndpoint {
+spanner/key_range_cache.go:130:func (c *keyRangeCache) setReplicaSelector(selector replicaSelector) {
+spanner/key_range_cache.go:146:func (c *keyRangeCache) recordEndpointLatency(address string, latency time.Duration) {
+spanner/key_range_cache.go:157:func (c *keyRangeCache) recordEndpointError(address string) {
+spanner/key_range_cache.go:656:	if t.endpoint.IsTransientFailure() {
+exec
+/bin/zsh -lc "nl -ba spanner/key_range_cache.go | sed -n '760,920p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "nl -ba spanner/location_aware_client.go | sed -n '1,480p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+   760	
+   761		tabletByUID := make(map[uint64]*cachedTablet, len(g.tablets))
+   762		for _, tablet := range g.tablets {
+   763			tabletByUID[tablet.tabletUID] = tablet
+   764		}
+   765		newTablets := make([]*cachedTablet, 0, len(groupIn.GetTablets()))
+   766		for _, tabletIn := range groupIn.GetTablets() {
+   767			tablet := tabletByUID[tabletIn.GetTabletUid()]
+   768			if tablet == nil {
+   769				tablet = &cachedTablet{}
+   770			}
+   771			tablet.update(tabletIn)
+   772			newTablets = append(newTablets, tablet)
+   773		}
+   774		g.tablets = newTablets
+   775	}
+   776	
+   777	func (g *cachedGroup) hasLeaderLocked() bool {
+   778		return g.leaderIdx >= 0 && g.leaderIdx < len(g.tablets)
+   779	}
+ succeeded in 0ms:
+     1	/*
+     2	Copyright 2026 Google LLC
+     3	
+     4	Licensed under the Apache License, Version 2.0 (the "License");
+     5	you may not use this file except in compliance with the License.
+     6	You may obtain a copy of the License at
+     7	
+     8	    http://www.apache.org/licenses/LICENSE-2.0
+     9	
+    10	Unless required by applicable law or agreed to in writing, software
+    11	distributed under the License is distributed on an "AS IS" BASIS,
+    12	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    13	See the License for the specific language governing permissions and
+    14	limitations under the License.
+    15	*/
+    16	
+    17	package spanner
+    18	
+    19	import (
+    20		"context"
+exec
+/bin/zsh -lc "nl -ba spanner/channel_finder.go | sed -n '1,240p' && nl -ba spanner/location_router.go | sed -n '1,240p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "nl -ba spanner/endpoint_client_cache.go | sed -n '1,260p' && nl -ba spanner/location_endpoint.go | sed -n '1,160p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+     1	/*
+     2	Copyright 2026 Google LLC
+     3	
+     4	Licensed under the Apache License, Version 2.0 (the "License");
+     5	you may not use this file except in compliance with the License.
+     6	You may obtain a copy of the License at
+     7	
+     8	    http://www.apache.org/licenses/LICENSE-2.0
+     9	
+    10	Unless required by applicable law or agreed to in writing, software
+    11	distributed under the License is distributed on an "AS IS" BASIS,
+    12	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    13	See the License for the specific language governing permissions and
+    14	limitations under the License.
+    15	*/
+    16	
+    17	package spanner
+    18	
+    19	import (
+    20		"context"
+ succeeded in 0ms:
+     1	/*
+     2	Copyright 2026 Google LLC
+     3	
+     4	Licensed under the Apache License, Version 2.0 (the "License");
+     5	you may not use this file except in compliance with the License.
+     6	You may obtain a copy of the License at
+     7	
+     8	    http://www.apache.org/licenses/LICENSE-2.0
+     9	
+    10	Unless required by applicable law or agreed to in writing, software
+    11	distributed under the License is distributed on an "AS IS" BASIS,
+    12	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    13	See the License for the specific language governing permissions and
+    14	limitations under the License.
+    15	*/
+    16	
+    17	package spanner
+    18	
+    19	import (
+    20		"context"
+exec
+/bin/zsh -lc "rg -n \"newAffinityTrackingStream|affinityClientWithExclusions|affinityClient\\(|shouldSkipWithExclusions\\(|shouldSkip\\(|lifecycleEvictionReasonStale|recordEndpointLatency|recordEndpointError|setLatencyTrackerFactory|setReplicaSelector|latencyTrackerFactory\" spanner/*test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+spanner/location_aware_client_test.go:489:	client := lac.affinityClient([]byte("tx-unhealthy"))
+exec
+/bin/zsh -lc 'ls -ld /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley || true' in /tmp/refactor-eq-workdir/cleanroom-v2/14418exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/inputs/diff-base-to-test.patch | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+drwxr-xr-x@ 3 junekim  staff  96 Apr 17 08:04 /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley
+exec
+/bin/zsh -lc "rg -n \"newAffinityTrackingStream|affinityClientWithExclusions|affinityClient\\(|shouldSkipWithExclusions\\(|shouldSkip\\(|lifecycleEvictionReasonStale|recordEndpointLatency|recordEndpointError|setLatencyTrackerFactory|setReplicaSelector|latencyTrackerFactory\" spanner --glob '"'!**/*test.go'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/14418 succeeded in 0ms:
+diff --git a/spanner/channel_finder.go b/spanner/channel_finder.go
+index a1705a59ed..29ddd04602 100644
+--- a/spanner/channel_finder.go
++++ b/spanner/channel_finder.go
+@@ -20,6 +20,7 @@ import (
+ 	"context"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
+ )
+@@ -43,6 +44,27 @@ func (f *channelFinder) useDeterministicRandom() {
+ 	f.rangeCache.useDeterministicRandom()
+ }
+ 
++func (f *channelFinder) setLifecycleManager(lifecycleManager *endpointLifecycleManager) {
++	if f == nil {
++		return
++	}
+ succeeded in 0ms:
+spanner/key_range_cache.go:61:	latencyTrackerFactory       func() latencyTracker
+spanner/key_range_cache.go:130:func (c *keyRangeCache) setReplicaSelector(selector replicaSelector) {
+spanner/key_range_cache.go:136:func (c *keyRangeCache) setLatencyTrackerFactory(factory func() latencyTracker) {
+spanner/key_range_cache.go:142:	c.latencyTrackerFactory = factory
+spanner/key_range_cache.go:146:func (c *keyRangeCache) recordEndpointLatency(address string, latency time.Duration) {
+spanner/key_range_cache.go:157:func (c *keyRangeCache) recordEndpointError(address string) {
+spanner/key_range_cache.go:193:	if c.latencyTrackerFactory == nil {
+spanner/key_range_cache.go:196:	tracker = c.latencyTrackerFactory()
+spanner/key_range_cache.go:610:func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+spanner/key_range_cache.go:611:	return t.shouldSkipWithExclusions(hint, nil)
+spanner/key_range_cache.go:614:func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+spanner/location_aware_client.go:159:func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+spanner/location_aware_client.go:160:	return c.affinityClientWithExclusions(txID, nil)
+spanner/location_aware_client.go:180:func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+spanner/location_aware_client.go:248:	return newAffinityTrackingStream(
+spanner/location_aware_client.go:294:	return newAffinityTrackingStream(
+spanner/location_aware_client.go:405:func newAffinityTrackingStream(
+spanner/endpoint_lifecycle_manager.go:40:	lifecycleEvictionReasonStale
+spanner/channel_finder.go:54:func (f *channelFinder) recordEndpointLatency(address string, latency time.Duration) {
+spanner/channel_finder.go:58:	f.rangeCache.recordEndpointLatency(address, latency)
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley/round-1-claims.md
+## Accepted Claims
+
+### C1 — Remove the unused stale lifecycle reason
+**File**: spanner/endpoint_lifecycle_manager.go:34
+**Change**: Delete the `lifecycleEvictionReasonStale` constant from the `lifecycleEvictionReason` const block, leaving the existing transient-failure, shutdown, and idle reasons unchanged.
+**Goal link**: Endpoint lifecycle management only needs reasons that are currently emitted by probing and idle eviction.
+**Justification**: Removing the unused stale reason makes the lifecycle eviction model match the implemented resilience paths without changing any eviction behavior.
+
+### C2 — Drop the unused first-response stream callback
+**File**: spanner/location_aware_client.go:391
+**Change**: Remove `latencyOnce` and `onFirstResponse` from `affinityTrackingStream`, remove the `onFirstResponse func()` parameter from `newAffinityTrackingStream`, delete the `latencyOnce.Do` block in `Recv`, and remove the two `nil` arguments at the `StreamingRead` and `ExecuteStreamingSql` constructor call sites.
+**Goal link**: Route-selection observability and retry exclusion are handled through explicit tracing and error callbacks, not through an unpopulated first-response hook.
+**Justification**: The callback is never supplied by production code, so deleting it removes an inert latency/observability indirection while preserving streaming behavior.
+
+### C3 — Remove the obsolete tablet skip wrapper
+**File**: spanner/key_range_cache.go:610
+**Change**: Delete `cachedTablet.shouldSkip` and `cachedTablet.shouldSkipWithExclusions`, keeping `shouldSkipForRouting` and `recordKnownTransientFailure` as the only tablet skip paths.
+**Goal link**: The goal distinguishes explicit skips, endpoint exclusions, unhealthy endpoints, transient failures, and recent transient-failure evictions.
+**Justification**: The older wrapper is no longer called and lacks the lifecycle-aware skip semantics, so removing it reduces duplicate skip logic without changing routing behavior.
+
+### C4 — Inline the unused affinity-client exclusion wrapper
+**File**: spanner/location_aware_client.go:157
+**Change**: Change `affinityClient` to call `affinityEndpoint(txID, nil)` followed by `clientForEndpoint`, then delete `affinityClientWithExclusions`.
+**Goal link**: Affinity fallback with endpoint exclusions is now expressed directly through `affinityEndpoint`.
+**Justification**: The wrapper has no production caller besides `affinityClient`, so inlining it removes a layer that does not clarify retry-aware affinity routing.
+
+## Rejected
+
+- Remove all latency tracker fields and helpers from `spanner/key_range_cache.go`: rejected because latency-aware replica selection is an explicit goal aspect, and deleting the underlying scoring machinery would move the implementation away from that goal even if endpoint latency recording is not yet wired through production RPCs.
+- Wire `recordEndpointLatency` and `recordEndpointError` into unary and streaming RPC paths: rejected because it would change observable routing decisions by introducing new latency scores, which is outside a behavior-preserving refactor claim.
+- Replace `lifecycleEvictionReason` with a boolean argument to `evictEndpoint`: rejected because the existing enum names make transient-failure retention versus ordinary eviction clear, and the smaller unused-constant removal captures the accidental complexity without weakening readability.
+- Merge `prepareReadRequestWithExclusions` and `prepareExecuteSQLRequestWithExclusions` in `spanner/location_router.go` behind a higher-order helper: rejected because the helper would obscure request-specific channel-finder calls for a modest duplication reduction.
+- Change `isExperimentalLocationAPIEnabledForConfig` to fall back to `config.IsExperimentalHost` when `GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API` contains an invalid boolean: rejected because the current code treats any non-empty unparsable env var as false, and changing that would alter override behavior.
+- Remove the `recordEndpointLatency` and `recordEndpointError` forwarding methods from `spanner/channel_finder.go`: rejected because they are plausible integration points for the explicit latency-aware selection goal, and removing only the forwarding methods while retaining the lower-level tracker would make the latency path less coherent.
+apply_patch(auto_approved=true) exited 0 in 24ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley/round-1-claims.md
+file update:
+diff --git a/samples/v2/gcloud-14418/volley/round-1-claims.md b/samples/v2/gcloud-14418/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e26c7a4da21cc73531fe2d08d9f9496dec558f48
+--- /dev/null
++++ b/samples/v2/gcloud-14418/volley/round-1-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove the unused stale lifecycle reason
++**File**: spanner/endpoint_lifecycle_manager.go:34
++**Change**: Delete the `lifecycleEvictionReasonStale` constant from the `lifecycleEvictionReason` const block, leaving the existing transient-failure, shutdown, and idle reasons unchanged.
++**Goal link**: Endpoint lifecycle management only needs reasons that are currently emitted by probing and idle eviction.
++**Justification**: Removing the unused stale reason makes the lifecycle eviction model match the implemented resilience paths without changing any eviction behavior.
++
++### C2 — Drop the unused first-response stream callback
++**File**: spanner/location_aware_client.go:391
++**Change**: Remove `latencyOnce` and `onFirstResponse` from `affinityTrackingStream`, remove the `onFirstResponse func()` parameter from `newAffinityTrackingStream`, delete the `latencyOnce.Do` block in `Recv`, and remove the two `nil` arguments at the `StreamingRead` and `ExecuteStreamingSql` constructor call sites.
++**Goal link**: Route-selection observability and retry exclusion are handled through explicit tracing and error callbacks, not through an unpopulated first-response hook.
++**Justification**: The callback is never supplied by production code, so deleting it removes an inert latency/observability indirection while preserving streaming behavior.
++
++### C3 — Remove the obsolete tablet skip wrapper
++**File**: spanner/key_range_cache.go:610
++**Change**: Delete `cachedTablet.shouldSkip` and `cachedTablet.shouldSkipWithExclusions`, keeping `shouldSkipForRouting` and `recordKnownTransientFailure` as the only tablet skip paths.
++**Goal link**: The goal distinguishes explicit skips, endpoint exclusions, unhealthy endpoints, transient failures, and recent transient-failure evictions.
++**Justification**: The older wrapper is no longer called and lacks the lifecycle-aware skip semantics, so removing it reduces duplicate skip logic without changing routing behavior.
++
++### C4 — Inline the unused affinity-client exclusion wrapper
++**File**: spanner/location_aware_client.go:157
++**Change**: Change `affinityClient` to call `affinityEndpoint(txID, nil)` followed by `clientForEndpoint`, then delete `affinityClientWithExclusions`.
++**Goal link**: Affinity fallback with endpoint exclusions is now expressed directly through `affinityEndpoint`.
++**Justification**: The wrapper has no production caller besides `affinityClient`, so inlining it removes a layer that does not clarify retry-aware affinity routing.
++
++## Rejected
++
++- Remove all latency tracker fields and helpers from `spanner/key_range_cache.go`: rejected because latency-aware replica selection is an explicit goal aspect, and deleting the underlying scoring machinery would move the implementation away from that goal even if endpoint latency recording is not yet wired through production RPCs.
++- Wire `recordEndpointLatency` and `recordEndpointError` into unary and streaming RPC paths: rejected because it would change observable routing decisions by introducing new latency scores, which is outside a behavior-preserving refactor claim.
++- Replace `lifecycleEvictionReason` with a boolean argument to `evictEndpoint`: rejected because the existing enum names make transient-failure retention versus ordinary eviction clear, and the smaller unused-constant removal captures the accidental complexity without weakening readability.
++- Merge `prepareReadRequestWithExclusions` and `prepareExecuteSQLRequestWithExclusions` in `spanner/location_router.go` behind a higher-order helper: rejected because the helper would obscure request-specific channel-finder calls for a modest duplication reduction.
++- Change `isExperimentalLocationAPIEnabledForConfig` to fall back to `config.IsExperimentalHost` when `GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API` contains an invalid boolean: rejected because the current code treats any non-empty unparsable env var as false, and changing that would alter override behavior.
++- Remove the `recordEndpointLatency` and `recordEndpointError` forwarding methods from `spanner/channel_finder.go`: rejected because they are plausible integration points for the explicit latency-aware selection goal, and removing only the forwarding methods while retaining the lower-level tracker would make the latency path less coherent.
+
+file update:
+diff --git a/samples/v2/gcloud-14418/volley/round-1-claims.md b/samples/v2/gcloud-14418/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e26c7a4da21cc73531fe2d08d9f9496dec558f48
+--- /dev/null
++++ b/samples/v2/gcloud-14418/volley/round-1-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove the unused stale lifecycle reason
++**File**: spanner/endpoint_lifecycle_manager.go:34
++**Change**: Delete the `lifecycleEvictionReasonStale` constant from the `lifecycleEvictionReason` const block, leaving the existing transient-failure, shutdown, and idle reasons unchanged.
++**Goal link**: Endpoint lifecycle management only needs reasons that are currently emitted by probing and idle eviction.
++**Justification**: Removing the unused stale reason makes the lifecycle eviction model match the implemented resilience paths without changing any eviction behavior.
++
++### C2 — Drop the unused first-response stream callback
++**File**: spanner/location_aware_client.go:391
++**Change**: Remove `latencyOnce` and `onFirstResponse` from `affinityTrackingStream`, remove the `onFirstResponse func()` parameter from `newAffinityTrackingStream`, delete the `latencyOnce.Do` block in `Recv`, and remove the two `nil` arguments at the `StreamingRead` and `ExecuteStreamingSql` constructor call sites.
++**Goal link**: Route-selection observability and retry exclusion are handled through explicit tracing and error callbacks, not through an unpopulated first-response hook.
++**Justification**: The callback is never supplied by production code, so deleting it removes an inert latency/observability indirection while preserving streaming behavior.
++
++### C3 — Remove the obsolete tablet skip wrapper
++**File**: spanner/key_range_cache.go:610
++**Change**: Delete `cachedTablet.shouldSkip` and `cachedTablet.shouldSkipWithExclusions`, keeping `shouldSkipForRouting` and `recordKnownTransientFailure` as the only tablet skip paths.
++**Goal link**: The goal distinguishes explicit skips, endpoint exclusions, unhealthy endpoints, transient failures, and recent transient-failure evictions.
++**Justification**: The older wrapper is no longer called and lacks the lifecycle-aware skip semantics, so removing it reduces duplicate skip logic without changing routing behavior.
++
++### C4 — Inline the unused affinity-client exclusion wrapper
++**File**: spanner/location_aware_client.go:157
++**Change**: Change `affinityClient` to call `affinityEndpoint(txID, nil)` followed by `clientForEndpoint`, then delete `affinityClientWithExclusions`.
++**Goal link**: Affinity fallback with endpoint exclusions is now expressed directly through `affinityEndpoint`.
++**Justification**: The wrapper has no production caller besides `affinityClient`, so inlining it removes a layer that does not clarify retry-aware affinity routing.
++
++## Rejected
++
++- Remove all latency tracker fields and helpers from `spanner/key_range_cache.go`: rejected because latency-aware replica selection is an explicit goal aspect, and deleting the underlying scoring machinery would move the implementation away from that goal even if endpoint latency recording is not yet wired through production RPCs.
++- Wire `recordEndpointLatency` and `recordEndpointError` into unary and streaming RPC paths: rejected because it would change observable routing decisions by introducing new latency scores, which is outside a behavior-preserving refactor claim.
++- Replace `lifecycleEvictionReason` with a boolean argument to `evictEndpoint`: rejected because the existing enum names make transient-failure retention versus ordinary eviction clear, and the smaller unused-constant removal captures the accidental complexity without weakening readability.
++- Merge `prepareReadRequestWithExclusions` and `prepareExecuteSQLRequestWithExclusions` in `spanner/location_router.go` behind a higher-order helper: rejected because the helper would obscure request-specific channel-finder calls for a modest duplication reduction.
++- Change `isExperimentalLocationAPIEnabledForConfig` to fall back to `config.IsExperimentalHost` when `GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API` contains an invalid boolean: rejected because the current code treats any non-empty unparsable env var as false, and changing that would alter override behavior.
++- Remove the `recordEndpointLatency` and `recordEndpointError` forwarding methods from `spanner/channel_finder.go`: rejected because they are plausible integration points for the explicit latency-aware selection goal, and removing only the forwarding methods while retaining the lower-level tracker would make the latency path less coherent.
+
+codex
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley/round-1-claims.md`.
+file update:
+diff --git a/samples/v2/gcloud-14418/volley/round-1-claims.md b/samples/v2/gcloud-14418/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e26c7a4da21cc73531fe2d08d9f9496dec558f48
+--- /dev/null
++++ b/samples/v2/gcloud-14418/volley/round-1-claims.md
+@@ -0,0 +1,34 @@
++## Accepted Claims
++
++### C1 — Remove the unused stale lifecycle reason
++**File**: spanner/endpoint_lifecycle_manager.go:34
++**Change**: Delete the `lifecycleEvictionReasonStale` constant from the `lifecycleEvictionReason` const block, leaving the existing transient-failure, shutdown, and idle reasons unchanged.
++**Goal link**: Endpoint lifecycle management only needs reasons that are currently emitted by probing and idle eviction.
++**Justification**: Removing the unused stale reason makes the lifecycle eviction model match the implemented resilience paths without changing any eviction behavior.
++
++### C2 — Drop the unused first-response stream callback
++**File**: spanner/location_aware_client.go:391
++**Change**: Remove `latencyOnce` and `onFirstResponse` from `affinityTrackingStream`, remove the `onFirstResponse func()` parameter from `newAffinityTrackingStream`, delete the `latencyOnce.Do` block in `Recv`, and remove the two `nil` arguments at the `StreamingRead` and `ExecuteStreamingSql` constructor call sites.
++**Goal link**: Route-selection observability and retry exclusion are handled through explicit tracing and error callbacks, not through an unpopulated first-response hook.
++**Justification**: The callback is never supplied by production code, so deleting it removes an inert latency/observability indirection while preserving streaming behavior.
++
++### C3 — Remove the obsolete tablet skip wrapper
++**File**: spanner/key_range_cache.go:610
++**Change**: Delete `cachedTablet.shouldSkip` and `cachedTablet.shouldSkipWithExclusions`, keeping `shouldSkipForRouting` and `recordKnownTransientFailure` as the only tablet skip paths.
++**Goal link**: The goal distinguishes explicit skips, endpoint exclusions, unhealthy endpoints, transient failures, and recent transient-failure evictions.
++**Justification**: The older wrapper is no longer called and lacks the lifecycle-aware skip semantics, so removing it reduces duplicate skip logic without changing routing behavior.
++
++### C4 — Inline the unused affinity-client exclusion wrapper
++**File**: spanner/location_aware_client.go:157
++**Change**: Change `affinityClient` to call `affinityEndpoint(txID, nil)` followed by `clientForEndpoint`, then delete `affinityClientWithExclusions`.
++**Goal link**: Affinity fallback with endpoint exclusions is now expressed directly through `affinityEndpoint`.
++**Justification**: The wrapper has no production caller besides `affinityClient`, so inlining it removes a layer that does not clarify retry-aware affinity routing.
++
++## Rejected
++
++- Remove all latency tracker fields and helpers from `spanner/key_range_cache.go`: rejected because latency-aware replica selection is an explicit goal aspect, and deleting the underlying scoring machinery would move the implementation away from that goal even if endpoint latency recording is not yet wired through production RPCs.
++- Wire `recordEndpointLatency` and `recordEndpointError` into unary and streaming RPC paths: rejected because it would change observable routing decisions by introducing new latency scores, which is outside a behavior-preserving refactor claim.
++- Replace `lifecycleEvictionReason` with a boolean argument to `evictEndpoint`: rejected because the existing enum names make transient-failure retention versus ordinary eviction clear, and the smaller unused-constant removal captures the accidental complexity without weakening readability.
++- Merge `prepareReadRequestWithExclusions` and `prepareExecuteSQLRequestWithExclusions` in `spanner/location_router.go` behind a higher-order helper: rejected because the helper would obscure request-specific channel-finder calls for a modest duplication reduction.
++- Change `isExperimentalLocationAPIEnabledForConfig` to fall back to `config.IsExperimentalHost` when `GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API` contains an invalid boolean: rejected because the current code treats any non-empty unparsable env var as false, and changing that would alter override behavior.
++- Remove the `recordEndpointLatency` and `recordEndpointError` forwarding methods from `spanner/channel_finder.go`: rejected because they are plausible integration points for the explicit latency-aware selection goal, and removing only the forwarding methods while retaining the lower-level tracker would make the latency path less coherent.
+
+tokens used
+84,293
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gcloud-14418/volley/round-1-claims.md`.

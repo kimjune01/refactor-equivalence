@@ -1,0 +1,825 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24834
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a81-6a26-7143-9a6b-4bb261d686e4
+--------
+user
+# Volley — goal-anchored refactor spec
+
+You are sharpening a refactor spec into specific, testable claims against a concrete goal. Do not edit code. Produce a markdown document.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/goal/GOAL.md` — concatenation of: linked issue(s) title + body (if any), PR title, PR body. This is what the PR is *trying* to accomplish.
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/diff-base-to-test.patch` — the first-pass implementation that made tests pass. A working draft, not the final shape.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/allowed-files.txt` — source files changed from C_base to C_test (post-exclusion). You may only propose edits to files in this set.
+- **Cleanroom source tree** rooted at `/tmp/refactor-eq-workdir/cleanroom-v2/24834/` — the repo at C_test. You may grep it for patterns, imports, and idioms.
+
+Read all inputs. You may grep the wider codebase.
+
+## Task
+
+Produce a sharpened list of **prescriptive, bounded refactor claims** that, if applied, would move the artifact closer to a cleaner expression of the goal — without changing behavior.
+
+"Closer to the goal" means:
+- The implementation expresses the intent of the goal more directly (less accidental structure, fewer indirections that don't serve the goal).
+- The code is more idiomatic to the surrounding codebase at C_test.
+- Accidental complexity added during the first-pass (helper duplication, stray dead code, over-abstracted for one call site, unnecessary state) is removed.
+
+Each claim must be:
+- **Specific**: names a file, a function/block, and the change.
+- **Bounded**: one independent change, applicable without forward reference to later claims.
+- **Testable against the existing suite**: behavior preserved; the full test suite at C_test continues to pass.
+- **Justified against the goal**: one sentence on *which goal aspect* this clarifies and *why* it reduces complexity.
+- **Within scope**: only touches files in `allowed-files.txt`; never any `*.test.ts`, `*.test.tsx`, or other test files.
+
+**Empty Accepted Claims is permitted.** If the artifact is already a clean expression of the goal and no prescriptive changes are warranted, say so explicitly. Do not invent claims.
+
+List rejected candidate claims with reasons (e.g., "would cross a public API boundary", "out of allowed edit set", "would change observable behavior in test X").
+
+## Output
+
+Write to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md`, where N is passed in the task environment.
+
+Format:
+
+```
+## Accepted Claims
+
+### C1 — <title>
+**File**: <path>:<line>
+**Change**: <prescriptive description>
+**Goal link**: <which aspect of the goal this clarifies>
+**Justification**: <one sentence>
+
+### C2 — ...
+
+## Rejected
+
+- <claim candidate>: <reason>
+```
+
+No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the goal, patch, and allowed file list first, then inspect only the relevant source regions in the cleanroom tree before writing the claims document.
+exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+.gemini/settings.json
+.github/workflows/memory-nightly.yml
+GEMINI.md
+integration-tests/browser-agent.concurrent.responses
+memory-tests/baselines.json
+memory-tests/globalSetup.ts
+memory-tests/memory.idle-startup.responses
+memory-tests/memory.multi-function-call.responses
+memory-tests/memory.multi-turn.responses
+memory-tests/memory.simple-prompt.responses
+memory-tests/tsconfig.json
+memory-tests/vitest.config.ts
+package-lock.json
+package.json
+packages/a2a-server/package.json
+packages/cli/package.json
+packages/cli/src/acp/commandHandler.ts
+packages/cli/src/acp/commands/help.ts
+packages/cli/src/acp/commands/memory.ts
+packages/cli/src/config/settingsSchema.ts
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+# PR #24834 — fix(core): resolve windows symlink bypass and stabilize sandbox integration tests
+
+## PR body
+
+## Summary
+
+This PR resolves persistent flakiness and 60-second timeouts in the `sandboxManager.integration.test.ts` suite on Windows CI runners, and fixes a critical vulnerability where Windows sandboxed processes could bypass `forbiddenPaths` restrictions by accessing files via symlinks.
+
+To achieve this, we optimized the test workspace isolation strategy and fundamentally refactored how the sandbox manages path resolution across all operating systems to ensure symlink targets are explicitly evaluated and secured.
+
+## Details
+
+**1. Centralized Path Resolution Architecture:**
+- Introduced `ResolvedSandboxPaths`, a structured interface that acts as the "Source of Truth" for all sandbox boundaries (workspace, global includes, policy-allowed paths, and dynamic read/write permissions).
+- Refactored `resolveSandboxPaths` to centralize all symlink expansion, absolute path enforcement, and deduplication logic. Every path category now automatically yields both the symlink and its real target, preventing bypasses across all OS sandbox engines.
+- Streamlined `WindowsSandboxManager` to fully consume the pre-resolved struct, eliminating redundant local loops and improving the robustness of ACL applications (e.g., distinguishing between files and directories for inheritance flags).
+- *Note:* macOS and Linux managers have been minimally updated to consume the new interface fields. A follow-up PR will fully refactor their internal profile builders to remove remaining redundant path logic.
+
+**2. Stabilized Sandbox Integration Tests:**
+- **Isolated Workspaces:** Replaced `process.cwd()` with isolated temporary directories. This prevents false positives and massively speeds up `icacls` execution on Windows runners by using `os.tmpdir()`.
+ succeeded in 0ms:
+diff --git a/.gemini/settings.json b/.gemini/settings.json
+index 6a0121df17..eb7741997b 100644
+--- a/.gemini/settings.json
++++ b/.gemini/settings.json
+@@ -2,6 +2,7 @@
+   "experimental": {
+     "extensionReloading": true,
+     "modelSteering": true,
++    "memoryManager": false,
+     "topicUpdateNarration": true
+   },
+   "general": {
+diff --git a/.github/workflows/memory-nightly.yml b/.github/workflows/memory-nightly.yml
+deleted file mode 100644
+index ee4e5e589c..0000000000
+--- a/.github/workflows/memory-nightly.yml
++++ /dev/null
+@@ -1,33 +0,0 @@
+-name: 'Memory Tests: Nightly'
+-
+codex
+The patch includes broad unrelated deletions, but the goal is specifically about sandbox path resolution and integration test stability. I’m narrowing the review to allowed non-test source files that implement sandbox behavior.
+exec
+/bin/zsh -lc 'find packages/core/src/sandbox -type f | sort' in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+packages/core/src/sandbox/linux/LinuxSandboxManager.test.ts
+packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+packages/core/src/sandbox/linux/bwrapArgsBuilder.test.ts
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts
+packages/core/src/sandbox/macos/MacOsSandboxManager.test.ts
+packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+packages/core/src/sandbox/macos/baseProfile.ts
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.test.ts
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.ts
+packages/core/src/sandbox/utils/commandSafety.ts
+packages/core/src/sandbox/utils/commandUtils.ts
+packages/core/src/sandbox/utils/fsUtils.ts
+packages/core/src/sandbox/utils/proactivePermissions.test.ts
+packages/core/src/sandbox/utils/proactivePermissions.ts
+packages/core/src/sandbox/utils/sandboxDenialUtils.test.ts
+packages/core/src/sandbox/utils/sandboxDenialUtils.ts
+packages/core/src/sandbox/utils/sandboxReadWriteUtils.ts
+packages/core/src/sandbox/windows/GeminiSandbox.cs
+packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+exec
+/bin/zsh -lc 'rg -n "sandbox|ResolvedSandboxPaths|resolveSandboxPaths|forbiddenPaths|realpath|read/write|readWrite|icacls|symlink" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+654:-    "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.39.0-nightly.20260408.e77b22e63"
+655:+    "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.36.0-nightly.20260317.2f90b4653"
+660:     "test:integration:all": "npm run test:integration:sandbox:none && npm run test:integration:sandbox:docker && npm run test:integration:sandbox:podman",
+661:     "test:integration:flaky": "cross-env RUN_FLAKY_INTEGRATION=1 npm run test:integration:sandbox:none",
+662:     "test:integration:sandbox:none": "cross-env GEMINI_SANDBOX=false vitest run --root ./integration-tests",
+665:     "test:integration:sandbox:docker": "cross-env GEMINI_SANDBOX=docker npm run build:sandbox && cross-env GEMINI_SANDBOX=docker vitest run --root ./integration-tests",
+666:     "test:integration:sandbox:podman": "cross-env GEMINI_SANDBOX=podman vitest run --root ./integration-tests",
+714:-    "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.39.0-nightly.20260408.e77b22e63"
+715:+    "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.36.0-nightly.20260317.2f90b4653"
+919:-    (process.config?.variables as any)?.v8_enable_sandbox === 1;
+1044:       sandboxManager: new NoopSandboxManager(),
+2109:-    await fs.symlink(
+2114:+    await fs.symlink(skillSourceDir, destPath, 'dir');
+3543:diff --git a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+3545:--- a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+3546:+++ b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+3560:-} from '../utils/sandboxDenialUtils.js';
+3561:+import { parsePosixSandboxDenials } from '../utils/sandboxDenialUtils.js';
+3562: import { handleReadWriteCommands } from '../utils/sandboxReadWriteUtils.js';
+3571:     // If it exists (even as a broken symlink), do nothing
+exec
+/bin/zsh -lc 'rg -n "ResolvedSandboxPaths|resolveSandboxPaths|forbiddenPaths|realpath|resolvePath|readWrite|writable|sandbox" packages/core/src/sandbox packages/core/src/services/sandboxManager.ts' in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+packages/core/src/services/sandboxManager.ts:13:} from '../sandbox/utils/commandSafety.js';
+packages/core/src/services/sandboxManager.ts:17:} from '../sandbox/windows/commandSafety.js';
+packages/core/src/services/sandboxManager.ts:25:import type { SandboxPolicyManager } from '../policy/sandboxPolicyManager.js';
+packages/core/src/services/sandboxManager.ts:29: * A structured result of fully resolved sandbox paths.
+packages/core/src/services/sandboxManager.ts:33:export interface ResolvedSandboxPaths {
+packages/core/src/services/sandboxManager.ts:38:  /** Directories included globally across all commands in this sandbox session. */
+packages/core/src/services/sandboxManager.ts:53:    /** Paths that should be writable by the command. */
+packages/core/src/services/sandboxManager.ts:61: * Security boundaries and permissions applied to a specific sandboxed execution.
+packages/core/src/services/sandboxManager.ts:75: * Configuration for the sandbox mode behavior.
+packages/core/src/services/sandboxManager.ts:94:  forbiddenPaths?: () => Promise<string[]>;
+packages/core/src/services/sandboxManager.ts:95:  /** The current sandbox mode behavior from config. */
+packages/core/src/services/sandboxManager.ts:102: * Request for preparing a command to run in a sandbox.
+packages/core/src/services/sandboxManager.ts:118: * A command that has been prepared for sandboxed execution.
+packages/core/src/services/sandboxManager.ts:134: * A structured result from parsing sandbox denials.
+packages/core/src/services/sandboxManager.ts:144: * Interface for a service that prepares commands for sandboxed execution.
+packages/core/src/services/sandboxManager.ts:148:   * Prepares a command to run in a sandbox, including environment sanitization.
+packages/core/src/services/sandboxManager.ts:153:   * Checks if a command with its arguments is known to be safe for this sandbox.
+packages/core/src/services/sandboxManager.ts:158:   * Checks if a command with its arguments is explicitly known to be dangerous for this sandbox.
+packages/core/src/services/sandboxManager.ts:163:   * Parses the output of a command to detect sandbox denials.
+packages/core/src/services/sandboxManager.ts:168:   * Returns the primary workspace directory for this sandbox.
+exec
+/bin/zsh -lc "sed -n '240,520p' packages/core/src/services/sandboxManager.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "sed -n '1,240p' packages/core/src/services/sandboxManager.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+    '.idea',
+    '.vscode',
+  ]);
+
+  async function walk(dir: string, depth: number) {
+    if (depth > maxDepth) return;
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!skipDirs.has(entry.name)) {
+            await walk(fullPath, depth + 1);
+          }
+        } else if (entry.isFile()) {
+          if (isSecretFile(entry.name)) {
+            secrets.push(fullPath);
+          }
+        }
+      }
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  isKnownSafeCommand as isMacSafeCommand,
+  isDangerousCommand as isMacDangerousCommand,
+} from '../sandbox/utils/commandSafety.js';
+import {
+  isKnownSafeCommand as isWindowsSafeCommand,
+  isDangerousCommand as isWindowsDangerousCommand,
+} from '../sandbox/windows/commandSafety.js';
+import { isNodeError } from '../utils/errors.js';
+import {
+  sanitizeEnvironment,
+exec
+/bin/zsh -lc "sed -n '1,620p' packages/core/src/sandbox/windows/WindowsSandboxManager.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import {
+  type SandboxManager,
+  type SandboxRequest,
+  type SandboxedCommand,
+  GOVERNANCE_FILES,
+  findSecretFiles,
+  type GlobalSandboxOptions,
+  type SandboxPermissions,
+  type ParsedSandboxDenial,
+  resolveSandboxPaths,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/sandbox/linux/LinuxSandboxManager.ts | sed -n '230,280p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "nl -ba packages/core/src/sandbox/macos/MacOsSandboxManager.ts | sed -n '110,170p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "nl -ba packages/core/src/sandbox/windows/WindowsSandboxManager.ts | sed -n '430,570p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "nl -ba packages/core/src/services/sandboxManager.ts | sed -n '340,430p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "nl -ba packages/core/src/sandbox/windows/WindowsSandboxManager.ts | sed -n '250,430p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+   110	      : undefined;
+   111	
+   112	    const mergedAdditional: SandboxPermissions = {
+   113	      fileSystem: {
+   114	        read: [
+   115	          ...(persistentPermissions?.fileSystem?.read ?? []),
+   116	          ...(req.policy?.additionalPermissions?.fileSystem?.read ?? []),
+   117	        ],
+   118	        write: [
+   119	          ...(persistentPermissions?.fileSystem?.write ?? []),
+   120	          ...(req.policy?.additionalPermissions?.fileSystem?.write ?? []),
+   121	        ],
+   122	      },
+   123	      network:
+   124	        defaultNetwork ||
+   125	        persistentPermissions?.network ||
+   126	        req.policy?.additionalPermissions?.network ||
+   127	        false,
+   128	    };
+   129	
+ succeeded in 0ms:
+   230	    };
+   231	
+   232	    const { command: finalCommand, args: finalArgs } = handleReadWriteCommands(
+   233	      req,
+   234	      mergedAdditional,
+   235	      this.options.workspace,
+   236	      req.policy?.allowedPaths,
+   237	    );
+   238	
+   239	    const sanitizationConfig = getSecureSanitizationConfig(
+   240	      req.policy?.sanitizationConfig,
+   241	    );
+   242	
+   243	    const sanitizedEnv = sanitizeEnvironment(req.env, sanitizationConfig);
+   244	
+   245	    const resolvedPaths = await resolveSandboxPaths(
+   246	      this.options,
+   247	      req,
+   248	      mergedAdditional,
+   249	    );
+ succeeded in 0ms:
+   340	
+   341	  getWorkspace(): string {
+   342	    return this.options?.workspace ?? process.cwd();
+   343	  }
+   344	
+   345	  getOptions(): GlobalSandboxOptions | undefined {
+   346	    return this.options;
+   347	  }
+   348	}
+   349	
+   350	/**
+   351	 * Resolves and sanitizes all path categories for a sandbox request.
+   352	 */
+   353	export async function resolveSandboxPaths(
+   354	  options: GlobalSandboxOptions,
+   355	  req: SandboxRequest,
+   356	  overridePermissions?: SandboxPermissions,
+   357	): Promise<ResolvedSandboxPaths> {
+   358	  const workspace = resolveToRealPath(options.workspace);
+   359	
+ succeeded in 0ms:
+   430	          // Ignore errors
+   431	        }
+   432	      },
+   433	    };
+   434	  }
+   435	
+   436	  /**
+   437	   * Grants "Low Mandatory Level" access to a path using icacls.
+   438	   */
+   439	  private async grantLowIntegrityAccess(targetPath: string): Promise<void> {
+   440	    if (os.platform() !== 'win32') {
+   441	      return;
+   442	    }
+   443	
+   444	    const resolvedPath = resolveToRealPath(targetPath);
+   445	    if (this.allowedCache.has(resolvedPath)) {
+   446	      return;
+   447	    }
+   448	
+   449	    // Explicitly reject UNC paths to prevent credential theft/SSRF,
+ succeeded in 0ms:
+   250	        ],
+   251	        write: [
+   252	          ...(persistentPermissions?.fileSystem?.write ?? []),
+   253	          ...(req.policy?.additionalPermissions?.fileSystem?.write ?? []),
+   254	        ],
+   255	      },
+   256	      network:
+   257	        isYolo ||
+   258	        persistentPermissions?.network ||
+   259	        req.policy?.additionalPermissions?.network ||
+   260	        false,
+   261	    };
+   262	
+   263	    if (req.command === '__read' && req.args[0]) {
+   264	      mergedAdditional.fileSystem!.read!.push(req.args[0]);
+   265	    } else if (req.command === '__write' && req.args[0]) {
+   266	      mergedAdditional.fileSystem!.write!.push(req.args[0]);
+   267	    }
+   268	
+   269	    const defaultNetwork =
+exec
+/bin/zsh -lc "sed -n '1,120p' packages/core/src/utils/paths.ts && nl -ba packages/core/src/utils/paths.ts | sed -n '1,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import path from 'node:path';
+import os from 'node:os';
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+export const GEMINI_DIR = '.gemini';
+export const GOOGLE_ACCOUNTS_FILENAME = 'google_accounts.json';
+
+/**
+ * Returns the home directory.
+ * If GEMINI_CLI_HOME environment variable is set, it returns its value.
+ * Otherwise, it returns the user's home directory.
+ */
+exec
+/bin/zsh -lc "rg -n \"tryRealpath\\(\" packages/core/src --glob '"'!*.test.ts'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "sed -n '1,120p' packages/core/src/sandbox/utils/fsUtils.ts && rg -n \"sanitizePaths\\(|getPathIdentity\\(\" packages/core/src --glob '"'!*.test.ts'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+packages/core/src/services/sandboxManager.ts:455:export async function tryRealpath(p: string): Promise<string> {
+packages/core/src/services/sandboxManager.ts:464:      return path.join(await tryRealpath(parentDir), path.basename(p));
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:66:  const workspacePath = tryRealpath(options.workspace);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:93:      const resolved = tryRealpath(includeDir);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:102:    const resolved = tryRealpath(allowedPath);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:107:        const resolvedParent = tryRealpath(dirname(resolved));
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:129:      const safeResolvedPath = tryRealpath(p);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:141:      const safeResolvedPath = tryRealpath(p);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:150:    const realPath = tryRealpath(filePath);
+packages/core/src/sandbox/linux/bwrapArgsBuilder.ts:160:      resolved = tryRealpath(p); // Forbidden paths should still resolve to block the real path
+packages/core/src/sandbox/utils/fsUtils.ts:14:export function tryRealpath(p: string): string {
+packages/core/src/sandbox/utils/fsUtils.ts:23:      return path.join(tryRealpath(parentDir), path.basename(p));
+packages/core/src/sandbox/utils/fsUtils.ts:44:        const resolvedWorktreeGitDir = tryRealpath(worktreeGitDir);
+packages/core/src/sandbox/utils/fsUtils.ts:52:          if (tryRealpath(backlink) === tryRealpath(gitPath)) {
+packages/core/src/sandbox/utils/fsUtils.ts:66:              if (tryRealpath(worktreePath) === tryRealpath(workspacePath)) {
+packages/core/src/sandbox/utils/fsUtils.ts:79:        const mainGitDir = tryRealpath(
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.ts:53:  const workspacePath = tryRealpath(options.workspace);
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.ts:61:  const tmpPath = tryRealpath(os.tmpdir());
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.ts:69:    const realGovernanceFile = tryRealpath(governanceFile);
+packages/core/src/sandbox/macos/seatbeltArgsBuilder.ts:97:    const resolvedBase = tryRealpath(basePath);
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+export function isErrnoException(e: unknown): e is NodeJS.ErrnoException {
+  return e instanceof Error && 'code' in e;
+}
+
+export function tryRealpath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch (e) {
+    if (isErrnoException(e) && e.code === 'ENOENT') {
+      const parentDir = path.dirname(p);
+      if (parentDir === p) {
+exec
+/bin/zsh -lc "rg -n \"function resolveToRealPath|export function resolveToRealPath\" packages/core/src/utils/paths.ts packages/core/src -g 'paths.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+packages/core/src/utils/paths.ts:381:export function resolveToRealPath(pathStr: string): string {
+packages/core/src/utils/paths.ts:381:export function resolveToRealPath(pathStr: string): string {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/utils/paths.ts | sed -n '360,410p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+   360	    c = c.toLowerCase();
+   361	  }
+   362	
+   363	  const relative = pathModule.relative(p, c);
+   364	
+   365	  return (
+   366	    !relative.startsWith(`..${pathModule.sep}`) &&
+   367	    relative !== '..' &&
+   368	    !pathModule.isAbsolute(relative)
+   369	  );
+   370	}
+   371	
+   372	/**
+   373	 * Resolves a path to its real path, sanitizing it first.
+   374	 * - Removes 'file://' protocol if present.
+   375	 * - Decodes URI components (e.g. %20 -> space).
+   376	 * - Resolves symbolic links using fs.realpathSync.
+   377	 *
+   378	 * @param pathStr The path string to resolve.
+   379	 * @returns The resolved real path.
+exec
+/bin/zsh -lc "nl -ba packages/core/src/utils/paths.ts | sed -n '397,450p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+   397	function robustRealpath(p: string, visited = new Set<string>()): string {
+   398	  const key = process.platform === 'win32' ? p.toLowerCase() : p;
+   399	  if (visited.has(key)) {
+   400	    throw new Error(`Infinite recursion detected in robustRealpath: ${p}`);
+   401	  }
+   402	  visited.add(key);
+   403	  try {
+   404	    return fs.realpathSync(p);
+   405	  } catch (e: unknown) {
+   406	    if (
+   407	      e &&
+   408	      typeof e === 'object' &&
+   409	      'code' in e &&
+   410	      (e.code === 'ENOENT' || e.code === 'EISDIR')
+   411	    ) {
+   412	      try {
+   413	        const stat = fs.lstatSync(p);
+   414	        if (stat.isSymbolicLink()) {
+   415	          const target = fs.readlinkSync(p);
+   416	          const resolvedTarget = path.resolve(path.dirname(p), target);
+codex
+I’ve found a few places where the draft carries minor accidental structure without changing the sandbox contract. I’m checking each candidate against the “behavior preserved” constraint before writing the markdown, because some tempting path-resolution changes would actually alter symlink behavior.
+exec
+/bin/zsh -lc "sed -n '1,130p' packages/core/src/sandbox/linux/LinuxSandboxManager.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "sed -n '1,120p' packages/core/src/sandbox/macos/MacOsSandboxManager.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs';
+import { join, dirname } from 'node:path';
+import os from 'node:os';
+import {
+  type SandboxManager,
+  type GlobalSandboxOptions,
+  type SandboxRequest,
+  type SandboxedCommand,
+  type SandboxPermissions,
+  GOVERNANCE_FILES,
+  type ParsedSandboxDenial,
+  resolveSandboxPaths,
+} from '../../services/sandboxManager.js';
+import type { ShellExecutionResult } from '../../services/shellExecutionService.js';
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  type SandboxManager,
+  type SandboxRequest,
+  type SandboxedCommand,
+  type SandboxPermissions,
+  type GlobalSandboxOptions,
+  type ParsedSandboxDenial,
+  resolveSandboxPaths,
+} from '../../services/sandboxManager.js';
+import type { ShellExecutionResult } from '../../services/shellExecutionService.js';
+import {
+exec
+/bin/zsh -lc "sed -n '1,160p' packages/core/src/sandbox/windows/windowsSandboxDenialUtils.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834exec
+/bin/zsh -lc "sed -n '1,220p' packages/core/src/sandbox/utils/sandboxDenialUtils.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { type ParsedSandboxDenial } from '../../services/sandboxManager.js';
+import type { ShellExecutionResult } from '../../services/shellExecutionService.js';
+
+/**
+ * Windows-specific sandbox denial detection.
+ * Extracts paths from "Access is denied" and related errors.
+ */
+export function parseWindowsSandboxDenials(
+  result: ShellExecutionResult,
+): ParsedSandboxDenial | undefined {
+  const output = result.output || '';
+  const errorOutput = result.error?.message;
+  const combined = (output + ' ' + (errorOutput || '')).toLowerCase();
+
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { type ParsedSandboxDenial } from '../../services/sandboxManager.js';
+import type { ShellExecutionResult } from '../../services/shellExecutionService.js';
+
+/**
+ * Common POSIX-style sandbox denial detection.
+ * Used by macOS and Linux sandbox managers.
+ */
+export function parsePosixSandboxDenials(
+  result: ShellExecutionResult,
+): ParsedSandboxDenial | undefined {
+  const output = result.output || '';
+  const errorOutput = result.error?.message;
+  const combined = (output + ' ' + (errorOutput || '')).toLowerCase();
+
+exec
+/bin/zsh -lc "sed -n '4240,4360p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+         `[MemoryService] Completed in ${elapsed}s. No new skills created (processed ${newSessionIds.length} session(s))`,
+diff --git a/packages/core/src/services/sandboxManager.ts b/packages/core/src/services/sandboxManager.ts
+index 673c13b9af..b4b8e97451 100644
+--- a/packages/core/src/services/sandboxManager.ts
++++ b/packages/core/src/services/sandboxManager.ts
+@@ -23,6 +23,28 @@ import {
+ } from './environmentSanitization.js';
+ import type { ShellExecutionResult } from './shellExecutionService.js';
+ import type { SandboxPolicyManager } from '../policy/sandboxPolicyManager.js';
++import { resolveToRealPath } from '../utils/paths.js';
++
++/**
++ * A structured result of fully resolved sandbox paths.
++ * All paths in this object are absolute, deduplicated, and expanded to include
++ * both the original path and its real target (if it is a symlink).
++ */
++export interface ResolvedSandboxPaths {
++  /** The primary workspace directory. */
++  workspace: string;
++  /** Explicitly denied paths. */
+exec
+/bin/zsh -lc 'ls -ld /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley || true' in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+drwxr-xr-x@ 3 junekim  staff  96 Apr 17 01:14 /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley
+exec
+/bin/zsh -lc "ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley && [ -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md ] && sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 exited 1 in 0ms:
+total 64
+-rw-r--r--@ 1 junekim  staff  30277 Apr 17 01:15 round-1-codex-stdout.log
+codex
+I’m going to write the claims file now. The accepted set is intentionally small: the stronger-looking POSIX path-resolution changes would alter sandbox profiles rather than preserve behavior.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+## Accepted Claims
+
+### C1 — Name the path-resolution helpers by boundary role
+**File**: packages/core/src/services/sandboxManager.ts:364
+**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
+**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
+**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
+
+### C2 — Remove stale step numbering from Windows sandbox preparation comments
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
+**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
+**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
+**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
+
+### C3 — Return the sanitized Windows environment directly
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
+**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
+**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
+**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
+
+## Rejected
+
+- Use `resolvedPaths.globalIncludes` in `MacOsSandboxManager.prepareCommand` when building `allowedPaths`: this would change observable macOS sandbox profile behavior for symlinked include directories rather than being a behavior-preserving refactor, and the goal explicitly notes POSIX profile-builder cleanup as follow-up work.
+- Use `resolvedPaths.globalIncludes` in `LinuxSandboxManager.prepareCommand` when passing `includeDirectories` to `buildBwrapArgs`: this would alter Linux bind/mask behavior for symlinked include directories and is not safely behavior-preserving against C_test.
+- Replace `this.options.workspace` with `resolvedPaths.workspace` in macOS or Linux profile construction and governance-file setup: this would change which textual workspace path is emitted or touched when the workspace itself is a symlink.
+- Remove the exported async `tryRealpath` from `packages/core/src/services/sandboxManager.ts`: it appears unused by non-test source, but tests import or spy on the export, and removing it would cross an observable module boundary.
+- Change `resolveSandboxPaths` so relative inputs are rejected before `resolveToRealPath` normalizes them: although closer to the comment's "absolute path enforcement" wording, it would change current behavior for relative path inputs.
+- Fold the Windows `grantLowIntegrityAccess` and `denyLowIntegrityAccess` realpath calls into `resolveSandboxPaths`: those helpers are also used for discovered secret files, so removing local resolution would change behavior for paths that do not originate from the resolved struct.
+- Refactor or remove memory-test files, package metadata, or unrelated settings changes from the artifact: those files are in the allowed edit set, but they do not express the sandbox symlink bypass or Windows integration-test stabilization goal.
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+file update:
+diff --git a/samples/v2/gemini-cli-24834/volley/round-1-claims.md b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9cadc3cd88ff3fee675529b5389dee117489d048
+--- /dev/null
++++ b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C1 — Name the path-resolution helpers by boundary role
++**File**: packages/core/src/services/sandboxManager.ts:364
++**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
++**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
++**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
++
++### C2 — Remove stale step numbering from Windows sandbox preparation comments
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
++**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
++**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
++**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
++
++### C3 — Return the sanitized Windows environment directly
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
++**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
++**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
++**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
++
++## Rejected
++
++- Use `resolvedPaths.globalIncludes` in `MacOsSandboxManager.prepareCommand` when building `allowedPaths`: this would change observable macOS sandbox profile behavior for symlinked include directories rather than being a behavior-preserving refactor, and the goal explicitly notes POSIX profile-builder cleanup as follow-up work.
++- Use `resolvedPaths.globalIncludes` in `LinuxSandboxManager.prepareCommand` when passing `includeDirectories` to `buildBwrapArgs`: this would alter Linux bind/mask behavior for symlinked include directories and is not safely behavior-preserving against C_test.
++- Replace `this.options.workspace` with `resolvedPaths.workspace` in macOS or Linux profile construction and governance-file setup: this would change which textual workspace path is emitted or touched when the workspace itself is a symlink.
++- Remove the exported async `tryRealpath` from `packages/core/src/services/sandboxManager.ts`: it appears unused by non-test source, but tests import or spy on the export, and removing it would cross an observable module boundary.
++- Change `resolveSandboxPaths` so relative inputs are rejected before `resolveToRealPath` normalizes them: although closer to the comment's "absolute path enforcement" wording, it would change current behavior for relative path inputs.
++- Fold the Windows `grantLowIntegrityAccess` and `denyLowIntegrityAccess` realpath calls into `resolveSandboxPaths`: those helpers are also used for discovered secret files, so removing local resolution would change behavior for paths that do not originate from the resolved struct.
++- Refactor or remove memory-test files, package metadata, or unrelated settings changes from the artifact: those files are in the allowed edit set, but they do not express the sandbox symlink bypass or Windows integration-test stabilization goal.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24834/volley/round-1-claims.md b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9cadc3cd88ff3fee675529b5389dee117489d048
+--- /dev/null
++++ b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C1 — Name the path-resolution helpers by boundary role
++**File**: packages/core/src/services/sandboxManager.ts:364
++**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
++**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
++**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
++
++### C2 — Remove stale step numbering from Windows sandbox preparation comments
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
++**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
++**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
++**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
++
++### C3 — Return the sanitized Windows environment directly
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
++**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
++**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
++**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
++
++## Rejected
++
++- Use `resolvedPaths.globalIncludes` in `MacOsSandboxManager.prepareCommand` when building `allowedPaths`: this would change observable macOS sandbox profile behavior for symlinked include directories rather than being a behavior-preserving refactor, and the goal explicitly notes POSIX profile-builder cleanup as follow-up work.
++- Use `resolvedPaths.globalIncludes` in `LinuxSandboxManager.prepareCommand` when passing `includeDirectories` to `buildBwrapArgs`: this would alter Linux bind/mask behavior for symlinked include directories and is not safely behavior-preserving against C_test.
++- Replace `this.options.workspace` with `resolvedPaths.workspace` in macOS or Linux profile construction and governance-file setup: this would change which textual workspace path is emitted or touched when the workspace itself is a symlink.
++- Remove the exported async `tryRealpath` from `packages/core/src/services/sandboxManager.ts`: it appears unused by non-test source, but tests import or spy on the export, and removing it would cross an observable module boundary.
++- Change `resolveSandboxPaths` so relative inputs are rejected before `resolveToRealPath` normalizes them: although closer to the comment's "absolute path enforcement" wording, it would change current behavior for relative path inputs.
++- Fold the Windows `grantLowIntegrityAccess` and `denyLowIntegrityAccess` realpath calls into `resolveSandboxPaths`: those helpers are also used for discovered secret files, so removing local resolution would change behavior for paths that do not originate from the resolved struct.
++- Refactor or remove memory-test files, package metadata, or unrelated settings changes from the artifact: those files are in the allowed edit set, but they do not express the sandbox symlink bypass or Windows integration-test stabilization goal.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24834/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24834 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name the path-resolution helpers by boundary role
+**File**: packages/core/src/services/sandboxManager.ts:364
+**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
+**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
+**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
+
+### C2 — Remove stale step numbering from Windows sandbox preparation comments
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
+**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
+**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
+**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
+
+### C3 — Return the sanitized Windows environment directly
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
+**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
+**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
+**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24834/volley/round-1-claims.md b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9cadc3cd88ff3fee675529b5389dee117489d048
+--- /dev/null
++++ b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C1 — Name the path-resolution helpers by boundary role
++**File**: packages/core/src/services/sandboxManager.ts:364
++**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
++**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
++**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
++
++### C2 — Remove stale step numbering from Windows sandbox preparation comments
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
++**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
++**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
++**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
++
++### C3 — Return the sanitized Windows environment directly
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
++**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
++**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
++**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
++
++## Rejected
++
++- Use `resolvedPaths.globalIncludes` in `MacOsSandboxManager.prepareCommand` when building `allowedPaths`: this would change observable macOS sandbox profile behavior for symlinked include directories rather than being a behavior-preserving refactor, and the goal explicitly notes POSIX profile-builder cleanup as follow-up work.
++- Use `resolvedPaths.globalIncludes` in `LinuxSandboxManager.prepareCommand` when passing `includeDirectories` to `buildBwrapArgs`: this would alter Linux bind/mask behavior for symlinked include directories and is not safely behavior-preserving against C_test.
++- Replace `this.options.workspace` with `resolvedPaths.workspace` in macOS or Linux profile construction and governance-file setup: this would change which textual workspace path is emitted or touched when the workspace itself is a symlink.
++- Remove the exported async `tryRealpath` from `packages/core/src/services/sandboxManager.ts`: it appears unused by non-test source, but tests import or spy on the export, and removing it would cross an observable module boundary.
++- Change `resolveSandboxPaths` so relative inputs are rejected before `resolveToRealPath` normalizes them: although closer to the comment's "absolute path enforcement" wording, it would change current behavior for relative path inputs.
++- Fold the Windows `grantLowIntegrityAccess` and `denyLowIntegrityAccess` realpath calls into `resolveSandboxPaths`: those helpers are also used for discovered secret files, so removing local resolution would change behavior for paths that do not originate from the resolved struct.
++- Refactor or remove memory-test files, package metadata, or unrelated settings changes from the artifact: those files are in the allowed edit set, but they do not express the sandbox symlink bypass or Windows integration-test stabilization goal.
+
+codex
+Done.
+file update:
+diff --git a/samples/v2/gemini-cli-24834/volley/round-1-claims.md b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9cadc3cd88ff3fee675529b5389dee117489d048
+--- /dev/null
++++ b/samples/v2/gemini-cli-24834/volley/round-1-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C1 — Name the path-resolution helpers by boundary role
++**File**: packages/core/src/services/sandboxManager.ts:364
++**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
++**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
++**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
++
++### C2 — Remove stale step numbering from Windows sandbox preparation comments
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
++**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
++**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
++**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
++
++### C3 — Return the sanitized Windows environment directly
++**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
++**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
++**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
++**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
++
++## Rejected
++
++- Use `resolvedPaths.globalIncludes` in `MacOsSandboxManager.prepareCommand` when building `allowedPaths`: this would change observable macOS sandbox profile behavior for symlinked include directories rather than being a behavior-preserving refactor, and the goal explicitly notes POSIX profile-builder cleanup as follow-up work.
++- Use `resolvedPaths.globalIncludes` in `LinuxSandboxManager.prepareCommand` when passing `includeDirectories` to `buildBwrapArgs`: this would alter Linux bind/mask behavior for symlinked include directories and is not safely behavior-preserving against C_test.
++- Replace `this.options.workspace` with `resolvedPaths.workspace` in macOS or Linux profile construction and governance-file setup: this would change which textual workspace path is emitted or touched when the workspace itself is a symlink.
++- Remove the exported async `tryRealpath` from `packages/core/src/services/sandboxManager.ts`: it appears unused by non-test source, but tests import or spy on the export, and removing it would cross an observable module boundary.
++- Change `resolveSandboxPaths` so relative inputs are rejected before `resolveToRealPath` normalizes them: although closer to the comment's "absolute path enforcement" wording, it would change current behavior for relative path inputs.
++- Fold the Windows `grantLowIntegrityAccess` and `denyLowIntegrityAccess` realpath calls into `resolveSandboxPaths`: those helpers are also used for discovered secret files, so removing local resolution would change behavior for paths that do not originate from the resolved struct.
++- Refactor or remove memory-test files, package metadata, or unrelated settings changes from the artifact: those files are in the allowed edit set, but they do not express the sandbox symlink bypass or Windows integration-test stabilization goal.
+
+tokens used
+52,973
+Done.

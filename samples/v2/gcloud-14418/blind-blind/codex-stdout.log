@@ -1,0 +1,1586 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-14418
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9bfc-4f9b-7a00-8f54-2e9454bd6dbf
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, patch, and allowed-file list first, then apply only the accepted claims to the named source files and write the required implementation summary.
+exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+spanner/channel_finder.go
+spanner/client.go
+spanner/endpoint_client_cache.go
+spanner/endpoint_exclusion.go
+spanner/endpoint_lifecycle_manager.go
+spanner/key_range_cache.go
+spanner/latency_tracker.go
+spanner/location_aware_client.go
+spanner/location_endpoint.go
+spanner/location_router.go
+spanner/replica_selector.go
+spanner/request_id_header.go
+spanner/testdata/location/finder_test.textproto
+spanner/testdata/location/range_cache_test.textproto
+exec
+/bin/zsh -lc "sed -n '1,240p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+# PR #14418 — feat(spanner): complete location-aware routing resilience and observability
+
+## PR body
+
+## Summary
+
+  This change expands the location-aware routing path in the Spanner Go client with endpoint lifecycle management,
+  stronger endpoint health handling, retry-aware exclusion, latency-aware replica selection, and route-selection tracing.
+
+  ## What Changed
+
+  - enabled location-aware routing automatically for experimental-host configurations while preserving env-var override
+    behavior
+  - added endpoint cache support for GetIfPresent, Evict, and DefaultChannel
+  - switched endpoint health evaluation to real gRPC connectivity state, including transient-failure detection
+  - added an endpoint lifecycle manager with:
+      - background probing
+      - idle eviction
+      - endpoint recreation requests
+      - recent transient-failure eviction tracking
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove the unused stale lifecycle reason
+**File**: spanner/endpoint_lifecycle_manager.go:34
+**Change**: Delete the `lifecycleEvictionReasonStale` constant from the `lifecycleEvictionReason` const block, leaving the existing transient-failure, shutdown, and idle reasons unchanged.
+**Goal link**: Endpoint lifecycle management only needs reasons that are currently emitted by probing and idle eviction.
+**Justification**: Removing the unused stale reason makes the lifecycle eviction model match the implemented resilience paths without changing any eviction behavior.
+
+### C2 — Drop the unused first-response stream callback
+**File**: spanner/location_aware_client.go:391
+**Change**: Remove `latencyOnce` and `onFirstResponse` from `affinityTrackingStream`, remove the `onFirstResponse func()` parameter from `newAffinityTrackingStream`, delete the `latencyOnce.Do` block in `Recv`, and remove the two `nil` arguments at the `StreamingRead` and `ExecuteStreamingSql` constructor call sites.
+**Goal link**: Route-selection observability and retry exclusion are handled through explicit tracing and error callbacks, not through an unpopulated first-response hook.
+**Justification**: The callback is never supplied by production code, so deleting it removes an inert latency/observability indirection while preserving streaming behavior.
+
+### C3 — Remove the obsolete tablet skip wrapper
+**File**: spanner/key_range_cache.go:610
+**Change**: Delete `cachedTablet.shouldSkip` and `cachedTablet.shouldSkipWithExclusions`, keeping `shouldSkipForRouting` and `recordKnownTransientFailure` as the only tablet skip paths.
+**Goal link**: The goal distinguishes explicit skips, endpoint exclusions, unhealthy endpoints, transient failures, and recent transient-failure evictions.
+**Justification**: The older wrapper is no longer called and lacks the lifecycle-aware skip semantics, so removing it reduces duplicate skip logic without changing routing behavior.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+diff --git a/spanner/channel_finder.go b/spanner/channel_finder.go
+index a1705a59ed..29ddd04602 100644
+--- a/spanner/channel_finder.go
++++ b/spanner/channel_finder.go
+@@ -20,6 +20,7 @@ import (
+ 	"context"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
+ )
+@@ -43,6 +44,27 @@ func (f *channelFinder) useDeterministicRandom() {
+ 	f.rangeCache.useDeterministicRandom()
+ }
+ 
++func (f *channelFinder) setLifecycleManager(lifecycleManager *endpointLifecycleManager) {
++	if f == nil {
++		return
++	}
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 654ms:
+internal/generated/snippets/financialservices/apiv1/AMLClient/ListDatasets/main.go
+internal/generated/snippets/aiplatform/apiv1/ModelGardenClient/Deploy/main.go
+internal/generated/snippets/aiplatform/apiv1beta1/FeatureOnlineStoreAdminClient/ListFeatureOnlineStores/main.go
+internal/generated/snippets/aiplatform/apiv1/ReasoningEngineClient/ListOperations/main.go
+internal/generated/snippets/dataproc/apiv1/WorkflowTemplateClient/CancelOperation/main.go
+internal/generated/snippets/aiplatform/apiv1beta1/PipelineClient/CancelOperation/main.go
+internal/generated/snippets/beyondcorp/clientconnectorservices/apiv1/Client/GetLocation/main.go
+internal/generated/snippets/aiplatform/apiv1beta1/PersistentResourceClient/GetOperation/main.go
+internal/generated/snippets/orgpolicy/apiv2/Client/DeletePolicy/main.go
+internal/generated/snippets/financialservices/apiv1/AMLClient/CreateEngineConfig/main.go
+internal/generated/snippets/video/stitcher/apiv1/VideoStitcherClient/GetSlate/main.go
+internal/generated/snippets/aiplatform/apiv1/TensorboardClient/ListLocations/main.go
+internal/generated/snippets/aiplatform/apiv1beta1/FeatureOnlineStoreAdminClient/DeleteFeatureView/main.go
+internal/generated/snippets/aiplatform/apiv1/ModelGardenClient/GetOperation/main.go
+internal/generated/snippets/video/stitcher/apiv1/VideoStitcherClient/ListVodStitchDetails/main.go
+internal/generated/snippets/video/stitcher/apiv1/VideoStitcherClient/CreateVodSession/main.go
+internal/generated/snippets/aiplatform/apiv1/VertexRagClient/CorroborateContent/main.go
+internal/generated/snippets/video/stitcher/apiv1/VideoStitcherClient/ListVodAdTagDetails/main.go
+internal/generated/snippets/aiplatform/apiv1/ReasoningEngineClient/DeleteOperation/main.go
+internal/generated/snippets/aiplatform/apiv1/VertexRagClient/GetIamPolicy/main.go
+codex
+The spec has four accepted claims, all scoped to `spanner/endpoint_lifecycle_manager.go`, `spanner/location_aware_client.go`, and `spanner/key_range_cache.go`. I’m going to inspect those exact regions now and then patch only those files plus `IMPLEMENT_SUMMARY.md`.
+exec
+/bin/zsh -lc "sed -n '1,90p' spanner/endpoint_lifecycle_manager.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package spanner
+
+import (
+	"context"
+exec
+/bin/zsh -lc "sed -n '130,190p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.String("spanner.target", target),
+		attribute.Bool("spanner.route.used_default_endpoint", usedDefaultEndpoint),
+		attribute.Bool("spanner.route.has_channel_finder", hasChannelFinder),
+		attribute.String("spanner.route.method", method),
+	}
+	span.SetAttributes(attrs...)
+	span.AddEvent("spanner.route.selected", otrace.WithAttributes(attrs...))
+}
+
+// clientForEndpoint resolves a channelEndpoint to a spannerClient, falling
+// back to the default client if the endpoint is nil, unhealthy, or has no
+// associated client.
+func (c *locationAwareSpannerClient) clientForEndpoint(ep channelEndpoint) spannerClient {
+	if ep == nil || !ep.IsHealthy() {
+		return c.defaultClient
+	}
+	client := c.endpointCache.ClientFor(ep)
+exec
+/bin/zsh -lc "sed -n '560,660p' spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc "sed -n '360,440p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+	client := c.clientForEndpoint(ep)
+	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Commit", ep, client == c.defaultClient, len(req.GetMutations()) > 0)
+	resp, err := client.Commit(ctx, req, opts...)
+	c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+	c.router.observeCommitResponse(resp)
+	c.router.clearTransactionAffinity(string(req.GetTransactionId()))
+	return resp, err
+}
+
+func (c *locationAwareSpannerClient) Rollback(ctx context.Context, req *spannerpb.RollbackRequest, opts ...gax.CallOption) error {
+	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
+	ep := c.affinityEndpoint(req.GetTransactionId(), excludedEndpoints)
+	client := c.clientForEndpoint(ep)
+	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Rollback", ep, client == c.defaultClient, false)
+	err := client.Rollback(ctx, req, opts...)
+	c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+	c.router.clearTransactionAffinity(string(req.GetTransactionId()))
+	return err
+}
+
+ succeeded in 0ms:
+	t.skip = tabletIn.GetSkip()
+	t.role = tabletIn.GetRole()
+	t.location = tabletIn.GetLocation()
+	if t.serverAddress != tabletIn.GetServerAddress() {
+		t.serverAddress = tabletIn.GetServerAddress()
+		t.endpoint = nil
+	}
+}
+
+func (t *cachedTablet) matches(directedReadOptions *sppb.DirectedReadOptions) bool {
+	if directedReadOptions == nil {
+		return t.distance <= maxLocalReplicaDistance
+	}
+	switch replicas := directedReadOptions.GetReplicas().(type) {
+	case *sppb.DirectedReadOptions_IncludeReplicas_:
+		for _, selection := range replicas.IncludeReplicas.GetReplicaSelections() {
+			if t.matchesReplicaSelection(selection) {
+				return true
+			}
+		}
+exec
+/bin/zsh -lc "rg -n \"affinityClientWithExclusions|newAffinityTrackingStream|onFirstResponse|latencyOnce|shouldSkipWithExclusions|shouldSkip\\(\" spanner/location_aware_client.go spanner/key_range_cache.go spanner/endpoint_lifecycle_manager.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+spanner/key_range_cache.go:610:func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+spanner/key_range_cache.go:611:	return t.shouldSkipWithExclusions(hint, nil)
+spanner/key_range_cache.go:614:func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+spanner/location_aware_client.go:160:	return c.affinityClientWithExclusions(txID, nil)
+spanner/location_aware_client.go:180:func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+spanner/location_aware_client.go:248:	return newAffinityTrackingStream(
+spanner/location_aware_client.go:294:	return newAffinityTrackingStream(
+spanner/location_aware_client.go:392:	latencyOnce        sync.Once
+spanner/location_aware_client.go:394:	onFirstResponse    func()
+spanner/location_aware_client.go:405:func newAffinityTrackingStream(
+spanner/location_aware_client.go:412:	onFirstResponse func(),
+spanner/location_aware_client.go:423:		onFirstResponse:    onFirstResponse,
+spanner/location_aware_client.go:438:	s.latencyOnce.Do(func() {
+spanner/location_aware_client.go:439:		if s.onFirstResponse != nil {
+spanner/location_aware_client.go:440:			s.onFirstResponse()
+codex
+The unused wrappers and callback fields are present exactly as described, and `rg` shows no other call sites for the tablet skip wrappers. I’m patching those removals now and keeping the public method surface untouched.
+exec
+/bin/zsh -lc "sed -n '430,500p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc "sed -n '220,315p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+	if err != nil {
+		s.errorOnce.Do(func() {
+			if s.onError != nil {
+				s.onError(err)
+			}
+		})
+		return nil, err
+	}
+	s.latencyOnce.Do(func() {
+		if s.onFirstResponse != nil {
+			s.onFirstResponse()
+		}
+	})
+	// Record transaction metadata from the first PartialResultSet that contains
+	// a transaction ID.
+	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+		txID := string(txMeta.GetId())
+		s.once.Do(func() {
+			if s.trackReadOnlyBegin {
+				s.router.trackReadOnlyTransaction(txID, s.readOnlyStrong)
+ succeeded in 0ms:
+	return c.defaultClient.ExecuteBatchDml(ctx, req, opts...)
+}
+
+func (c *locationAwareSpannerClient) PartitionQuery(ctx context.Context, req *spannerpb.PartitionQueryRequest, opts ...gax.CallOption) (*spannerpb.PartitionResponse, error) {
+	return c.defaultClient.PartitionQuery(ctx, req, opts...)
+}
+
+func (c *locationAwareSpannerClient) PartitionRead(ctx context.Context, req *spannerpb.PartitionReadRequest, opts ...gax.CallOption) (*spannerpb.PartitionResponse, error) {
+	return c.defaultClient.PartitionRead(ctx, req, opts...)
+}
+
+func (c *locationAwareSpannerClient) BatchWrite(ctx context.Context, req *spannerpb.BatchWriteRequest, opts ...gax.CallOption) (spannerpb.Spanner_BatchWriteClient, error) {
+	return c.defaultClient.BatchWrite(ctx, req, opts...)
+}
+
+// --- Routed RPCs ---
+
+func (c *locationAwareSpannerClient) StreamingRead(ctx context.Context, req *spannerpb.ReadRequest, opts ...gax.CallOption) (spannerpb.Spanner_StreamingReadClient, error) {
+	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
+	ep := c.router.prepareReadRequestWithExclusions(ctx, req, excludedEndpoints)
+exec
+/bin/zsh -lc "rg -n \"sync\\.\" spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc 'rg -n "lifecycleEvictionReasonStale|lifecycleEvictionReason" spanner/endpoint_lifecycle_manager.go' in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+390:	once               sync.Once
+391:	errorOnce          sync.Once
+392:	latencyOnce        sync.Once
+ succeeded in 0ms:
+34:type lifecycleEvictionReason int
+37:	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+38:	lifecycleEvictionReasonShutdown
+39:	lifecycleEvictionReasonIdle
+40:	lifecycleEvictionReasonStale
+321:			m.evictEndpoint(address, lifecycleEvictionReasonTransientFailure)
+326:		m.evictEndpoint(address, lifecycleEvictionReasonShutdown)
+358:		m.evictEndpoint(address, lifecycleEvictionReasonIdle)
+362:func (m *endpointLifecycleManager) evictEndpoint(address string, reason lifecycleEvictionReason) {
+377:	if reason == lifecycleEvictionReasonTransientFailure {
+file update
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -609,20 +609,2 @@
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -159,3 +159,4 @@
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+@@ -177,7 +178,2 @@
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+@@ -254,3 +250,2 @@
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+@@ -300,3 +295,2 @@
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+@@ -391,5 +385,3 @@
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+@@ -411,3 +403,2 @@
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+@@ -422,3 +413,2 @@
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+@@ -437,7 +427,2 @@
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -39,3 +39,2 @@
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+apply_patch(auto_approved=true) exited 0 in 19ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+M /tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+codex
+The source edits are in place. I’m running formatting on the touched Go files and checking for any leftover deleted symbols before writing the required summary.
+exec
+/bin/zsh -lc "rg -n \"lifecycleEvictionReasonStale|affinityClientWithExclusions|onFirstResponse|latencyOnce|shouldSkipWithExclusions|func \\(t \\*cachedTablet\\) shouldSkip\\(\" spanner/endpoint_lifecycle_manager.go spanner/location_aware_client.go spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/bb-codex-14418 exited 1 in 0ms:
+
+exec
+/bin/zsh -lc 'gofmt -w spanner/endpoint_lifecycle_manager.go spanner/location_aware_client.go spanner/key_range_cache.go' in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+codex
+`gofmt` completed, and the deleted symbols no longer appear in the touched files. I’m adding `IMPLEMENT_SUMMARY.md` now with the applied claim list, then I’ll do a final diff check without running tests.
+file update
+A /tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+Applied claims: C1, C2, C3, C4
+
+Modified files:
+- spanner/endpoint_lifecycle_manager.go
+- spanner/location_aware_client.go
+- spanner/key_range_cache.go
+apply_patch(auto_approved=true) exited 0 in 19ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3bbbd06eb5119d479b0e69a502508b911eeb940
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- spanner/endpoint_lifecycle_manager.go
++- spanner/location_aware_client.go
++- spanner/key_range_cache.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3bbbd06eb5119d479b0e69a502508b911eeb940
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- spanner/endpoint_lifecycle_manager.go
++- spanner/location_aware_client.go
++- spanner/key_range_cache.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc 'git diff -- spanner/endpoint_lifecycle_manager.go spanner/location_aware_client.go spanner/key_range_cache.go IMPLEMENT_SUMMARY.md' in /tmp/refactor-eq-workdir/bb-codex-14418 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ exited 129 in 0ms:
+warning: Limiting comparison with pathspecs is only supported if both paths are directories.
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+exec
+/bin/zsh -lc "rg -n \"lifecycleEvictionReasonStale|affinityClientWithExclusions|onFirstResponse|latencyOnce|shouldSkipWithExclusions|func \\(t \\*cachedTablet\\) shouldSkip\\(\" spanner/endpoint_lifecycle_manager.go spanner/location_aware_client.go spanner/key_range_cache.go || true" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3bbbd06eb5119d479b0e69a502508b911eeb940
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- spanner/endpoint_lifecycle_manager.go
++- spanner/location_aware_client.go
++- spanner/key_range_cache.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+codex
+This worktree is not a Git repository, so `git diff`/`git status` are unavailable here. The remaining verification is direct: deleted symbols are absent, touched files are within the allowed source set, and tests were not run per instruction.
+exec
+/bin/zsh -lc "sed -n '600,636p' spanner/key_range_cache.go" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc "sed -n '1,40p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-14418exec
+/bin/zsh -lc "sed -n '30,44p' spanner/endpoint_lifecycle_manager.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+	switch selection.GetType() {
+	case sppb.DirectedReadOptions_ReplicaSelection_READ_WRITE:
+		return t.role == sppb.Tablet_READ_WRITE || t.role == sppb.Tablet_ROLE_UNSPECIFIED
+	case sppb.DirectedReadOptions_ReplicaSelection_READ_ONLY:
+		return t.role == sppb.Tablet_READ_ONLY
+	default:
+		return true
+	}
+}
+
+func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+	if hint == nil {
+		return true
+	}
+	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) {
+		t.addSkippedTablet(hint, skippedTabletUIDs)
+		return true
+	}
+
+	t.clearShutdownEndpoint()
+ succeeded in 0ms:
+Applied claims: C1, C2, C3, C4
+
+Modified files:
+- spanner/endpoint_lifecycle_manager.go
+- spanner/location_aware_client.go
+- spanner/key_range_cache.go
+ succeeded in 0ms:
+	lifecycleEvictionCheckInterval = 5 * time.Minute
+	maxTransientFailureProbeCount  = 3
+)
+
+type lifecycleEvictionReason int
+
+const (
+	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+	lifecycleEvictionReasonShutdown
+	lifecycleEvictionReasonIdle
+)
+
+type endpointLifecycleState struct {
+	address                      string
+	lastProbeAt                  time.Time
+exec
+/bin/zsh -lc "sed -n '154,184p' spanner/location_aware_client.go && sed -n '244,304p' spanner/location_aware_client.go && sed -n '384,452p' spanner/location_aware_client.go" in /tmp/refactor-eq-workdir/bb-codex-14418 succeeded in 0ms:
+	return client
+}
+
+// affinityClient returns the spannerClient for a given transaction ID based on
+// affinity, falling back to the default client.
+func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+	ep := c.affinityEndpoint(txID, nil)
+	return c.clientForEndpoint(ep)
+}
+
+func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+	if len(txID) == 0 {
+		return nil
+	}
+	ep := c.router.getTransactionAffinity(string(txID))
+	if ep != nil && isEndpointExcluded(excludedEndpoints, ep.Address()) {
+		return nil
+	}
+	if ep != nil && !ep.IsHealthy() && c.router != nil && c.router.lifecycleManager != nil {
+		c.router.lifecycleManager.requestEndpointRecreation(ep.Address())
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3bbbd06eb5119d479b0e69a502508b911eeb940
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- spanner/endpoint_lifecycle_manager.go
++- spanner/location_aware_client.go
++- spanner/key_range_cache.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+codex
+Implemented all accepted claims C1-C4 and wrote [`IMPLEMENT_SUMMARY.md`](/tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md).
+
+Modified:
+- [`spanner/endpoint_lifecycle_manager.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go): removed unused stale lifecycle eviction reason.
+- [`spanner/location_aware_client.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go): removed unused first-response stream callback plumbing and inlined the affinity-client exclusion wrapper.
+- [`spanner/key_range_cache.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go): removed obsolete tablet skip wrappers.
+
+I ran `gofmt` on the touched Go files. I did not run tests, per the instruction that tests may not be run because `node_modules` is absent.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3bbbd06eb5119d479b0e69a502508b911eeb940
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- spanner/endpoint_lifecycle_manager.go
++- spanner/location_aware_client.go
++- spanner/key_range_cache.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+index 68e360efc37f2a2ce69ca2296a6947287da34169..77a1d730cdc3e2509f4aa0986079b4ec7e889395
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go
+@@ -37,7 +37,6 @@
+ 	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
+ 	lifecycleEvictionReasonShutdown
+ 	lifecycleEvictionReasonIdle
+-	lifecycleEvictionReasonStale
+ )
+ 
+ type endpointLifecycleState struct {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+index 4c8197928c44557fe97cbc32d2974c97e14f0e59..77914e01709a96dfdb3d756de80d3a0c8de5049a
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go
+@@ -607,24 +607,6 @@
+ 	}
+ }
+ 
+-func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+-	return t.shouldSkipWithExclusions(hint, nil)
+-}
+-
+-func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+-	if hint == nil {
+-		return true
+-	}
+-	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+-		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+-			TabletUid:   t.tabletUID,
+-			Incarnation: append([]byte(nil), t.incarnation...),
+-		})
+-		return true
+-	}
+-	return false
+-}
+-
+ func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
+ 	if hint == nil {
+ 		return true
+diff --git a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+index 64546e1ab94eff47e9ed712c70f90ac777029cf8..52a53c1e82ef6b634d523abf3d0e54b88fe21d3b
+--- a//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
++++ b//tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go
+@@ -157,7 +157,8 @@
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
+-	return c.affinityClientWithExclusions(txID, nil)
++	ep := c.affinityEndpoint(txID, nil)
++	return c.clientForEndpoint(ep)
+ }
+ 
+ func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+@@ -175,11 +176,6 @@
+ 		return nil
+ 	}
+ 	return ep
+-}
+-
+-func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
+-	ep := c.affinityEndpoint(txID, excludedEndpoints)
+-	return c.clientForEndpoint(ep)
+ }
+ 
+ // --- Pass-through methods ---
+@@ -252,7 +248,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -298,7 +293,6 @@
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
+-		nil,
+ 		func(err error) {
+ 			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		},
+@@ -389,9 +383,7 @@
+ 	trackAffinity      bool
+ 	once               sync.Once
+ 	errorOnce          sync.Once
+-	latencyOnce        sync.Once
+ 	inner              streamingClient
+-	onFirstResponse    func()
+ 	onError            func(error)
+ }
+ 
+@@ -409,7 +401,6 @@
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
+-	onFirstResponse func(),
+ 	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+@@ -420,7 +411,6 @@
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
+-		onFirstResponse:    onFirstResponse,
+ 		onError:            onError,
+ 	}
+ }
+@@ -435,11 +425,6 @@
+ 		})
+ 		return nil, err
+ 	}
+-	s.latencyOnce.Do(func() {
+-		if s.onFirstResponse != nil {
+-			s.onFirstResponse()
+-		}
+-	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+
+tokens used
+60,693
+Implemented all accepted claims C1-C4 and wrote [`IMPLEMENT_SUMMARY.md`](/tmp/refactor-eq-workdir/bb-codex-14418/IMPLEMENT_SUMMARY.md).
+
+Modified:
+- [`spanner/endpoint_lifecycle_manager.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/endpoint_lifecycle_manager.go): removed unused stale lifecycle eviction reason.
+- [`spanner/location_aware_client.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/location_aware_client.go): removed unused first-response stream callback plumbing and inlined the affinity-client exclusion wrapper.
+- [`spanner/key_range_cache.go`](/tmp/refactor-eq-workdir/bb-codex-14418/spanner/key_range_cache.go): removed obsolete tablet skip wrappers.
+
+I ran `gofmt` on the touched Go files. I did not run tests, per the instruction that tests may not be run because `node_modules` is absent.

@@ -1,0 +1,408 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-4153
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c43-17c6-7523-866e-54dc817d8dca
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and artifact first, then apply only the accepted claims to the named files. I won’t run tests or touch test files.
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-4153 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-codex-4153
+SHARPENED_SPEC.md
+FORGE_INPUT_DIFF.patch
+openapi_operations.yaml
+CONTRIBUTING.md
+github/repos_hooks_deliveries_test.go
+github/licenses.go
+github/enterprise_codesecurity_configurations.go
+github/orgs_rules_test.go
+github/gists_comments_test.go
+github/enterprise_billing_cost_centers.go
+github/interactions.go
+github/copilot_test.go
+github/orgs_rules.go
+github/orgs_artifacts_test.go
+github/emojis_test.go
+github/enterprise.go
+github/enterprise_codesecurity_configurations_test.go
+github/dependabot.go
+github/orgs_properties.go
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-4153exec
+/bin/zsh -lc "sed -n '1,240p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-4153exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-4153exec
+/bin/zsh -lc "sed -n '1,240p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-4153 succeeded in 0ms:
+diff --git a/README.md b/README.md
+index 60caa865..9d52476e 100644
+--- a/README.md
++++ b/README.md
+@@ -479,7 +479,7 @@ documentation for details on preview functionality.
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+diff --git a/github/repos_contents.go b/github/repos_contents.go
+index 0c2ac3bf..c54176f4 100644
+--- a/github/repos_contents.go
++++ b/github/repos_contents.go
+@@ -17,7 +17,6 @@ import (
+ 	"io"
+ 	"net/http"
+ succeeded in 0ms:
+# PR #4153
+
+This PR refactors the behaviour of `DownloadContents` & `DownloadContentsWithMeta` with the former now being a direct passthrough to the latter as the only difference was the signature. The code has been refactored to use the API directly instead of via an unnecessary layer of indirection.
+
+I've added an OpenAPI update to this PR as it proves that the updated code works against GitHub.
+
+This change is required for #4151.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove Unrelated README URL Churn
+**File**: README.md:482
+**Change**: Revert the Calendar Versioning GitHub Blog link to the pre-artifact URL so the patch no longer includes documentation churn unrelated to repository content downloads.
+**Goal link**: The goal is specifically to refactor `DownloadContents` and `DownloadContentsWithMeta`; removing an unrelated README link edit keeps the change set focused on that behavior.
+**Justification**: This reduces accidental structure in the artifact without affecting compiled code or the existing test suite.
+
+## Rejected
+
+- Inline the `DownloadContentsWithMeta` call in `DownloadContents`: Go cannot drop the extra `*RepositoryContent` return value from a four-result call in a three-result return statement, so the current temporary variables are the bounded idiom needed for the passthrough.
+- Replace the direct download request in `DownloadContentsWithMeta` with `s.client.NewRequest` and `s.client.Do`: the download URL is an absolute `download_url` value returned by GitHub rather than a go-github API path, and using the client response checker would change the documented behavior that failed download responses can be returned with a nil error.
+- Restore the old directory-list fallback in `DownloadContentsWithMeta`: that would reintroduce the unnecessary layer of indirection the goal explicitly removes and would change the single-file API request behavior introduced by the artifact.
+- Add a shared helper for the `download_url` request path: the logic has only one implementation site after `DownloadContents` delegates to `DownloadContentsWithMeta`, so a helper would add indirection without reducing duplication.
+ succeeded in 0ms:
+README.md
+github/repos_contents.go
+codex
+The sharpened spec has one accepted claim, and it is limited to `README.md`: revert the calendar-versioning URL churn from the artifact. I’m checking the current file state, then I’ll make that exact edit and write the required implementation summary.
+exec
+/bin/zsh -lc "sed -n '470,490p' README.md" in /tmp/refactor-eq-workdir/bb-codex-4153 succeeded in 0ms:
+* We increment the **minor version** with any backwards-compatible changes to
+	functionality, as well as any changes to preview functionality in the GitHub
+	API. GitHub makes no guarantee about the stability of preview functionality,
+	so neither do we consider it a stable part of the go-github API.
+* We increment the **patch version** with any backwards-compatible bug fixes.
+
+Preview functionality may take the form of entire methods or simply additional
+data returned from an otherwise non-preview method. Refer to the GitHub API
+documentation for details on preview functionality.
+
+### Calendar Versioning ###
+
+As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+that they are starting to version their v3 API based on "calendar-versioning".
+
+In practice, our goal is to make per-method version overrides (at
+least in the core library) rare and temporary.
+
+Our understanding of the GitHub docs is that they will be revving the
+entire API to each new date-based version, even if only a few methods
+exec
+/bin/zsh -lc "sed -n '1,240p' github/repos_contents.go" in /tmp/refactor-eq-workdir/bb-codex-4153 succeeded in 0ms:
+// Copyright 2013 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Repository contents API methods.
+// GitHub API docs: https://docs.github.com/rest/repos/contents?apiVersion=2022-11-28
+
+package github
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+exec
+/bin/zsh -lc 'git diff -- README.md github/repos_contents.go' in /tmp/refactor-eq-workdir/bb-codex-4153 exited 1 in 0ms:
+diff --git a/README.md b/github/repos_contents.go
+index 9d52476..c54176f 100644
+--- a/README.md
++++ b/github/repos_contents.go
+@@ -1,518 +1,374 @@
+-# go-github #
++// Copyright 2013 The go-github AUTHORS. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
+ 
+-[![go-github release (latest SemVer)](https://img.shields.io/github/v/release/google/go-github?sort=semver)](https://github.com/google/go-github/releases)
+-[![Go Reference](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/google/go-github/v84/github)
+-[![Test Status](https://github.com/google/go-github/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/google/go-github/actions/workflows/tests.yml)
+-[![Test Coverage](https://codecov.io/gh/google/go-github/branch/master/graph/badge.svg)](https://codecov.io/gh/google/go-github)
+-[![Discuss at go-github@googlegroups.com](https://img.shields.io/badge/discuss-go--github%40googlegroups.com-blue.svg)](https://groups.google.com/group/go-github)
+-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/796/badge)](https://bestpractices.coreinfrastructure.org/projects/796)
++// Repository contents API methods.
++// GitHub API docs: https://docs.github.com/rest/repos/contents?apiVersion=2022-11-28
+ 
+codex
+The repository content refactor from the artifact is already present. The only accepted sharpened claim still needs the README URL restored to the older `github.blog/developer-skills/...` path.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -481,3 +481,3 @@
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-4153/README.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+codex
+The source edit is in place. I’m writing the required `IMPLEMENT_SUMMARY.md` now and then I’ll verify that only allowed non-test files were changed.
+file update
+A /tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+Applied claims:
+- C1 - Remove Unrelated README URL Churn
+
+Modified files:
+- README.md
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..69ee3002488c9deb33c88c2e437e177a30768c1d
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Remove Unrelated README URL Churn
++
++Modified files:
++- README.md
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..69ee3002488c9deb33c88c2e437e177a30768c1d
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Remove Unrelated README URL Churn
++
++Modified files:
++- README.md
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-4153 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+exec
+/bin/zsh -lc 'git diff -- README.md IMPLEMENT_SUMMARY.md' in /tmp/refactor-eq-workdir/bb-codex-4153 exited 1 in 0ms:
+diff --git a/README.md b/IMPLEMENT_SUMMARY.md
+index 60caa86..69ee300 100644
+--- a/README.md
++++ b/IMPLEMENT_SUMMARY.md
+@@ -1,518 +1,5 @@
+-# go-github #
++Applied claims:
++- C1 - Remove Unrelated README URL Churn
+ 
+-[![go-github release (latest SemVer)](https://img.shields.io/github/v/release/google/go-github?sort=semver)](https://github.com/google/go-github/releases)
+-[![Go Reference](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/google/go-github/v84/github)
+-[![Test Status](https://github.com/google/go-github/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/google/go-github/actions/workflows/tests.yml)
+-[![Test Coverage](https://codecov.io/gh/google/go-github/branch/master/graph/badge.svg)](https://codecov.io/gh/google/go-github)
+-[![Discuss at go-github@googlegroups.com](https://img.shields.io/badge/discuss-go--github%40googlegroups.com-blue.svg)](https://groups.google.com/group/go-github)
+-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/796/badge)](https://bestpractices.coreinfrastructure.org/projects/796)
+-
+-go-github is a Go client library for accessing the [GitHub API v3][].
+-
+-go-github tracks [Go's version support policy][support-policy] supporting any
+-minor version of the latest two major releases of Go and the go directive in
+exec
+/bin/zsh -lc "sed -n '478,486p' README.md && sed -n '1,40p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-4153 succeeded in 0ms:
+documentation for details on preview functionality.
+
+### Calendar Versioning ###
+
+As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+that they are starting to version their v3 API based on "calendar-versioning".
+
+In practice, our goal is to make per-method version overrides (at
+least in the core library) rare and temporary.
+Applied claims:
+- C1 - Remove Unrelated README URL Churn
+
+Modified files:
+- README.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..69ee3002488c9deb33c88c2e437e177a30768c1d
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Remove Unrelated README URL Churn
++
++Modified files:
++- README.md
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+codex
+Implemented the accepted sharpened claim.
+
+Changed:
+- [README.md](/tmp/refactor-eq-workdir/bb-codex-4153/README.md): reverted the Calendar Versioning GitHub Blog URL to the pre-artifact `github.blog/developer-skills/...` form.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md): recorded claim C1 and the modified file.
+
+I did not run tests, per instruction. The directory is not a Git repository, so `git status`/normal diff verification was unavailable.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..69ee3002488c9deb33c88c2e437e177a30768c1d
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Remove Unrelated README URL Churn
++
++Modified files:
++- README.md
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4153/README.md b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+index 9d52476e1021ea86bf9c7aab55e993cb17cadb1a..60caa865f89b30bfe04171151a8f21c6162ef59e
+--- a//tmp/refactor-eq-workdir/bb-codex-4153/README.md
++++ b//tmp/refactor-eq-workdir/bb-codex-4153/README.md
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+
+tokens used
+28,882
+Implemented the accepted sharpened claim.
+
+Changed:
+- [README.md](/tmp/refactor-eq-workdir/bb-codex-4153/README.md): reverted the Calendar Versioning GitHub Blog URL to the pre-artifact `github.blog/developer-skills/...` form.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-4153/IMPLEMENT_SUMMARY.md): recorded claim C1 and the modified file.
+
+I did not run tests, per instruction. The directory is not a Git repository, so `git status`/normal diff verification was unavailable.

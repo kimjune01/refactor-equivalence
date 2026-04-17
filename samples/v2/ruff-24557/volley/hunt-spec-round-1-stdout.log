@@ -1,0 +1,629 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24557
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ae5-b0e9-7250-bab0-21f5b5947f90
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/24557/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/24557/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll read the goal, spec, allowed file list, and patch first, then cross-check the named symbols and tests in the cleanroom tree. I’ll only write the requested hunt report file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+# PR #24557 — Add inline snapshots to mdtest
+
+## PR body
+
+## Summary
+
+This PR adds support for inline snapshots to mdtests.
+
+The design differs from what was discussed in https://github.com/astral-sh/ty/issues/195:
+
+* There's no `cargo insta` integration because it's unclear to me how that would work. 
+* Diagnostic snapshotting is selective. Diagnostics that should be snapshotted must be marked with a `# snapshot: <code?>` comment. I think this design is superior because:
+  * The test fails if there's a `diagnostic` block without any `# snapshot:` comment (is now unused)
+  * The test can automatically insert the `diagnostic` block if there's at least one `# snapshot:` comment
+  * Unlike with external snapshots, it allows asserting a single diagnostic in an existing test case without snapshotting many unrelated diagnostics too.
+* Each file has its own `diagnostic` block (favors proximity)
+
+Future extension:
+
+* Add a mode to capture all diagnostics if we see the need for it
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove duplicate keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies the new shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making the selective inline snapshot comment parser simpler.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+Cargo.lock
+crates/ruff_index/src/slice.rs
+crates/ty_python_semantic/Cargo.toml
+crates/ty_python_semantic/tests/mdtest.rs
+crates/ty_static/src/env_vars.rs
+crates/ty_test/Cargo.toml
+crates/ty_test/src/lib.rs
+crates/ty_test/src/matcher.rs
+crates/ty_test/src/parser.rs
+crates/ty_test/src/pragma_comments.rs
+ succeeded in 0ms:
+diff --git a/Cargo.lock b/Cargo.lock
+index 62a205395b..af77f19aef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4666,7 +4666,6 @@ dependencies = [
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_site_packages",
+- "ty_static",
+  "ty_test",
+  "ty_vendored",
+ ]
+@@ -4762,6 +4761,7 @@ dependencies = [
+  "rustc-stable-hash",
+  "salsa",
+  "serde",
++ "similar 3.1.0",
+  "smallvec",
+  "tempfile",
+  "thiserror 2.0.18",
+codex
+The spec has five accepted claims, all within the allowed file set. I’m now checking whether the exact code in the cleanroom tree matches the claimed APIs and whether any visible tests assert strings touched by these claims.
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '780,835p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/matcher.rs | sed -n '300,360p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '925,975p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/pragma_comments.rs | sed -n '250,295p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   780	            .collect()
+   781	    }
+   782	}
+   783	
+   784	fn diagnostic_display_config() -> DisplayDiagnosticConfig {
+   785	    DisplayDiagnosticConfig::new("ty")
+   786	        .color(false)
+   787	        .show_fix_diff(true)
+   788	        .with_fix_applicability(Applicability::DisplayOnly)
+   789	}
+   790	
+   791	fn render_diagnostic(db: &mut Db, diagnostic: &Diagnostic) -> String {
+   792	    diagnostic
+   793	        .display(db, &diagnostic_display_config())
+   794	        .to_string()
+   795	}
+   796	
+   797	fn render_diagnostics(db: &mut Db, diagnostics: &[Diagnostic]) -> String {
+   798	    let mut rendered = String::new();
+   799	    for (index, diag) in diagnostics.iter().enumerate() {
+ succeeded in 0ms:
+   300	            "{}{}{}",
+   301	            &path_captures[1], normalized_path, &path_captures[3]
+   302	        )
+   303	    }
+   304	
+   305	    PATH_IN_CLASS_DISPLAY_REGEX.replace_all(ty, normalize_path_captures)
+   306	}
+   307	
+   308	struct Matcher {
+   309	    line_index: LineIndex,
+   310	    source: SourceText,
+   311	}
+   312	
+   313	impl Matcher {
+   314	    fn from_file(db: &Db, file: File) -> Self {
+   315	        Self {
+   316	            line_index: line_index(db, file),
+   317	            source: source_text(db, file),
+   318	        }
+   319	    }
+ succeeded in 0ms:
+   925	        current_section.config = config;
+   926	
+   927	        self.current_section_has_config = true;
+   928	
+   929	        Ok(())
+   930	    }
+   931	
+   932	    fn process_inline_snapshot(
+   933	        &mut self,
+   934	        code: &'s str,
+   935	        offsets: BacktickOffsets,
+   936	    ) -> anyhow::Result<()> {
+   937	        let Some(file) = self.files.last_mut() else {
+   938	            bail!(
+   939	                "Inline diagnostics block must follow a checkable Python file in the same section."
+   940	            );
+   941	        };
+   942	
+   943	        if !file.is_checkable() {
+   944	            bail!(
+ succeeded in 0ms:
+   250	/// in the event of an invalid comment.
+   251	#[derive(Debug)]
+   252	pub(crate) enum UnparsedAssertion<'a> {
+   253	    /// A `# revealed:` assertion.
+   254	    Revealed(&'a str),
+   255	    /// An `# error:` assertion.
+   256	    Error(&'a str),
+   257	}
+   258	
+   259	impl std::fmt::Display for UnparsedAssertion<'_> {
+   260	    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+   261	        match self {
+   262	            Self::Revealed(expected_type) => {
+   263	                write!(f, "revealed: {expected_type}")
+   264	            }
+   265	            Self::Error(assertion) => write!(f, "error: {assertion}"),
+   266	        }
+   267	    }
+   268	}
+   269	
+exec
+/bin/zsh -lc 'rg -n "struct TestFile|struct CodeBlock|enum File|is_checkable|code_blocks" crates/ty_test/src/parser.rs crates/ty_test/src/lib.rs' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/lib.rs:422:                code_blocks: embedded.code_blocks.clone(),
+crates/ty_test/src/lib.rs:768:struct TestFile<'a> {
+crates/ty_test/src/lib.rs:772:    code_blocks: Vec<CodeBlock<'a>>,
+crates/ty_test/src/lib.rs:777:        self.code_blocks
+crates/ty_test/src/lib.rs:835:    for (index, code_block) in test_file.code_blocks.iter().enumerate() {
+crates/ty_test/src/lib.rs:837:            .code_blocks
+crates/ty_test/src/parser.rs:377:    pub(crate) code_blocks: Vec<CodeBlock<'s>>,
+crates/ty_test/src/parser.rs:393:        self.code_blocks.push(CodeBlock {
+crates/ty_test/src/parser.rs:416:    pub(crate) fn is_checkable(&self) -> bool {
+crates/ty_test/src/parser.rs:422:pub(crate) struct CodeBlock<'s> {
+crates/ty_test/src/parser.rs:864:                    code_blocks: vec![CodeBlock {
+crates/ty_test/src/parser.rs:904:            .any(|id| self.files[*id].code_blocks.len() > 1)
+crates/ty_test/src/parser.rs:943:        if !file.is_checkable() {
+crates/ty_test/src/parser.rs:950:        let code_block = file.code_blocks.last_mut().unwrap();
+crates/ty_test/src/parser.rs:1659:    fn code_blocks_must_not_be_indented() {
+exec
+/bin/zsh -lc "rg -n \"inline diagnostics|snapshot|MDTEST_UPDATE|match_line|snapshot_update_mode_override|diagnostics block|must follow\" crates/ty_test crates/ty_python_semantic/tests crates/ty_python_semantic/resources -g '"'!target'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_python_semantic/tests/mdtest.rs:18:    let snapshot_path = crate_dir.join("resources").join("mdtest").join("snapshots");
+crates/ty_python_semantic/tests/mdtest.rs:38:        &snapshot_path,
+crates/ty_test/README.md:144:Inline snapshots store rendered diagnostics directly in the Markdown fixture.
+crates/ty_test/README.md:146:Add `# snapshot` to the lines you want to snapshot, then add a fenced
+crates/ty_test/README.md:151:# snapshot
+crates/ty_test/README.md:154:# snapshot
+crates/ty_test/README.md:175:`# snapshot` follows the same placement rules as other inline assertions.
+crates/ty_test/README.md:177:To insert or rewrite inline snapshots automatically, run mdtest with
+crates/ty_test/README.md:178:`MDTEST_UPDATE_SNAPSHOTS` set. For example:
+crates/ty_test/README.md:181:MDTEST_UPDATE_SNAPSHOTS=1 cargo test -p ty_python_semantic --test mdtest -- diagnostics/missing_argument.md
+crates/ty_test/README.md:187:MDTEST_UPDATE_SNAPSHOTS=1 MDTEST_TEST_FILTER="Missing argument diagnostics" cargo test -p ty_python_semantic --test mdtest -- --nocapture
+crates/ty_test/README.md:190:External `<!-- snapshot-diagnostics -->` snapshots are still supported, but
+crates/ty_test/README.md:191:inline snapshots are generally preferred for new tests.
+crates/ty_test/README.md:514:> At present, one can opt into diagnostic snapshotting that is managed via external files. See
+crates/ty_test/README.md:515:> the section above for more details. The feature outlined below, *inline* diagnostic snapshotting,
+crates/ty_test/src/parser.rs:144:    pub(super) fn should_snapshot_diagnostics(&self) -> bool {
+crates/ty_test/src/parser.rs:229:    /// The expected snapshot content.
+crates/ty_test/src/parser.rs:232:    /// The range of the inline snapshot block, including both fences.
+crates/ty_test/src/parser.rs:396:            inline_snapshot_block: None,
+crates/ty_test/src/parser.rs:428:    /// The code block's associated inline snapshot block (where inline snapshots are stored).
+exec
+/bin/zsh -lc 'rg -n "UnparsedAssertion|LinePragmaComments|Unmatched" crates/ty_test/src/matcher.rs crates/ty_test/src/pragma_comments.rs' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/pragma_comments.rs:48:    by_line: Vec<LinePragmaComments<'s>>,
+crates/ty_test/src/pragma_comments.rs:131:            pragmas_by_line.push(LinePragmaComments {
+crates/ty_test/src/pragma_comments.rs:145:    type Item = &'a LinePragmaComments<'s>;
+crates/ty_test/src/pragma_comments.rs:147:    type IntoIter = std::slice::Iter<'a, LinePragmaComments<'s>>;
+crates/ty_test/src/pragma_comments.rs:155:    type Item = LinePragmaComments<'s>;
+crates/ty_test/src/pragma_comments.rs:157:    type IntoIter = std::vec::IntoIter<LinePragmaComments<'s>>;
+crates/ty_test/src/pragma_comments.rs:187:/// An [`UnparsedAssertion`] with the [`TextRange`] of its original inline comment.
+crates/ty_test/src/pragma_comments.rs:203:/// A vector of [`UnparsedAssertion`]s belonging to a single line.
+crates/ty_test/src/pragma_comments.rs:207:type AssertionVec<'a> = SmallVec<[UnparsedAssertion<'a>; 1]>;
+crates/ty_test/src/pragma_comments.rs:211:pub(crate) struct LinePragmaComments<'a> {
+crates/ty_test/src/pragma_comments.rs:230:    Assertion(UnparsedAssertion<'a>),
+crates/ty_test/src/pragma_comments.rs:242:        UnparsedAssertion::from_comment(comment).map(Self::Assertion)
+crates/ty_test/src/pragma_comments.rs:252:pub(crate) enum UnparsedAssertion<'a> {
+crates/ty_test/src/pragma_comments.rs:259:impl std::fmt::Display for UnparsedAssertion<'_> {
+crates/ty_test/src/pragma_comments.rs:270:impl<'a> UnparsedAssertion<'a> {
+crates/ty_test/src/pragma_comments.rs:549:    fn into_vec(assertions: TestPragmaComments<'_>) -> Vec<LinePragmaComments<'_>> {
+crates/ty_test/src/pragma_comments.rs:687:        let [UnparsedAssertion::Error(error1)] = &line1.assertions[..] else {
+crates/ty_test/src/pragma_comments.rs:695:        let [UnparsedAssertion::Error(error2)] = &line2.assertions[..] else {
+crates/ty_test/src/pragma_comments.rs:723:            UnparsedAssertion::Error(error1),
+crates/ty_test/src/pragma_comments.rs:724:            UnparsedAssertion::Revealed(expected_ty),
+exec
+/bin/zsh -lc 'rg -n "MDTEST_TEST_FILTER|MDTEST_GITHUB_ANNOTATIONS_FORMAT|EnvVars::MDTEST" .' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 631ms:
+./crates/ty_test/src/lib.rs:46:const MDTEST_TEST_FILTER: &str = "MDTEST_TEST_FILTER";
+./crates/ty_test/src/lib.rs:71:    let filter = std::env::var(MDTEST_TEST_FILTER).ok();
+./crates/ty_test/src/lib.rs:173:                set the environment variable: {MDTEST_TEST_FILTER}='{escaped_test_name}'",
+./crates/ty_test/src/lib.rs:177:                "{MDTEST_TEST_FILTER}='{escaped_test_name}' cargo test -p ty_python_semantic \
+./crates/ty_test/README.md:187:MDTEST_UPDATE_SNAPSHOTS=1 MDTEST_TEST_FILTER="Missing argument diagnostics" cargo test -p ty_python_semantic --test mdtest -- --nocapture
+./crates/ty_test/README.md:269:`MDTEST_TEST_FILTER` environment variable. This variable will match any tests which contain the
+./crates/ty_python_semantic/mdtest.py:204:            if "MDTEST_TEST_FILTER" in line:
+./crates/ty_python_semantic/tests/mdtest.rs:8:const MDTEST_GITHUB_ANNOTATIONS_FORMAT: &str = "MDTEST_GITHUB_ANNOTATIONS_FORMAT";
+./crates/ty_python_semantic/tests/mdtest.rs:28:    let output_format = if std::env::var(MDTEST_GITHUB_ANNOTATIONS_FORMAT).is_ok() {
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '350,445p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '780,875p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   350	    fn is_allowed_explicit_path(path: &str) -> bool {
+   351	        [PySourceType::Python, PySourceType::Stub]
+   352	            .iter()
+   353	            .all(|source_type| path != EmbeddedFilePath::Autogenerated(*source_type).as_str())
+   354	    }
+   355	}
+   356	
+   357	/// A single file embedded in a [`Section`] as a fenced code block.
+   358	///
+   359	/// Currently must be a Python file (`py` language), a type stub (`pyi`) or a [typeshed `VERSIONS`]
+   360	/// file.
+   361	///
+   362	/// TOML configuration blocks are also supported, but are not stored as `EmbeddedFile`s. In the
+   363	/// future we plan to support `pth` files as well.
+   364	///
+   365	/// A Python embedded file makes its containing [`Section`] into a [`MarkdownTest`], and will be
+   366	/// type-checked and searched for inline-comment assertions to match against the diagnostics from
+   367	/// type checking.
+   368	///
+   369	/// [typeshed `VERSIONS`]: https://github.com/python/typeshed/blob/c546278aae47de0b2b664973da4edb613400f6ce/stdlib/VERSIONS#L1-L18
+ succeeded in 0ms:
+   780	
+   781	        Ok(())
+   782	    }
+   783	
+   784	    fn process_code_block(
+   785	        &mut self,
+   786	        lang: &'s str,
+   787	        code: &'s str,
+   788	        backtick_offsets: BacktickOffsets,
+   789	    ) -> anyhow::Result<()> {
+   790	        // We never pop the implicit root section.
+   791	        let section = self.stack.top();
+   792	        let test_name = self.sections[section].title;
+   793	
+   794	        if lang == "toml" {
+   795	            return self.process_config_block(code);
+   796	        }
+   797	
+   798	        if lang == "ignore" {
+   799	            return Ok(());
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/matcher.rs | sed -n '100,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   100	    let parsed = parsed_module(db, file).load(db);
+   101	    let pragmas = TestPragmaComments::from_file(&source, &parsed, &line_index(db, file));
+   102	
+   103	    let diagnostics = SortedDiagnostics::new(diagnostics, &line_index(db, file));
+   104	
+   105	    let mut line_diagnostics = diagnostics.iter_lines();
+   106	
+   107	    // Get iterators over assertions and diagnostics grouped by line, in ascending line order.
+   108	    let mut line_pragmas = pragmas.into_iter();
+   109	    let mut current_pragmas = line_pragmas.next();
+   110	    let mut current_diagnostics = line_diagnostics.next();
+   111	
+   112	    let matcher = Matcher::from_file(db, file);
+   113	    let mut failures = FailuresByLine::default();
+   114	    let mut snapshot_diagnostics: Vec<Diagnostic> = Vec::new();
+   115	
+   116	    loop {
+   117	        match (&current_pragmas, &current_diagnostics) {
+   118	            (Some(pragmas), Some(diagnostics)) => {
+   119	                match pragmas.line_number.cmp(&diagnostics.line_number) {
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '2120,2195p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+  2120	             come before everything else \
+  2121	             (including TOML configuration blocks).",
+  2122	        );
+  2123	    }
+  2124	
+  2125	    #[test]
+  2126	    fn section_directive_must_appear_before_embedded_files() {
+  2127	        let source = dedent(
+  2128	            "
+  2129	            # Some header
+  2130	
+  2131	            ```py
+  2132	            x = 1
+  2133	            ```
+  2134	
+  2135	            <!-- snapshot-diagnostics -->
+  2136	            ",
+  2137	        );
+  2138	        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+  2139	        assert_eq!(
+codex
+No obvious nonexistent symbols surfaced: `LinePragmaComments`, `Matcher::match_line`, `snapshot_update_mode_override`, and `process_inline_snapshot` are present at the claimed locations. I’m tightening the review around misleading goal links and underspecified user-visible error text before writing the report.
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/pragma_comments.rs | sed -n '225,245p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/parser.rs | sed -n '880,910p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   225	#[derive(Debug)]
+   226	pub(crate) enum UnparsedPragmaComment<'a> {
+   227	    /// A `# snapshot` pragma comment.
+   228	    Snapshot,
+   229	
+   230	    Assertion(UnparsedAssertion<'a>),
+   231	}
+   232	
+   233	impl<'a> UnparsedPragmaComment<'a> {
+   234	    /// Returns `Some(_)` if the comment starts with `# snapshot`, `# error:` or `# revealed:`,
+   235	    /// indicating that it is a pragma comment.
+   236	    fn from_comment(comment: &'a str) -> Option<Self> {
+   237	        let comment = comment.trim().strip_prefix('#')?.trim();
+   238	        if comment == "snapshot" {
+   239	            return Some(Self::Snapshot);
+   240	        }
+   241	
+   242	        UnparsedAssertion::from_comment(comment).map(Self::Assertion)
+   243	    }
+   244	}
+ succeeded in 0ms:
+   880	
+   881	                if has_explicit_file_paths {
+   882	                    bail!(
+   883	                        "Merged snippets in test `{test_name}` are not allowed in the presence of other files."
+   884	                    );
+   885	                }
+   886	
+   887	                let index = *entry.get();
+   888	                self.files[index].append_code(backtick_offsets, code);
+   889	            }
+   890	        }
+   891	
+   892	        Ok(())
+   893	    }
+   894	
+   895	    fn current_section_has_explicit_file_paths(&self) -> bool {
+   896	        self.current_section_files
+   897	            .iter()
+   898	            .any(|(path, _)| path.is_explicit())
+   899	    }
+exec
+/bin/zsh -lc "rg -n \"last_mut\\(|pub const fn last\" crates/ruff_index/src crates/ty_test/src/parser.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/parser.rs:937:        let Some(file) = self.files.last_mut() else {
+crates/ty_test/src/parser.rs:950:        let code_block = file.code_blocks.last_mut().unwrap();
+crates/ruff_index/src/slice.rs:49:    pub const fn last(&self) -> Option<&T> {
+crates/ruff_index/src/slice.rs:54:    pub const fn last_mut(&mut self) -> Option<&mut T> {
+crates/ruff_index/src/slice.rs:55:        self.raw.last_mut()
+exec
+/bin/zsh -lc 'rg -n "expect_err|assert_eq!'"\\(\\s*err\\.to_string|inline diagnostics block|diagnostics block\" crates/ty_test/src/parser.rs crates/ty_test/src/lib.rs crates/ty_test/src/matcher.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/parser.rs:939:                "Inline diagnostics block must follow a checkable Python file in the same section."
+crates/ty_test/src/parser.rs:945:                "Inline diagnostics block must follow a checkable Python file block in the same section but it follows a {} block.",
+crates/ty_test/src/parser.rs:954:            "File `{}` has more than one inline diagnostics block.",
+crates/ty_test/src/parser.rs:1348:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1395:            let err = super::parse("file.md", &dedent(source)).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1422:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1509:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1527:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1547:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1612:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1613:        assert_eq!(err.to_string(), "Unterminated code block at line 2.");
+crates/ty_test/src/parser.rs:1632:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1633:        assert_eq!(err.to_string(), "Unterminated code block at line 10.");
+crates/ty_test/src/parser.rs:1669:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1670:        assert_eq!(err.to_string(), "Indented code blocks are not supported.");
+crates/ty_test/src/parser.rs:1686:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1772:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:1796:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+crates/ty_test/src/parser.rs:2031:        super::parse("file.md", &source).expect_err(
+crates/ty_test/src/parser.rs:2045:        let err = super::parse("file.md", &source).expect_err("Should fail to parse");
+exec
+/bin/zsh -lc "sed -n '1,40p' crates/ty_test/src/parser.rs" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+use std::{
+    borrow::Cow,
+    collections::hash_map::Entry,
+    fmt::{Formatter, LowerHex, Write},
+    hash::Hash,
+};
+
+use anyhow::bail;
+use ruff_db::system::{SystemPath, SystemPathBuf};
+use rustc_hash::FxHashMap;
+
+use crate::config::MarkdownTestConfig;
+use ruff_index::{IndexVec, newtype_index};
+use ruff_python_ast::PySourceType;
+use ruff_python_trivia::Cursor;
+use ruff_source_file::{LineIndex, LineRanges, OneIndexed};
+use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
+use rustc_stable_hash::{FromStableHash, SipHasher128Hash, StableSipHasher128};
+
+/// Parse the Markdown `source` as a test suite with given `title`.
+codex
+I found two spec issues worth recording: one goal-link overstates that `# snapshot` goes through the duplicated trim path, and one claim asks for a new parser error without pinning the exact message while the branch appears unreachable under current parser construction. I’m writing those as warnings, not blockers.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
+**Severity**: warning
+**Claim**: C1
+**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
+**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
+**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
+
+## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
+**Severity**: warning
+**Claim**: C4
+**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
+**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
+**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+apply_patch(auto_approved=true) exited 0 in 13ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+file update:
+diff --git a/samples/v2/ruff-24557/volley/hunt-spec-round-1.md b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8ff78f6219ffd3b93362fe4fd6eaf3f8a49985b
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
++**Severity**: warning
++**Claim**: C1
++**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
++**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
++**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
++
++## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
++**Severity**: warning
++**Claim**: C4
++**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
++**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
++**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+
+file update:
+diff --git a/samples/v2/ruff-24557/volley/hunt-spec-round-1.md b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8ff78f6219ffd3b93362fe4fd6eaf3f8a49985b
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
++**Severity**: warning
++**Claim**: C1
++**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
++**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
++**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
++
++## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
++**Severity**: warning
++**Claim**: C4
++**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
++**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
++**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
+**Severity**: warning
+**Claim**: C1
+**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
+**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
+**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
+
+## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
+**Severity**: warning
+**Claim**: C4
+**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
+**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
+**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+file update:
+diff --git a/samples/v2/ruff-24557/volley/hunt-spec-round-1.md b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8ff78f6219ffd3b93362fe4fd6eaf3f8a49985b
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
++**Severity**: warning
++**Claim**: C1
++**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
++**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
++**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
++
++## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
++**Severity**: warning
++**Claim**: C4
++**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
++**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
++**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+
+codex
+Wrote the hunt report to [/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md).
+
+It contains two findings, both `warning` severity:
+- C1 overstates that `# snapshot` goes through the duplicate trim path.
+- C4 leaves a new parser error string underspecified and appears to target an unreachable parser state.
+
+No source files were edited.
+file update:
+diff --git a/samples/v2/ruff-24557/volley/hunt-spec-round-1.md b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8ff78f6219ffd3b93362fe4fd6eaf3f8a49985b
+--- /dev/null
++++ b/samples/v2/ruff-24557/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Duplicate trim claim overstates snapshot parsing involvement
++**Severity**: warning
++**Claim**: C1
++**What**: The claim's goal link says removing the duplicate trim clarifies the shared parsing path for `# snapshot`, `# error:`, and `# revealed:` pragmas, but the duplicated `keyword.trim()` is only inside `UnparsedAssertion::from_comment`, which handles assertion comments after `# snapshot` has already been recognized separately. This does not make the code change unsafe, but it misstates which parser path is being simplified.
++**Evidence**: `crates/ty_test/src/pragma_comments.rs:237` checks `comment == "snapshot"` and returns `UnparsedPragmaComment::Snapshot` before calling `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:242`; the duplicate trim is in `UnparsedAssertion::from_comment` at `crates/ty_test/src/pragma_comments.rs:275` and `crates/ty_test/src/pragma_comments.rs:277`.
++**Fix**: Narrow the goal link/justification to assertion pragma parsing (`# error:` and `# revealed:`), or state that this is cleanup within the broader pragma parser file rather than the `# snapshot` parse branch itself.
++
++## Finding F2 — New inline snapshot parse error is underspecified and appears unreachable
++**Severity**: warning
++**Claim**: C4
++**What**: The claim requires replacing `file.code_blocks.last_mut().unwrap()` with a `bail!(...)` branch, but it only describes the error semantically instead of specifying the exact user-visible string. Parser tests in this crate commonly assert exact `err.to_string()` values, so leaving the wording to the implementer creates avoidable guesswork. Also, current construction appears to guarantee that every `EmbeddedFile` has at least one `CodeBlock`, so the proposed branch may be dead validation rather than a meaningful mdtest edge.
++**Evidence**: `crates/ty_test/src/parser.rs:859` creates each new `EmbeddedFile` with `code_blocks: vec![CodeBlock { ... }]`; later blocks call `append_code` at `crates/ty_test/src/parser.rs:888`, which can skip empty blocks but does not remove the initial code block. Existing parser tests assert exact parse error strings, for example `crates/ty_test/src/parser.rs:1613`, `crates/ty_test/src/parser.rs:1670`, and `crates/ty_test/src/parser.rs:2140`.
++**Fix**: Specify the exact `bail!` message if the claim is kept, and clarify the reachable malformed input it is meant to handle; otherwise reject the claim as unnecessary dead-edge cleanup.
+
+tokens used
+51,109
+Wrote the hunt report to [/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/hunt-spec-round-1.md).
+
+It contains two findings, both `warning` severity:
+- C1 overstates that `# snapshot` goes through the duplicate trim path.
+- C4 leaves a new parser error string underspecified and appears to target an unreachable parser state.
+
+No source files were edited.

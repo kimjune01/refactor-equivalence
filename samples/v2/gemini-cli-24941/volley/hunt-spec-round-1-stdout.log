@@ -1,0 +1,534 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24941
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a6e-a7c8-7421-8cbf-1965110b8911
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/24941/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/24941/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll inspect the goal, claims, patch, allowed files, and relevant cleanroom code/tests, then write only the requested hunt report file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+# PR #24941 — Generalize evals infra to support more types of evals, organization and queuing of named suites
+
+## PR body
+
+Generalizes the evals infrastructure to:
+- Support grouping of evals into named 'suites' which can be run by name.
+- Support categorization of evals into behavioral (what we have today), hero (small number of larger and more representative evals), and component level (benchmarks for a specific component's effectiveness).
+- Helpers for component level evals.
+
+This is a precursor to having component level evaluation suites, such as one for compression, which measures the effectiveness of that component in isolation.
+
+It also paves the way for having more and varied tests.
+
+Only the behavioral evals tests are run by default. Other suites can be run on demand by feature maintainers or autonomously at PR time via https://github.com/google-gemini/gemini-cli/pull/24877
+
+Here's what the run queue UI looks like:
+
+<img width="710" height="854" alt="image" src="https://github.com/user-attachments/assets/eca0f4bc-1e74-44cb-9382-4ec5aa58eb4d" />
+
+
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Correct the component helper description
+**File**: evals/component-test-helper.ts:101
+**Change**: Update the JSDoc above `componentEvalTest` to describe it as a helper for component-level evaluations, not behavioral evaluations.
+**Goal link**: The goal explicitly adds component-level eval support; the current comment names the wrong eval category.
+**Justification**: Correct terminology makes the helper's purpose match the new eval taxonomy without changing runtime behavior.
+
+### C2 — Return the initialized component config
+**File**: evals/component-test-helper.ts:67
+**Change**: Change `ComponentRig.initialize()` to return the initialized `Config`, and in `componentEvalTest` use `const config = await rig.initialize()` for `setup` and `assert` instead of `rig.config!`.
+**Goal link**: Component-level evals are meant to exercise backend components through an initialized `Config`; returning that object expresses the helper contract directly.
+**Justification**: This removes the unnecessary undefined state/non-null assertions while preserving the existing initialization and cleanup flow.
+
+### C3 — Make the component Config import type-only
+**File**: evals/component-test-helper.ts:20
+**Change**: Move `Config` from the value import list to a `type Config` import from `@google/gemini-cli-core`.
+**Goal link**: The component helper should expose a narrow component-eval surface rather than implying a runtime dependency on the `Config` symbol.
+**Justification**: The file only uses `Config` as a TypeScript type, so a type-only import is more idiomatic under the repo's `verbatimModuleSyntax` configuration and has no runtime effect.
+
+ succeeded in 0ms:
+.gemini/settings.json
+.github/actions/publish-release/action.yml
+.github/actions/run-tests/action.yml
+.github/workflows/ci.yml
+.github/workflows/eval-guidance.yml
+.github/workflows/eval-pr.yml
+.github/workflows/memory-nightly.yml
+.github/workflows/perf-nightly.yml
+.gitignore
+CONTRIBUTING.md
+GEMINI.md
+README.md
+esbuild.config.js
+eslint.config.js
+evals/app-test-helper.ts
+evals/background_processes.eval.ts
+evals/component-test-helper.ts
+evals/plan_mode.eval.ts
+evals/test-helper.ts
+evals/tracker.eval.ts
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+diff --git a/.gemini/settings.json b/.gemini/settings.json
+index 6a0121df17..9051dc78de 100644
+--- a/.gemini/settings.json
++++ b/.gemini/settings.json
+@@ -1,8 +1,9 @@
+ {
+   "experimental": {
++    "plan": true,
+     "extensionReloading": true,
+     "modelSteering": true,
+-    "topicUpdateNarration": true
++    "memoryManager": true
+   },
+   "general": {
+     "devtools": true
+diff --git a/.github/actions/publish-release/action.yml b/.github/actions/publish-release/action.yml
+index 4d33edffee..a7df2039d5 100644
+--- a/.github/actions/publish-release/action.yml
++++ b/.github/actions/publish-release/action.yml
+@@ -175,9 +175,7 @@ runs:
+codex
+The claims are narrowly focused on `evals/*-test-helper.ts`, so I’m checking those files and the tests/import usage around them against the cleanroom tree rather than the whole patch.
+exec
+/bin/zsh -lc "nl -ba evals/app-test-helper.ts | sed -n '1,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "nl -ba evals/test-helper.ts | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { AppRig } from '../packages/cli/src/test-utils/AppRig.js';
+     8	import {
+     9	  type EvalPolicy,
+    10	  runEval,
+    11	  prepareLogDir,
+    12	  symlinkNodeModules,
+    13	  withEvalRetries,
+    14	  prepareWorkspace,
+    15	  BaseEvalCase,
+    16	  EVAL_MODEL,
+    17	} from './test-helper.js';
+    18	import fs from 'node:fs';
+    19	import path from 'node:path';
+    20	
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { it } from 'vitest';
+     8	import fs from 'node:fs';
+     9	import path from 'node:path';
+    10	import crypto from 'node:crypto';
+    11	import { execSync } from 'node:child_process';
+    12	import { TestRig } from '@google/gemini-cli-test-utils';
+    13	import {
+    14	  createUnauthorizedToolError,
+    15	  parseAgentMarkdown,
+    16	  Storage,
+    17	  getProjectHash,
+    18	  SESSION_FILE_PREFIX,
+    19	  PREVIEW_GEMINI_FLASH_MODEL,
+    20	  getErrorMessage,
+exec
+/bin/zsh -lc "nl -ba evals/component-test-helper.ts | sed -n '1,190p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  type EvalPolicy,
+     9	  runEval,
+    10	  prepareLogDir,
+    11	  withEvalRetries,
+    12	  prepareWorkspace,
+    13	  type BaseEvalCase,
+    14	} from './test-helper.js';
+    15	import fs from 'node:fs';
+    16	import path from 'node:path';
+    17	import os from 'node:os';
+    18	import { randomUUID } from 'node:crypto';
+    19	import {
+    20	  Config,
+exec
+/bin/zsh -lc "rg -n \"componentEvalTest|ComponentRig|AppEvalCase|BaseEvalCase|from './test-helper\\.js'|from \\\"./test-helper\\.js\\\"\" evals packages -g '"'!node_modules'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+evals/test-helper.ts:393:export interface BaseEvalCase {
+evals/test-helper.ts:399:export interface EvalCase extends BaseEvalCase {
+evals/shell-efficiency.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/gitRepo.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/test-helper.test.ts:10:import { internalEvalTest } from './test-helper.js';
+evals/sandbox_recovery.eval.ts:2:import { evalTest } from './test-helper.js';
+evals/edit-locations-eval.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/app-test-helper.ts:15:  BaseEvalCase,
+evals/app-test-helper.ts:17:} from './test-helper.js';
+evals/app-test-helper.ts:38:export interface AppEvalCase extends BaseEvalCase {
+evals/app-test-helper.ts:49:export function appEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+evals/answer-vs-act.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/README.md:125:import { evalTest } from './test-helper.js';
+evals/interactive-hang.eval.ts:2:import { evalTest } from './test-helper.js';
+evals/hierarchical_memory.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/cli_help_delegation.eval.ts:2:import { evalTest } from './test-helper.js';
+evals/redundant_casts.eval.ts:8:import { evalTest } from './test-helper.js';
+evals/ask_user.eval.ts:8:import { appEvalTest, AppEvalCase } from './app-test-helper.js';
+evals/ask_user.eval.ts:9:import { EvalPolicy } from './test-helper.js';
+evals/ask_user.eval.ts:11:function askUserEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+exec
+/bin/zsh -lc "nl -ba evals/test-helper.ts | sed -n '360,430p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "nl -ba evals/tsconfig.json | sed -n '1,160p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+     1	{
+     2	  "extends": "../tsconfig.json",
+     3	  "compilerOptions": {
+     4	    "jsx": "react-jsx",
+     5	    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+     6	    "types": ["node", "vitest/globals"]
+     7	  },
+     8	  "include": ["**/*.ts", "**/*.tsx"],
+     9	  "exclude": ["node_modules", "logs"]
+    10	}
+ succeeded in 0ms:
+   360	  await fs.promises.mkdir(logDir, { recursive: true });
+   361	  const sanitizedName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+   362	  return { logDir, sanitizedName };
+   363	}
+   364	
+   365	/**
+   366	 * Symlinks node_modules to the test directory to speed up tests that need to run tools.
+   367	 */
+   368	export function symlinkNodeModules(testDir: string) {
+   369	  const rootNodeModules = path.join(process.cwd(), 'node_modules');
+   370	  const testNodeModules = path.join(testDir, 'node_modules');
+   371	  if (
+   372	    testDir &&
+   373	    fs.existsSync(rootNodeModules) &&
+   374	    !fs.existsSync(testNodeModules)
+   375	  ) {
+   376	    fs.symlinkSync(rootNodeModules, testNodeModules, 'dir');
+   377	  }
+   378	}
+   379	
+exec
+/bin/zsh -lc "rg -n \"verbatimModuleSyntax|importsNotUsedAsValues|preserveValueImports|isolatedModules\" . -g 'tsconfig*.json' -g 'package.json'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "rg -n \"export (class|interface|type|const).*Config|class Config|interface Config|type Config|export .*Config\" packages/core/src packages/core -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 97ms:
+packages/core/src/utils/errors.ts:99:export class FatalConfigError extends FatalError {
+packages/core/src/utils/oauth-flow.ts:24:export interface OAuthFlowConfig {
+packages/core/src/utils/oauth-flow.ts:37:export type OAuthRefreshConfig = Pick<
+packages/core/src/utils/errors.ts:99:export class FatalConfigError extends FatalError {
+packages/core/src/utils/fastAckHelper.ts:14:export const DEFAULT_FAST_ACK_MODEL_CONFIG_KEY: ModelConfigKey = {
+packages/core/src/utils/environmentContext.ts:48:export async function getEnvironmentContext(config: Config): Promise<Part[]> {
+packages/core/src/scheduler/tool-executor.ts:15:  type Config,
+packages/core/src/utils/environmentContext.ts:48:export async function getEnvironmentContext(config: Config): Promise<Part[]> {
+packages/core/src/utils/fastAckHelper.ts:14:export const DEFAULT_FAST_ACK_MODEL_CONFIG_KEY: ModelConfigKey = {
+packages/core/src/ide/ide-connection-utils.ts:25:export type StdioConfig = {
+packages/core/src/ide/ide-connection-utils.ts:30:export type ConnectionConfig = {
+packages/core/src/ide/ide-connection-utils.ts:82:export function getStdioConfigFromEnv(): StdioConfig | undefined {
+packages/core/src/ide/ide-connection-utils.ts:112:export async function getConnectionConfigFromFile(
+packages/core/src/scheduler/tool-executor.ts:15:  type Config,
+packages/core/node_modules/dotenv/lib/main.d.ts:25:export interface DotenvConfigOptions {
+packages/core/node_modules/dotenv/lib/main.d.ts:92:export interface DotenvConfigOutput {
+packages/core/node_modules/dotenv/lib/main.d.ts:139:export function config(options?: DotenvConfigOptions): DotenvConfigOutput;
+packages/core/node_modules/dotenv/lib/main.d.ts:150:export function configDotenv(options?: DotenvConfigOptions): DotenvConfigOutput;
+packages/core/src/code_assist/types.ts:369:export const RequiredMcpServerConfigSchema = z.object({
+packages/core/src/code_assist/types.ts:391:export type RequiredMcpServerConfig = z.infer<
+ succeeded in 391ms:
+./node_modules/@bufbuild/protobuf/package.json:15:    "build:cjs": "../../node_modules/typescript/bin/tsc --project tsconfig.json --module commonjs --verbatimModuleSyntax false --moduleResolution node10 --outDir ./dist/cjs && echo >./dist/cjs/package.json '{\"type\":\"commonjs\"}'",
+./node_modules/editions/tsconfig.json:6:    "isolatedModules": true,
+./node_modules/istextorbinary/tsconfig.json:6:    "isolatedModules": true,
+./node_modules/textextensions/tsconfig.json:6:    "isolatedModules": true,
+./node_modules/@tootallnate/once/package.json:43:        "isolatedModules": true
+./node_modules/binaryextensions/tsconfig.json:6:    "isolatedModules": true,
+./node_modules/version-range/tsconfig.json:6:    "isolatedModules": true,
+./node_modules/data-uri-to-buffer/package.json:53:        "isolatedModules": true
+exec
+/bin/zsh -lc 'rg -n "component-test-helper|app-test-helper|BaseEvalCase|componentEvalTest|ComponentRig|behavioral evaluations directly against backend" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+845:diff --git a/evals/app-test-helper.ts b/evals/app-test-helper.ts
+847:--- a/evals/app-test-helper.ts
+848:+++ b/evals/app-test-helper.ts
+855:+  BaseEvalCase,
+870:+export interface AppEvalCase extends BaseEvalCase {
+1054:diff --git a/evals/component-test-helper.ts b/evals/component-test-helper.ts
+1058:+++ b/evals/component-test-helper.ts
+1072:+  type BaseEvalCase,
+1105:+export interface ComponentEvalCase extends BaseEvalCase {
+1111:+export class ComponentRig {
+1161:+ * A helper for running behavioral evaluations directly against backend components.
+1164:+export function componentEvalTest(
+1170:+      const rig = new ComponentRig({
+1502:+export interface BaseEvalCase {
+1508:+export interface EvalCase extends BaseEvalCase {
+exec
+/bin/zsh -lc "sed -n '820,910p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24941exec
+/bin/zsh -lc "sed -n '1038,1190p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+           argsIgnorePattern: '^_',
+           varsIgnorePattern: '^_',
+-          caughtErrors: 'all',
++          caughtErrorsIgnorePattern: '^_',
+         },
+       ],
+     },
+@@ -365,7 +360,7 @@ export default tseslint.config(
+         {
+           argsIgnorePattern: '^_',
+           varsIgnorePattern: '^_',
+-          caughtErrors: 'all',
++          caughtErrorsIgnorePattern: '^_',
+         },
+       ],
+     },
+@@ -427,7 +422,7 @@ export default tseslint.config(
+         {
+           argsIgnorePattern: '^_',
+           varsIgnorePattern: '^_',
+ succeeded in 0ms:
+-    },
+-    assert: async (rig, result) => {
+-      const toolCalls = rig.readToolLogs();
+-
+-      // Check if list_background_processes was called
+-      const hasListCall = toolCalls.some(
+-        (call) => call.toolRequest.name === 'list_background_processes',
+-      );
+-
+-      expect(
+-        hasListCall,
+-        'Expected agent to call list_background_processes',
+-      ).toBe(true);
+-    },
+-  });
+-});
+diff --git a/evals/component-test-helper.ts b/evals/component-test-helper.ts
+new file mode 100644
+index 0000000000..23f3cb8b6a
+--- /dev/null
+exec
+/bin/zsh -lc 'rg -n "component|app-test-helper|BaseEvalCase|run queue|suite|category|EvalCategory|EvalSuite|eval" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md' in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:1:# PR #24941 — Generalize evals infra to support more types of evals, organization and queuing of named suites
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:5:Generalizes the evals infrastructure to:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:6:- Support grouping of evals into named 'suites' which can be run by name.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:7:- Support categorization of evals into behavioral (what we have today), hero (small number of larger and more representative evals), and component level (benchmarks for a specific component's effectiveness).
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:8:- Helpers for component level evals.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:10:This is a precursor to having component level evaluation suites, such as one for compression, which measures the effectiveness of that component in isolation.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:14:Only the behavioral evals tests are run by default. Other suites can be run on demand by feature maintainers or autonomously at PR time via https://github.com/google-gemini/gemini-cli/pull/24877
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/goal/GOAL.md:16:Here's what the run queue UI looks like:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:3:### C1 — Correct the component helper description
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:4:**File**: evals/component-test-helper.ts:101
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:5:**Change**: Update the JSDoc above `componentEvalTest` to describe it as a helper for component-level evaluations, not behavioral evaluations.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:6:**Goal link**: The goal explicitly adds component-level eval support; the current comment names the wrong eval category.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:7:**Justification**: Correct terminology makes the helper's purpose match the new eval taxonomy without changing runtime behavior.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:9:### C2 — Return the initialized component config
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:10:**File**: evals/component-test-helper.ts:67
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:11:**Change**: Change `ComponentRig.initialize()` to return the initialized `Config`, and in `componentEvalTest` use `const config = await rig.initialize()` for `setup` and `assert` instead of `rig.config!`.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:12:**Goal link**: Component-level evals are meant to exercise backend components through an initialized `Config`; returning that object expresses the helper contract directly.
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:15:### C3 — Make the component Config import type-only
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:16:**File**: evals/component-test-helper.ts:20
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md:18:**Goal link**: The component helper should expose a narrow component-eval surface rather than implying a runtime dependency on the `Config` symbol.
+exec
+/bin/zsh -lc "sed -n '1480,1520p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+ 
+   if (Object.keys(acknowledgedAgents).length > 0) {
+     const ackPath = path.join(
+-      rig.homeDir!,
++      homeDir,
+       '.gemini',
+       'acknowledgments',
+       'agents.json',
+@@ -299,7 +323,7 @@ async function setupTestFiles(rig: TestRig, files: Record<string, string>) {
+     fs.writeFileSync(ackPath, JSON.stringify(acknowledgedAgents, null, 2));
+   }
+ 
+-  const execOptions = { cwd: rig.testDir!, stdio: 'inherit' as const };
++  const execOptions = { cwd: testDir, stdio: 'ignore' as const };
+   execSync('git init --initial-branch=main', execOptions);
+   execSync('git config user.email "test@example.com"', execOptions);
+   execSync('git config user.name "Test User"', execOptions);
+@@ -366,15 +390,18 @@ interface ForbiddenToolSettings {
+   };
+ }
+codex
+I’ve confirmed the referenced symbols and files exist, and the allowed set permits the two helper files. I’m doing one last consistency pass for TypeScript/API subtleties before writing the report.
+exec
+/bin/zsh -lc 'npm exec tsc -- --noEmit --project evals/tsconfig.json' in /tmp/refactor-eq-workdir/cleanroom-v2/24941 exited 2 in 3.94s:
+evals/app-test-helper.ts(7,24): error TS6307: File '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/packages/cli/src/test-utils/AppRig.tsx' is not listed within the file list of project '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/tsconfig.json'. Projects must list all files or use an 'include' pattern.
+  File is ECMAScript module because '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/packages/cli/package.json' has field "type" with value "module"
+evals/app-test-helper.ts(15,3): error TS1484: 'BaseEvalCase' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+evals/ask_user.eval.ts(8,23): error TS1484: 'AppEvalCase' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+evals/ask_user.eval.ts(9,10): error TS1484: 'EvalPolicy' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+evals/ask_user.eval.ts(17,9): error TS2698: Spread types may only be created from object types.
+evals/ask_user.eval.ts(17,38): error TS4111: Property 'general' comes from an index signature, so it must be accessed with ['general'].
+evals/ask_user.eval.ts(85,25): error TS2339: Property 'name' does not exist on type 'PendingConfirmation'.
+evals/ask_user.eval.ts(86,13): error TS2339: Property 'acceptConfirmation' does not exist on type 'AppRig'.
+evals/frugalSearch.eval.ts(16,9): error TS6133: 'getGrepParams' is declared but its value is never read.
+evals/hierarchical_memory.eval.ts(9,38): error TS6307: File '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/integration-tests/test-helper.ts' is not listed within the file list of project '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/tsconfig.json'. Projects must list all files or use an 'include' pattern.
+  The file is in the program because:
+    Imported via '../integration-tests/test-helper.js' from file '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/hierarchical_memory.eval.ts'
+    Imported via '../integration-tests/test-helper.js' from file '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/save_memory.eval.ts'
+  File is ECMAScript module because '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/package.json' has field "type" with value "module"
+evals/model_steering.eval.ts(8,1): error TS6133: 'act' is declared but its value is never read.
+evals/model_steering.eval.ts(12,1): error TS6133: 'PolicyDecision' is declared but its value is never read.
+packages/cli/src/acp/acpClient.ts(56,38): error TS6307: File '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/packages/cli/src/acp/fileSystemService.ts' is not listed within the file list of project '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/tsconfig.json'. Projects must list all files or use an 'include' pattern.
+  File is ECMAScript module because '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/packages/cli/package.json' has field "type" with value "module"
+packages/cli/src/acp/acpClient.ts(57,36): error TS6307: File '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/packages/cli/src/acp/acpErrors.ts' is not listed within the file list of project '/private/tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/tsconfig.json'. Projects must list all files or use an 'include' pattern.
+exec
+/bin/zsh -lc "nl -ba tsconfig.json | sed -n '1,80p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+     1	{
+     2	  "compilerOptions": {
+     3	    "strict": true,
+     4	    "esModuleInterop": true,
+     5	    "skipLibCheck": true,
+     6	    "noImplicitAny": true,
+     7	    "noImplicitOverride": true,
+     8	    "noImplicitReturns": true,
+     9	    "noImplicitThis": true,
+    10	    "forceConsistentCasingInFileNames": true,
+    11	    "noPropertyAccessFromIndexSignature": true,
+    12	    "noUnusedLocals": true,
+    13	    "strictBindCallApply": true,
+    14	    "strictFunctionTypes": true,
+    15	    "strictNullChecks": true,
+    16	    "strictPropertyInitialization": true,
+    17	    "resolveJsonModule": true,
+    18	    "sourceMap": true,
+    19	    "composite": true,
+    20	    "incremental": true,
+codex
+I found a concrete spec issue in the rejected section: it claims `.eval.ts` files are outside the permitted scope, but the allowed file list explicitly includes several of them. I’m writing that as a warning in the requested report.
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md && nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md | sed -n '1,160p' || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24941 succeeded in 0ms:
+
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+## Finding F1 — Rejected rationale misstates eval file scope
+**Severity**: warning
+**Claim**: global
+**What**: The rejected item says editing existing `*.eval.ts` files is "explicitly outside the permitted claim scope", but the allowed edit set includes multiple `evals/*.eval.ts` files. That rationale misrepresents the scope rules and could incorrectly constrain a later reconcile step. The prompt forbids `*.test.{ts,tsx,py,go,rs}`, not `*.eval.ts`.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt` lists entries such as `evals/plan_mode.eval.ts`, `evals/tracker.eval.ts`, `evals/update_topic.eval.ts`, `evals/unsafe-cloning.eval.ts`, and `evals/background_processes.eval.ts`; `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md` rejected section says "eval files are test files and are explicitly outside the permitted claim scope."
+**Fix**: Clarify the rejection to say suite/category tagging should be rejected because it changes the eval API/behavior or exceeds the bounded cleanup, not because all `*.eval.ts` files are outside the allowed file set.
+apply_patch(auto_approved=true) exited 0 in 27ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+file update:
+diff --git a/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..54d3e39d999ed9265875a75b993e6e33c2ab3912
+--- /dev/null
++++ b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Rejected rationale misstates eval file scope
++**Severity**: warning
++**Claim**: global
++**What**: The rejected item says editing existing `*.eval.ts` files is "explicitly outside the permitted claim scope", but the allowed edit set includes multiple `evals/*.eval.ts` files. That rationale misrepresents the scope rules and could incorrectly constrain a later reconcile step. The prompt forbids `*.test.{ts,tsx,py,go,rs}`, not `*.eval.ts`.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt` lists entries such as `evals/plan_mode.eval.ts`, `evals/tracker.eval.ts`, `evals/update_topic.eval.ts`, `evals/unsafe-cloning.eval.ts`, and `evals/background_processes.eval.ts`; `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md` rejected section says "eval files are test files and are explicitly outside the permitted claim scope."
++**Fix**: Clarify the rejection to say suite/category tagging should be rejected because it changes the eval API/behavior or exceeds the bounded cleanup, not because all `*.eval.ts` files are outside the allowed file set.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..54d3e39d999ed9265875a75b993e6e33c2ab3912
+--- /dev/null
++++ b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Rejected rationale misstates eval file scope
++**Severity**: warning
++**Claim**: global
++**What**: The rejected item says editing existing `*.eval.ts` files is "explicitly outside the permitted claim scope", but the allowed edit set includes multiple `evals/*.eval.ts` files. That rationale misrepresents the scope rules and could incorrectly constrain a later reconcile step. The prompt forbids `*.test.{ts,tsx,py,go,rs}`, not `*.eval.ts`.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt` lists entries such as `evals/plan_mode.eval.ts`, `evals/tracker.eval.ts`, `evals/update_topic.eval.ts`, `evals/unsafe-cloning.eval.ts`, and `evals/background_processes.eval.ts`; `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md` rejected section says "eval files are test files and are explicitly outside the permitted claim scope."
++**Fix**: Clarify the rejection to say suite/category tagging should be rejected because it changes the eval API/behavior or exceeds the bounded cleanup, not because all `*.eval.ts` files are outside the allowed file set.
+
+codex
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md)
+
+It contains one warning: the spec’s rejected section incorrectly says existing `*.eval.ts` files are outside the permitted scope, even though `allowed-files.txt` includes several of them. No source files were edited.
+file update:
+diff --git a/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..54d3e39d999ed9265875a75b993e6e33c2ab3912
+--- /dev/null
++++ b/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — Rejected rationale misstates eval file scope
++**Severity**: warning
++**Claim**: global
++**What**: The rejected item says editing existing `*.eval.ts` files is "explicitly outside the permitted claim scope", but the allowed edit set includes multiple `evals/*.eval.ts` files. That rationale misrepresents the scope rules and could incorrectly constrain a later reconcile step. The prompt forbids `*.test.{ts,tsx,py,go,rs}`, not `*.eval.ts`.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/inputs/allowed-files.txt` lists entries such as `evals/plan_mode.eval.ts`, `evals/tracker.eval.ts`, `evals/update_topic.eval.ts`, `evals/unsafe-cloning.eval.ts`, and `evals/background_processes.eval.ts`; `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/round-1-claims.md` rejected section says "eval files are test files and are explicitly outside the permitted claim scope."
++**Fix**: Clarify the rejection to say suite/category tagging should be rejected because it changes the eval API/behavior or exceeds the bounded cleanup, not because all `*.eval.ts` files are outside the allowed file set.
+
+tokens used
+55,755
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24941/volley/hunt-spec-round-1.md)
+
+It contains one warning: the spec’s rejected section incorrectly says existing `*.eval.ts` files are outside the permitted scope, even though `allowed-files.txt` includes several of them. No source files were edited.

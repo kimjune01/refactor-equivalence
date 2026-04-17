@@ -1,0 +1,6 @@
+## Finding F1 — Artifact exceeds allowed edit set
+**Severity**: blocker
+**Claim**: global
+**What**: The spec says the artifact already expresses the goal "within the allowed production edit set", but the artifact touches `vendor/github.com/docker/distribution/registry/client/auth/challenge/authchallenge.go`, which is not listed in `allowed-files.txt`. An implementer following the allowed edit set cannot reproduce the artifact as written without guessing whether that vendor source deletion/rename is permitted.
+**Evidence**: `round-1-claims.md:3` makes the allowed-edit-set claim. `diff-base-to-test.patch:50-56` renames from `vendor/github.com/docker/distribution/registry/client/auth/challenge/authchallenge.go` to `pkg/v1/remote/internal/authchallenge/authchallenge.go`. `allowed-files.txt:1-10` includes the new `pkg/v1/remote/internal/authchallenge/authchallenge.go` and `vendor/github.com/docker/distribution/registry/client/auth/challenge/addr.go`, but not the old vendor `authchallenge.go` path.
+**Fix**: Clarify or reject the global accepted-summary claim unless the allowed edit set is expanded to include the old vendor `authchallenge.go` path, or narrow the artifact description so it does not assert that every touched path is currently allowed.

@@ -1,0 +1,1004 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-4145
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9cb4-f2a5-79f2-b0aa-697865c555cb
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, spec, patch artifact, and allowed file list first, then apply only the accepted claims inside that edit boundary. I won’t run tests per your constraint.
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use read-only AST traversal for diagnostics
+**File**: tools/redundantptr/redundantptr.go:73
+**Change**: In `analyzeFunction`, replace the `astutil.Apply` traversal with `ast.Inspect`, inspect `*ast.CallExpr` nodes directly, and remove the now-unused `golang.org/x/tools/go/ast/astutil` import.
+**Goal link**: The goal is to detect redundant `github.Ptr(x)` calls, not rewrite the tree in memory.
+**Justification**: Using `ast.Inspect` expresses the linter as a read-only diagnostic pass and removes an unnecessary rewrite-capable traversal without changing the reported diagnostics or suggested fixes.
+
+### C2 — Narrow deprecated-wrapper skip helper to function declarations
+**File**: tools/redundantptr/redundantptr.go:223
+**Change**: Change `shouldIgnoreDeprecatedPtrWrapper` to accept `*ast.FuncDecl` instead of `ast.Node`, and call it only from the `*ast.FuncDecl` path before analyzing that function body.
+**Goal link**: The skip exists only to avoid reporting inside deprecated top-level pointer wrapper declarations while still detecting redundant pointer calls in ordinary functions and function literals.
+**Justification**: Removing the generic `ast.Node` parameter and internal type assertion makes the one special-case boundary explicit while preserving the current behavior for `FuncDecl` and `FuncLit` analysis.
+
+## Rejected
+
+- Remove unqualified `Ptr(x)` detection from `redundantPtrCall`: the goal text names `github.Ptr(x)`, but the current testdata expects unqualified `Ptr(i)` and `Ptr(opts.Mode)` warnings, so this would change observable linter behavior under the existing suite.
+- Add type information so the linter proves that `github.Ptr` resolves to `github.com/google/go-github/v84/github.Ptr`: this would require changing the load mode away from the surrounding custom linters' syntax-only pattern and would expand implementation scope rather than simplify the first-pass artifact.
+- Track locals in lexical order instead of pre-collecting all locals in `collectLocals`: this may improve precision for shadowing edge cases, but it would change which diagnostics are emitted and is not a behavior-preserving refactor.
+- Replace remaining literal `github.Ptr("...")` calls in examples, docs, or tests by introducing local temporaries: those calls are not directly replaceable with `&x`, often rely on non-addressable literals, and many candidate files are outside the allowed edit set or are test files.
+ succeeded in 0ms:
+# PR #4145
+
+This PR adds `redundantptr` linter to detect `github.Ptr(x)` calls that can be replaced with simple `&x`.
+ succeeded in 0ms:
+diff --git a/.custom-gcl.yml b/.custom-gcl.yml
+index 4c2c4aae..5e07e9c2 100644
+--- a/.custom-gcl.yml
++++ b/.custom-gcl.yml
+@@ -4,6 +4,8 @@ plugins:
+     path: ./tools/extraneousnew
+   - module: "github.com/google/go-github/v84/tools/fmtpercentv"
+     path: ./tools/fmtpercentv
++  - module: "github.com/google/go-github/v84/tools/redundantptr"
++    path: ./tools/redundantptr
+   - module: "github.com/google/go-github/v84/tools/sliceofpointers"
+     path: ./tools/sliceofpointers
+   - module: "github.com/google/go-github/v84/tools/structfield"
+diff --git a/.golangci.yml b/.golangci.yml
+index 9bc14152..91fb1514 100644
+--- a/.golangci.yml
++++ b/.golangci.yml
+@@ -27,6 +27,7 @@ linters:
+     - nolintlint
+     - paralleltest
+ succeeded in 0ms:
+.custom-gcl.yml
+.golangci.yml
+example/commitpr/main.go
+github/apps.go
+github/interactions_orgs.go
+github/interactions_repos.go
+github/markdown.go
+github/migrations.go
+github/migrations_user.go
+github/reactions.go
+tools/redundantptr/go.mod
+tools/redundantptr/redundantptr.go
+tools/redundantptr/testdata/src/github.com/google/go-github/v84/github/github.go
+tools/redundantptr/testdata/src/has-warnings/main.go
+tools/redundantptr/testdata/src/no-warnings/main.go
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-codex-4145
+SHARPENED_SPEC.md
+FORGE_INPUT_DIFF.patch
+openapi_operations.yaml
+CONTRIBUTING.md
+github/repos_hooks_deliveries_test.go
+github/licenses.go
+github/enterprise_codesecurity_configurations.go
+github/orgs_rules_test.go
+github/gists_comments_test.go
+github/enterprise_billing_cost_centers.go
+github/interactions.go
+github/copilot_test.go
+github/orgs_rules.go
+github/orgs_artifacts_test.go
+github/emojis_test.go
+github/enterprise.go
+github/enterprise_codesecurity_configurations_test.go
+github/dependabot.go
+github/orgs_properties.go
+codex
+The accepted claims both target `tools/redundantptr/redundantptr.go`, which is in the allowed set and is not a test file. I’m going to inspect that implementation around the traversal and deprecated-wrapper helper, then patch only that file plus `IMPLEMENT_SUMMARY.md`.
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "sed -n '1,280p' tools/redundantptr/redundantptr.go" in /tmp/refactor-eq-workdir/bb-codex-4145 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package redundantptr is a custom linter to find redundant github.Ptr calls.
+package redundantptr
+
+import (
+	"bytes"
+	"go/ast"
+	"go/format"
+	"go/token"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/ast/astutil"
+)
+
+func init() {
+codex
+There’s no `.git` metadata in this worktree, so I’ll verify by direct file inspection instead of git diff. The source currently matches the two refactor targets exactly: `astutil.Apply` is only used for read-only traversal, and the skip helper takes a generic `ast.Node`.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -16,3 +16,2 @@
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+@@ -53,2 +52,5 @@
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return false
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+@@ -66,10 +68,6 @@
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+@@ -102,3 +100,3 @@
+ 		return true
+-	}, nil)
++	})
+ }
+@@ -222,8 +220,3 @@
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..aa388e161e9493957ec16da18e394b3a0c07379b
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return false
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..aa388e161e9493957ec16da18e394b3a0c07379b
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return false
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+codex
+One subtlety in the file-level walk matters here: skipping a deprecated wrapper should skip analyzing that declaration body as a function, while still letting the outer walk see any nested function literals the same way it did before. I’m tightening that now before formatting and writing the implementation summary.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -53,3 +53,3 @@
+ 					if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-						return false
++						return true
+ 					}
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+exec
+/bin/zsh -lc 'gofmt -w tools/redundantptr/redundantptr.go' in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+exec
+/bin/zsh -lc "rg \"astutil|shouldIgnoreDeprecatedPtrWrapper|ast\\.Inspect\\(body\" tools/redundantptr/redundantptr.go" in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "sed -n '1,260p' tools/redundantptr/redundantptr.go" in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+					if shouldIgnoreDeprecatedPtrWrapper(fn) {
+	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
+func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ succeeded in 0ms:
+// Copyright 2026 The go-github AUTHORS. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package redundantptr is a custom linter to find redundant github.Ptr calls.
+package redundantptr
+
+import (
+	"bytes"
+	"go/ast"
+	"go/format"
+	"go/token"
+
+	"github.com/golangci/plugin-module-register/register"
+	"golang.org/x/tools/go/analysis"
+)
+
+func init() {
+	register.Plugin("redundantptr", New)
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+codex
+The source now reflects both accepted refactor claims and formats cleanly. I’m adding the required `IMPLEMENT_SUMMARY.md` with the modified files and applied claim IDs, then I’ll do a final static check of the touched files list.
+file update
+A /tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+Applied claims: C1, C2
+
+Modified files:
+- tools/redundantptr/redundantptr.go
+- IMPLEMENT_SUMMARY.md
+
+Notes:
+- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
+- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a6bcd49bea589211e505501b1579ef52081c216
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2
++
++Modified files:
++- tools/redundantptr/redundantptr.go
++- IMPLEMENT_SUMMARY.md
++
++Notes:
++- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
++- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a6bcd49bea589211e505501b1579ef52081c216
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2
++
++Modified files:
++- tools/redundantptr/redundantptr.go
++- IMPLEMENT_SUMMARY.md
++
++Notes:
++- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
++- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+exec
+/bin/zsh -lc "sed -n '1,120p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+Applied claims: C1, C2
+
+Modified files:
+- tools/redundantptr/redundantptr.go
+- IMPLEMENT_SUMMARY.md
+
+Notes:
+- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
+- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+exec
+/bin/zsh -lc "find . -name '*.test.ts' -o -name '*.test.tsx' -o -name '*_test.go' -o -name 'test_*.py' -o -name '*_test.py' | wc -l" in /tmp/refactor-eq-workdir/bb-codex-4145exec
+/bin/zsh -lc "rg \"astutil|shouldIgnoreDeprecatedPtrWrapper\\(fn ast\\.Node\\)|astutil\\.Apply\" tools/redundantptr/redundantptr.go IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-4145 succeeded in 0ms:
+IMPLEMENT_SUMMARY.md:- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
+ succeeded in 0ms:
+     219
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a6bcd49bea589211e505501b1579ef52081c216
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2
++
++Modified files:
++- tools/redundantptr/redundantptr.go
++- IMPLEMENT_SUMMARY.md
++
++Notes:
++- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
++- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+codex
+Implemented the accepted refactor claims C1 and C2.
+
+Changed:
+- [tools/redundantptr/redundantptr.go](/tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go): replaced `astutil.Apply` with read-only `ast.Inspect`, removed the `astutil` import, and narrowed `shouldIgnoreDeprecatedPtrWrapper` to `*ast.FuncDecl` called from the `FuncDecl` path.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md): added the required implementation evidence.
+
+I did not run tests, per the instruction that `node_modules` is not present and tests must not be run.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a6bcd49bea589211e505501b1579ef52081c216
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2
++
++Modified files:
++- tools/redundantptr/redundantptr.go
++- IMPLEMENT_SUMMARY.md
++
++Notes:
++- Replaced the diagnostic traversal in analyzeFunction with ast.Inspect and removed the unused astutil import.
++- Narrowed shouldIgnoreDeprecatedPtrWrapper to *ast.FuncDecl and call it only from the FuncDecl path before analyzing that function body.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+index 951e06bfed3c17e92bcf508391dfca41b3553ac2..2be116a849f0f7df7ab237a6de8125763d4aea8c
+--- a//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+
+tokens used
+20,425
+Implemented the accepted refactor claims C1 and C2.
+
+Changed:
+- [tools/redundantptr/redundantptr.go](/tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go): replaced `astutil.Apply` with read-only `ast.Inspect`, removed the `astutil` import, and narrowed `shouldIgnoreDeprecatedPtrWrapper` to `*ast.FuncDecl` called from the `FuncDecl` path.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-4145/IMPLEMENT_SUMMARY.md): added the required implementation evidence.
+
+I did not run tests, per the instruction that `node_modules` is not present and tests must not be run.

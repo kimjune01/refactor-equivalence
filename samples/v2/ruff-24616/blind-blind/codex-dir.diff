@@ -1,0 +1,1408 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/Cargo.lock /tmp/refactor-eq-workdir/bb-codex-24616/Cargo.lock
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/Cargo.lock	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/Cargo.lock	2026-04-17 03:23:52
+@@ -2063,10 +2063,6 @@
+  "thiserror 2.0.18",
+  "toml 1.1.2+spec-1.1.0",
+  "tracing",
+- "ty_module_resolver",
+- "ty_python_core",
+- "ty_python_semantic",
+- "ty_vendored",
+ ]
+ 
+ [[package]]
+@@ -4785,14 +4781,18 @@
+  "insta",
+  "mdtest",
+  "ruff_db",
++ "ruff_notebook",
+  "ruff_python_ast",
+  "ruff_source_file",
+  "salsa",
++ "serde",
+  "tempfile",
++ "tracing",
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_python_semantic",
+  "ty_static",
++ "ty_vendored",
+ ]
+ 
+ [[package]]
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/Cargo.toml /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/Cargo.toml
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/Cargo.toml	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/Cargo.toml	2026-04-17 03:23:05
+@@ -22,10 +22,6 @@
+ ruff_python_trivia = { workspace = true }
+ ruff_source_file = { workspace = true }
+ ruff_text_size = { workspace = true }
+-ty_module_resolver = { workspace = true }
+-ty_python_semantic = { workspace = true, features = ["serde", "testing"] }
+-ty_vendored = { workspace = true }
+-ty_python_core = { workspace = true }
+ 
+ anyhow = { workspace = true }
+ camino = { workspace = true }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/assertion.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/assertion.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/assertion.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/assertion.rs	2026-04-17 03:24:30
+@@ -481,29 +481,16 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::db::Db;
++    use crate::db::TestDb;
++    use ruff_db::files::system_path_to_file;
+     use ruff_db::parsed::parsed_module;
+     use ruff_db::source::line_index;
+     use ruff_db::system::DbWithWritableSystem as _;
+-    use ruff_db::{Db as _, files::system_path_to_file};
+     use ruff_python_trivia::textwrap::dedent;
+     use ruff_source_file::OneIndexed;
+-    use ty_module_resolver::SearchPathSettings;
+-    use ty_python_core::platform::PythonPlatform;
+-    use ty_python_core::program::{FallibleStrategy, Program, ProgramSettings};
+-    use ty_python_semantic::PythonVersionWithSource;
+ 
+     fn get_assertions(source: &str) -> InlineFileAssertions<'_> {
+-        let mut db = Db::setup();
+-
+-        let settings = ProgramSettings {
+-            python_version: PythonVersionWithSource::default(),
+-            python_platform: PythonPlatform::default(),
+-            search_paths: SearchPathSettings::new(Vec::new())
+-                .to_search_paths(db.system(), db.vendored(), &FallibleStrategy)
+-                .unwrap(),
+-        };
+-        Program::init_or_update(&mut db, settings);
++        let mut db = TestDb::setup();
+ 
+         db.write_file("/src/test.py", source).unwrap();
+         let file = system_path_to_file(&db, "/src/test.py").unwrap();
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/config.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/config.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/config.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/config.rs	1969-12-31 16:00:00
+@@ -1,164 +0,0 @@
+-//! TOML-deserializable ty configuration, similar to `ty.toml`, to be able to
+-//! control some configuration options from Markdown files. For now, this supports the
+-//! following limited structure:
+-//!
+-//! ```toml
+-//! log = true # or log = "ty=WARN"
+-//!
+-//! [environment]
+-//! python-version = "3.10"
+-//!
+-//! [project]
+-//! dependencies = ["pydantic==2.12.2"]
+-//! ```
+-
+-use ruff_db::system::{SystemPath, SystemPathBuf};
+-use ruff_python_ast::PythonVersion;
+-use serde::{Deserialize, Serialize};
+-use ty_python_core::platform::PythonPlatform;
+-
+-#[derive(Deserialize, Debug, Default, Clone)]
+-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+-pub struct MarkdownTestConfig {
+-    pub(crate) environment: Option<Environment>,
+-
+-    pub log: Option<Log>,
+-
+-    pub analysis: Option<Analysis>,
+-
+-    /// The [`ruff_db::system::System`] to use for tests.
+-    ///
+-    /// Defaults to the case-sensitive [`ruff_db::system::InMemorySystem`].
+-    pub system: Option<SystemKind>,
+-
+-    /// Project configuration for installing external dependencies.
+-    pub(crate) project: Option<Project>,
+-
+-    /// Simulate the use passing `-v` on the command line,
+-    /// which can be used to show more information in test diagnostics.
+-    pub(crate) verbose: Option<bool>,
+-}
+-
+-impl MarkdownTestConfig {
+-    pub fn python_version(&self) -> Option<PythonVersion> {
+-        self.environment.as_ref()?.python_version
+-    }
+-
+-    pub fn python_platform(&self) -> Option<PythonPlatform> {
+-        self.environment.as_ref()?.python_platform.clone()
+-    }
+-
+-    pub fn typeshed(&self) -> Option<&SystemPath> {
+-        self.environment.as_ref()?.typeshed.as_deref()
+-    }
+-
+-    pub fn extra_paths(&self) -> Option<&[SystemPathBuf]> {
+-        self.environment.as_ref()?.extra_paths.as_deref()
+-    }
+-
+-    pub fn python(&self) -> Option<&SystemPath> {
+-        self.environment.as_ref()?.python.as_deref()
+-    }
+-
+-    pub fn dependencies(&self) -> Option<&[String]> {
+-        self.project.as_ref()?.dependencies.as_deref()
+-    }
+-
+-    pub fn verbose(&self) -> bool {
+-        self.verbose.unwrap_or_default()
+-    }
+-}
+-
+-impl crate::parser::MdtestConfig for MarkdownTestConfig {
+-    fn has_dependencies(&self) -> bool {
+-        self.dependencies().is_some()
+-    }
+-}
+-
+-#[derive(Deserialize, Debug, Default, Clone)]
+-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+-pub(crate) struct Environment {
+-    /// Target Python version to assume when resolving types.
+-    ///
+-    /// The Python version affects allowed syntax, type definitions of the standard library, and
+-    /// type definitions of first- and third-party modules that are conditional on the Python version.
+-    ///
+-    /// By default, the Python version is inferred as the lower bound of the project's
+-    /// `requires-python` field from the `pyproject.toml`, if available. Otherwise, the latest
+-    /// stable version supported by ty is used (see `ty check --help` output).
+-    ///
+-    /// ty will not infer the Python version from the Python environment at this time.
+-    pub(crate) python_version: Option<PythonVersion>,
+-
+-    /// Target platform to assume when resolving types.
+-    pub(crate) python_platform: Option<PythonPlatform>,
+-
+-    /// Path to a custom typeshed directory.
+-    pub(crate) typeshed: Option<SystemPathBuf>,
+-
+-    /// Additional search paths to consider when resolving modules.
+-    pub(crate) extra_paths: Option<Vec<SystemPathBuf>>,
+-
+-    /// Path to the Python environment.
+-    ///
+-    /// ty uses the Python environment to resolve type information and third-party dependencies.
+-    ///
+-    /// If a path to a Python interpreter is provided, e.g., `.venv/bin/python3`, ty will attempt to
+-    /// find an environment two directories up from the interpreter's path, e.g., `.venv`. At this
+-    /// time, ty does not invoke the interpreter to determine the location of the environment. This
+-    /// means that ty will not resolve dynamic executables such as a shim.
+-    ///
+-    /// ty will search in the resolved environment's `site-packages` directories for type
+-    /// information and third-party imports.
+-    #[serde(skip_serializing_if = "Option::is_none")]
+-    pub python: Option<SystemPathBuf>,
+-}
+-
+-#[derive(Deserialize, Default, Debug, Clone)]
+-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+-pub struct Analysis {
+-    /// Whether ty should support `type: ignore` comments.
+-    pub respect_type_ignore_comments: Option<bool>,
+-
+-    pub allowed_unresolved_imports: Option<Vec<String>>,
+-
+-    pub replace_imports_with_any: Option<Vec<String>>,
+-}
+-
+-#[derive(Deserialize, Debug, Clone)]
+-#[serde(untagged)]
+-pub enum Log {
+-    /// Enable logging with tracing when `true`.
+-    Bool(bool),
+-    /// Enable logging and only show filters that match the given [env-filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
+-    Filter(String),
+-}
+-
+-/// The system to use for tests.
+-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+-#[serde(rename_all = "kebab-case")]
+-pub enum SystemKind {
+-    /// Use an in-memory system with a case-sensitive file system.
+-    ///
+-    /// This is recommended for all tests because it's fast.
+-    #[default]
+-    InMemory,
+-
+-    /// Use the os system.
+-    ///
+-    /// This system should only be used when testing system or OS specific behavior.
+-    Os,
+-}
+-
+-/// Project configuration for tests that need external dependencies.
+-#[derive(Deserialize, Debug, Default, Clone)]
+-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+-pub(crate) struct Project {
+-    /// List of Python package dependencies in `pyproject.toml` format.
+-    ///
+-    /// These will be installed using `uv sync` into a temporary virtual environment.
+-    /// The site-packages directory will then be copied into the test's filesystem.
+-    ///
+-    /// Example: `dependencies = ["pydantic==2.12.2"]`
+-    pub(crate) dependencies: Option<Vec<String>>,
+-}
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/db.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/db.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/db.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/db.rs	2026-04-17 03:20:45
+@@ -1,134 +1,34 @@
+-use camino::{Utf8Component, Utf8PathBuf};
+ use ruff_db::Db as SourceDb;
+-use ruff_db::diagnostic::Severity;
+-use ruff_db::files::{File, Files};
+-use ruff_db::system::{
+-    CaseSensitivity, DbWithWritableSystem, InMemorySystem, OsSystem, System, SystemPath,
+-    SystemPathBuf, WhichResult, WritableSystem,
+-};
++use ruff_db::files::Files;
++use ruff_db::system::{DbWithWritableSystem, System, TestSystem};
+ use ruff_db::vendored::VendoredFileSystem;
+-use ruff_notebook::{Notebook, NotebookError};
+-use salsa::Setter as _;
+-use std::borrow::Cow;
+-use std::sync::Arc;
+-use tempfile::TempDir;
+-use ty_module_resolver::{ModuleGlobSetBuilder, SearchPaths};
+-use ty_python_core::program::Program;
+-use ty_python_semantic::lint::{LintRegistry, RuleSelection};
+-use ty_python_semantic::{AnalysisSettings, Db as SemanticDb, default_lint_registry};
+ 
+-use crate::config::Analysis;
+-
+ #[salsa::db]
+ #[derive(Clone)]
+-pub struct Db {
++pub(crate) struct TestDb {
+     storage: salsa::Storage<Self>,
+     files: Files,
+-    system: MdtestSystem,
++    system: TestSystem,
+     vendored: VendoredFileSystem,
+-    rule_selection: Arc<RuleSelection>,
+-    settings: Option<Settings>,
+ }
+ 
+-impl Db {
+-    pub fn setup() -> Self {
+-        let rule_selection = RuleSelection::all(default_lint_registry(), Severity::Info);
+-
+-        let mut db = Self {
+-            system: MdtestSystem::in_memory(),
++impl TestDb {
++    pub(crate) fn setup() -> Self {
++        Self {
+             storage: salsa::Storage::new(Some(Box::new({
+                 move |event| {
+                     tracing::trace!("event: {:?}", event);
+                 }
+             }))),
+-            vendored: ty_vendored::file_system().clone(),
+             files: Files::default(),
+-            rule_selection: Arc::new(rule_selection),
+-            settings: None,
+-        };
+-
+-        db.settings = Some(Settings::new(&db));
+-        db
+-    }
+-
+-    fn settings(&self) -> Settings {
+-        self.settings.unwrap()
+-    }
+-
+-    pub fn set_verbosity(&mut self, verbose: bool) {
+-        self.settings().set_verbose(self).to(verbose);
+-    }
+-
+-    pub fn update_analysis_options(&mut self, options: Option<&Analysis>) {
+-        let analysis = if let Some(options) = options {
+-            let AnalysisSettings {
+-                respect_type_ignore_comments: respect_type_ignore_comments_default,
+-                allowed_unresolved_imports: allowed_unresolved_imports_default,
+-                replace_imports_with_any: replace_imports_with_any_default,
+-            } = AnalysisSettings::default();
+-
+-            let allowed_unresolved_imports = if let Some(allowed_unresolved_imports) =
+-                options.allowed_unresolved_imports.as_deref()
+-            {
+-                let mut builder = ModuleGlobSetBuilder::new();
+-                for pattern in allowed_unresolved_imports {
+-                    builder
+-                        .add(pattern)
+-                        .expect("Invalid `allowed-unresolved-imports` pattern `{pattern}");
+-                }
+-                builder.build().unwrap()
+-            } else {
+-                allowed_unresolved_imports_default
+-            };
+-
+-            let replace_imports_with_any = if let Some(replace_imports_with_any) =
+-                options.replace_imports_with_any.as_deref()
+-            {
+-                let mut builder = ModuleGlobSetBuilder::new();
+-                for pattern in replace_imports_with_any {
+-                    builder
+-                        .add(pattern)
+-                        .expect("Invalid `replace-imports-with-any` pattern `{pattern}");
+-                }
+-                builder.build().unwrap()
+-            } else {
+-                replace_imports_with_any_default
+-            };
+-
+-            AnalysisSettings {
+-                respect_type_ignore_comments: options
+-                    .respect_type_ignore_comments
+-                    .unwrap_or(respect_type_ignore_comments_default),
+-                allowed_unresolved_imports,
+-                replace_imports_with_any,
+-            }
+-        } else {
+-            AnalysisSettings::default()
+-        };
+-
+-        let settings = self.settings();
+-        if settings.analysis(self) != &analysis {
+-            settings.set_analysis(self).to(analysis);
++            system: TestSystem::default(),
++            vendored: VendoredFileSystem::default(),
+         }
+     }
+-
+-    pub fn use_os_system_with_temp_dir(&mut self, cwd: SystemPathBuf, temp_dir: TempDir) {
+-        self.system.with_os(cwd, temp_dir);
+-        Files::sync_all(self);
+-    }
+-
+-    pub fn use_in_memory_system(&mut self) {
+-        self.system.with_in_memory();
+-        Files::sync_all(self);
+-    }
+-
+-    pub fn create_directory_all(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
+-        self.system.create_directory_all(path)
+-    }
+ }
+ 
+ #[salsa::db]
+-impl SourceDb for Db {
++impl SourceDb for TestDb {
+     fn vendored(&self) -> &VendoredFileSystem {
+         &self.vendored
+     }
+@@ -142,245 +42,17 @@
+     }
+ 
+     fn python_version(&self) -> ruff_python_ast::PythonVersion {
+-        Program::get(self).python_version(self)
++        ruff_python_ast::PythonVersion::latest_ty()
+     }
+ }
+ 
+ #[salsa::db]
+-impl ty_module_resolver::Db for Db {
+-    fn search_paths(&self) -> &SearchPaths {
+-        Program::get(self).search_paths(self)
+-    }
+-}
++impl salsa::Database for TestDb {}
+ 
+-#[salsa::db]
+-impl ty_python_core::Db for Db {
+-    fn should_check_file(&self, file: File) -> bool {
+-        !file.path(self).is_vendored_path()
+-    }
+-}
++impl DbWithWritableSystem for TestDb {
++    type System = TestSystem;
+ 
+-#[salsa::db]
+-impl SemanticDb for Db {
+-    fn rule_selection(&self, _file: File) -> &RuleSelection {
+-        &self.rule_selection
+-    }
+-
+-    fn lint_registry(&self) -> &LintRegistry {
+-        default_lint_registry()
+-    }
+-
+-    fn verbose(&self) -> bool {
+-        self.settings().verbose(self)
+-    }
+-
+-    fn analysis_settings(&self, _file: File) -> &AnalysisSettings {
+-        self.settings().analysis(self)
+-    }
+-}
+-
+-#[salsa::db]
+-impl salsa::Database for Db {}
+-
+-impl DbWithWritableSystem for Db {
+-    type System = MdtestSystem;
+     fn writable_system(&self) -> &Self::System {
+         &self.system
+-    }
+-}
+-
+-#[salsa::input(debug)]
+-struct Settings {
+-    #[default]
+-    #[returns(ref)]
+-    analysis: AnalysisSettings,
+-    #[default]
+-    verbose: bool,
+-}
+-
+-#[derive(Debug, Clone)]
+-pub struct MdtestSystem(Arc<MdtestSystemInner>);
+-
+-#[derive(Debug)]
+-enum MdtestSystemInner {
+-    InMemory(InMemorySystem),
+-    Os {
+-        os_system: OsSystem,
+-        _temp_dir: TempDir,
+-    },
+-}
+-
+-impl MdtestSystem {
+-    fn in_memory() -> Self {
+-        Self(Arc::new(MdtestSystemInner::InMemory(
+-            InMemorySystem::default(),
+-        )))
+-    }
+-
+-    fn as_system(&self) -> &dyn WritableSystem {
+-        match &*self.0 {
+-            MdtestSystemInner::InMemory(system) => system,
+-            MdtestSystemInner::Os { os_system, .. } => os_system,
+-        }
+-    }
+-
+-    fn with_os(&mut self, cwd: SystemPathBuf, temp_dir: TempDir) {
+-        self.0 = Arc::new(MdtestSystemInner::Os {
+-            os_system: OsSystem::new(cwd),
+-            _temp_dir: temp_dir,
+-        });
+-    }
+-
+-    fn with_in_memory(&mut self) {
+-        if let MdtestSystemInner::InMemory(in_memory) = &*self.0 {
+-            in_memory.fs().remove_all();
+-        } else {
+-            self.0 = Arc::new(MdtestSystemInner::InMemory(InMemorySystem::default()));
+-        }
+-    }
+-
+-    fn normalize_path<'a>(&self, path: &'a SystemPath) -> Cow<'a, SystemPath> {
+-        match &*self.0 {
+-            MdtestSystemInner::InMemory(_) => Cow::Borrowed(path),
+-            MdtestSystemInner::Os { os_system, .. } => {
+-                // Make all paths relative to the current directory
+-                // to avoid writing or reading from outside the temp directory.
+-                let without_root: Utf8PathBuf = path
+-                    .components()
+-                    .skip_while(|component| {
+-                        matches!(
+-                            component,
+-                            Utf8Component::RootDir | Utf8Component::Prefix(..)
+-                        )
+-                    })
+-                    .collect();
+-                Cow::Owned(os_system.current_directory().join(&without_root))
+-            }
+-        }
+-    }
+-}
+-
+-impl System for MdtestSystem {
+-    fn path_metadata(
+-        &self,
+-        path: &SystemPath,
+-    ) -> ruff_db::system::Result<ruff_db::system::Metadata> {
+-        self.as_system().path_metadata(&self.normalize_path(path))
+-    }
+-
+-    fn canonicalize_path(&self, path: &SystemPath) -> ruff_db::system::Result<SystemPathBuf> {
+-        let canonicalized = self
+-            .as_system()
+-            .canonicalize_path(&self.normalize_path(path))?;
+-
+-        if let MdtestSystemInner::Os { os_system, .. } = &*self.0 {
+-            // Make the path relative to the current directory
+-            Ok(canonicalized
+-                .strip_prefix(os_system.current_directory())
+-                .unwrap()
+-                .to_owned())
+-        } else {
+-            Ok(canonicalized)
+-        }
+-    }
+-
+-    fn read_to_string(&self, path: &SystemPath) -> ruff_db::system::Result<String> {
+-        self.as_system().read_to_string(&self.normalize_path(path))
+-    }
+-
+-    fn read_to_notebook(&self, path: &SystemPath) -> Result<Notebook, NotebookError> {
+-        self.as_system()
+-            .read_to_notebook(&self.normalize_path(path))
+-    }
+-
+-    fn read_virtual_path_to_string(
+-        &self,
+-        path: &ruff_db::system::SystemVirtualPath,
+-    ) -> ruff_db::system::Result<String> {
+-        self.as_system().read_virtual_path_to_string(path)
+-    }
+-
+-    fn read_virtual_path_to_notebook(
+-        &self,
+-        path: &ruff_db::system::SystemVirtualPath,
+-    ) -> Result<Notebook, NotebookError> {
+-        self.as_system().read_virtual_path_to_notebook(path)
+-    }
+-
+-    fn path_exists_case_sensitive(&self, path: &SystemPath, prefix: &SystemPath) -> bool {
+-        self.as_system()
+-            .path_exists_case_sensitive(&self.normalize_path(path), &self.normalize_path(prefix))
+-    }
+-
+-    fn case_sensitivity(&self) -> CaseSensitivity {
+-        self.as_system().case_sensitivity()
+-    }
+-
+-    fn which(&self, name: &str) -> WhichResult {
+-        self.as_system().which(name)
+-    }
+-
+-    fn current_directory(&self) -> &SystemPath {
+-        self.as_system().current_directory()
+-    }
+-
+-    fn user_config_directory(&self) -> Option<SystemPathBuf> {
+-        self.as_system().user_config_directory()
+-    }
+-
+-    fn cache_dir(&self) -> Option<SystemPathBuf> {
+-        self.as_system().cache_dir()
+-    }
+-
+-    fn read_directory<'a>(
+-        &'a self,
+-        path: &SystemPath,
+-    ) -> ruff_db::system::Result<
+-        Box<dyn Iterator<Item = ruff_db::system::Result<ruff_db::system::DirectoryEntry>> + 'a>,
+-    > {
+-        self.as_system().read_directory(&self.normalize_path(path))
+-    }
+-
+-    fn walk_directory(
+-        &self,
+-        path: &SystemPath,
+-    ) -> ruff_db::system::walk_directory::WalkDirectoryBuilder {
+-        self.as_system().walk_directory(&self.normalize_path(path))
+-    }
+-
+-    fn as_writable(&self) -> Option<&dyn WritableSystem> {
+-        Some(self)
+-    }
+-
+-    fn as_any(&self) -> &dyn std::any::Any {
+-        self
+-    }
+-
+-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+-        self
+-    }
+-
+-    fn dyn_clone(&self) -> Box<dyn System> {
+-        Box::new(self.clone())
+-    }
+-}
+-
+-impl WritableSystem for MdtestSystem {
+-    fn create_new_file(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
+-        self.as_system().create_new_file(&self.normalize_path(path))
+-    }
+-
+-    fn write_file_bytes(&self, path: &SystemPath, content: &[u8]) -> ruff_db::system::Result<()> {
+-        self.as_system()
+-            .write_file_bytes(&self.normalize_path(path), content)
+-    }
+-
+-    fn create_directory_all(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
+-        self.as_system()
+-            .create_directory_all(&self.normalize_path(path))
+-    }
+-
+-    fn dyn_clone(&self) -> Box<dyn WritableSystem> {
+-        Box::new(self.clone())
+     }
+ }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/diagnostic.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/diagnostic.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/diagnostic.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/diagnostic.rs	2026-04-17 03:21:05
+@@ -140,7 +140,7 @@
+ 
+ #[cfg(test)]
+ mod tests {
+-    use crate::db::Db;
++    use crate::db::TestDb;
+     use ruff_db::diagnostic::{Annotation, Diagnostic, DiagnosticId, LintName, Severity, Span};
+     use ruff_db::files::system_path_to_file;
+     use ruff_db::source::line_index;
+@@ -150,7 +150,7 @@
+ 
+     #[test]
+     fn sort_and_group() {
+-        let mut db = Db::setup();
++        let mut db = TestDb::setup();
+         db.write_file("/src/test.py", "one\ntwo\n").unwrap();
+         let file = system_path_to_file(&db, "/src/test.py").unwrap();
+         let lines = line_index(&db, file);
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/lib.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/lib.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/lib.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/lib.rs	2026-04-17 03:20:52
+@@ -8,8 +8,8 @@
+ use parser::BacktickOffsets;
+ 
+ mod assertion;
+-pub mod config;
+-pub mod db;
++#[cfg(test)]
++pub(crate) mod db;
+ mod diagnostic;
+ pub mod matcher;
+ pub mod parser;
+@@ -92,14 +92,6 @@
+ 
+     /// The failures by lines in the file.
+     pub by_line: matcher::FailuresByLine,
+-}
+-
+-/// File in a test.
+-pub struct TestFile {
+-    pub file: ruff_db::files::File,
+-
+-    /// Positional information about the code block(s) to reconstruct absolute line numbers.
+-    pub backtick_offsets: Vec<BacktickOffsets>,
+ }
+ 
+ pub fn create_diagnostic_snapshot<C>(
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/matcher.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/matcher.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/matcher.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/matcher.rs	2026-04-17 03:24:26
+@@ -421,17 +421,12 @@
+ #[cfg(test)]
+ mod tests {
+     use super::FailuresByLine;
+-    use ruff_db::Db;
+     use ruff_db::diagnostic::{Annotation, Diagnostic, DiagnosticId, Severity, Span};
+     use ruff_db::files::{File, system_path_to_file};
+     use ruff_db::system::DbWithWritableSystem as _;
+     use ruff_python_trivia::textwrap::dedent;
+     use ruff_source_file::OneIndexed;
+     use ruff_text_size::TextRange;
+-    use ty_module_resolver::SearchPathSettings;
+-    use ty_python_core::platform::PythonPlatform;
+-    use ty_python_core::program::{FallibleStrategy, Program, ProgramSettings};
+-    use ty_python_semantic::PythonVersionWithSource;
+ 
+     struct ExpectedDiagnostic {
+         id: DiagnosticId,
+@@ -473,16 +468,7 @@
+     ) -> Result<(), FailuresByLine> {
+         colored::control::set_override(false);
+ 
+-        let mut db = crate::db::Db::setup();
+-
+-        let settings = ProgramSettings {
+-            python_version: PythonVersionWithSource::default(),
+-            python_platform: PythonPlatform::default(),
+-            search_paths: SearchPathSettings::new(Vec::new())
+-                .to_search_paths(db.system(), db.vendored(), &FallibleStrategy)
+-                .expect("Valid search paths settings"),
+-        };
+-        Program::init_or_update(&mut db, settings);
++        let mut db = crate::db::TestDb::setup();
+ 
+         db.write_file("/src/test.py", source).unwrap();
+         let file = system_path_to_file(&db, "/src/test.py").unwrap();
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/parser.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/parser.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/mdtest/src/parser.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/mdtest/src/parser.rs	2026-04-17 03:24:20
+@@ -970,17 +970,37 @@
+     use ruff_python_ast::PySourceType;
+     use ruff_python_trivia::textwrap::dedent;
+     use ruff_source_file::OneIndexed;
++    use serde::Deserialize;
+ 
+     use insta::assert_snapshot;
+ 
+-    use crate::config::MarkdownTestConfig;
+     use crate::parser::EmbeddedFilePath;
+ 
++    #[derive(Debug, Default, Clone, Deserialize)]
++    #[serde(rename_all = "kebab-case", deny_unknown_fields)]
++    struct TestConfig {
++        project: Option<TestProject>,
++    }
++
++    impl super::MdtestConfig for TestConfig {
++        fn has_dependencies(&self) -> bool {
++            self.project
++                .as_ref()
++                .is_some_and(|project| project.dependencies.is_some())
++        }
++    }
++
++    #[derive(Debug, Default, Clone, Deserialize)]
++    #[serde(rename_all = "kebab-case", deny_unknown_fields)]
++    struct TestProject {
++        dependencies: Option<Vec<String>>,
++    }
++
+     fn parse<'s>(
+         title: &'s str,
+         source: &'s str,
+-    ) -> anyhow::Result<super::MarkdownTestSuite<'s, MarkdownTestConfig>> {
+-        super::parse::<MarkdownTestConfig>(title, source)
++    ) -> anyhow::Result<super::MarkdownTestSuite<'s, TestConfig>> {
++        super::parse::<TestConfig>(title, source)
+     }
+ 
+     #[test]
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/Cargo.toml /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/Cargo.toml
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/Cargo.toml	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/Cargo.toml	2026-04-17 03:23:50
+@@ -16,12 +16,14 @@
+ [dependencies]
+ mdtest = { workspace = true }
+ ruff_db = { workspace = true, features = ["os", "testing"] }
++ruff_notebook = { workspace = true }
+ ruff_python_ast = { workspace = true }
+ ruff_source_file = { workspace = true }
+ ty_module_resolver = { workspace = true }
+ ty_python_semantic = { workspace = true, features = ["serde", "testing"] }
+ ty_static = { workspace = true }
+ ty_python_core = { workspace = true }
++ty_vendored = { workspace = true }
+ 
+ anyhow = { workspace = true }
+ camino = { workspace = true }
+@@ -29,7 +31,9 @@
+ dunce = { workspace = true }
+ insta = { workspace = true, features = ["filters"] }
+ salsa = { workspace = true }
++serde = { workspace = true }
+ tempfile = { workspace = true }
++tracing = { workspace = true }
+ 
+ [lints]
+ workspace = true
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/src/external_dependencies.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/src/external_dependencies.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/src/external_dependencies.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/src/external_dependencies.rs	2026-04-17 03:22:59
+@@ -1,11 +1,11 @@
+-use mdtest::db::Db;
+-
+ use anyhow::{Context, Result, anyhow, bail};
+ use camino::Utf8Path;
+ use ruff_db::system::{DbWithWritableSystem as _, OsSystem, SystemPath};
+ use ruff_python_ast::PythonVersion;
+ use ty_python_core::platform::PythonPlatform;
+ use ty_python_semantic::{PythonEnvironment, SysPrefixPathOrigin};
++
++use crate::Db;
+ 
+ /// Setup a virtual environment in the in-memory filesystem of `db` with
+ /// the specified dependencies installed.
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/src/lib.rs /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/src/lib.rs
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24616/crates/ty_test/src/lib.rs	2026-04-13 12:24:14
++++ /tmp/refactor-eq-workdir/bb-codex-24616/crates/ty_test/src/lib.rs	2026-04-17 03:23:24
+@@ -1,36 +1,543 @@
+ use anyhow::anyhow;
+ use camino::Utf8Path;
++use camino::{Utf8Component, Utf8PathBuf};
+ use colored::Colorize;
+ pub use mdtest::OutputFormat;
+-use mdtest::config::{Log, MarkdownTestConfig, SystemKind};
+-use mdtest::db::{self, Db};
+ use mdtest::parser::EmbeddedFileSourceMap;
+-use mdtest::{Failures, FileFailures, TestFile, matcher, parser as test_parser};
+-use ruff_db::Db as _;
++use mdtest::{Failures, FileFailures, matcher, parser as test_parser};
++use ruff_db::Db as SourceDb;
+ use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
+ use ruff_db::files::{File, FileRootKind, system_path_to_file};
+ use ruff_db::panic::{PanicError, catch_unwind};
+ use ruff_db::parsed::parsed_module;
+-use ruff_db::system::{DbWithWritableSystem as _, SystemPath, SystemPathBuf};
++use ruff_db::system::{
++    CaseSensitivity, DbWithWritableSystem, InMemorySystem, OsSystem, System, WhichResult,
++    WritableSystem,
++};
++use ruff_db::system::{SystemPath, SystemPathBuf};
+ use ruff_db::testing::{setup_logging, setup_logging_with_filter};
++use ruff_db::vendored::VendoredFileSystem;
++use ruff_notebook::{Notebook, NotebookError};
++use ruff_python_ast::PythonVersion;
+ use ruff_source_file::{LineIndex, OneIndexed};
++use salsa::Setter as _;
++use serde::{Deserialize, Serialize};
+ use std::backtrace::BacktraceStatus;
++use std::borrow::Cow;
+ use std::fmt::Write;
++use std::sync::Arc;
++use tempfile::TempDir;
+ use ty_module_resolver::{
+-    Module, SearchPath, SearchPathSettings, list_modules, resolve_module_confident,
++    Module, ModuleGlobSetBuilder, SearchPath, SearchPathSettings, SearchPaths, list_modules,
++    resolve_module_confident,
+ };
+ use ty_python_core::platform::PythonPlatform;
+ use ty_python_core::program::{FallibleStrategy, Program, ProgramSettings};
++use ty_python_semantic::lint::{LintRegistry, RuleSelection};
+ use ty_python_semantic::pull_types::pull_types;
+ use ty_python_semantic::types::{UNDEFINED_REVEAL, check_types};
+ use ty_python_semantic::{
+-    PythonEnvironment, PythonVersionSource, PythonVersionWithSource, SysPrefixPathOrigin,
++    AnalysisSettings, Db as SemanticDb, PythonEnvironment, PythonVersionSource,
++    PythonVersionWithSource, SysPrefixPathOrigin, default_lint_registry,
+ };
+ 
+ mod external_dependencies;
+ 
+ use ty_static::EnvVars;
+ 
++/// TOML-deserializable ty configuration, similar to `ty.toml`, to be able to
++/// control some configuration options from Markdown files.
++#[derive(Deserialize, Debug, Default, Clone)]
++#[serde(rename_all = "kebab-case", deny_unknown_fields)]
++pub struct MarkdownTestConfig {
++    environment: Option<Environment>,
++
++    pub log: Option<Log>,
++
++    pub analysis: Option<Analysis>,
++
++    /// The [`ruff_db::system::System`] to use for tests.
++    ///
++    /// Defaults to the case-sensitive [`ruff_db::system::InMemorySystem`].
++    pub system: Option<SystemKind>,
++
++    /// Project configuration for installing external dependencies.
++    project: Option<Project>,
++
++    /// Simulate the user passing `-v` on the command line,
++    /// which can be used to show more information in test diagnostics.
++    verbose: Option<bool>,
++}
++
++impl MarkdownTestConfig {
++    pub fn python_version(&self) -> Option<PythonVersion> {
++        self.environment.as_ref()?.python_version
++    }
++
++    pub fn python_platform(&self) -> Option<PythonPlatform> {
++        self.environment.as_ref()?.python_platform.clone()
++    }
++
++    pub fn typeshed(&self) -> Option<&SystemPath> {
++        self.environment.as_ref()?.typeshed.as_deref()
++    }
++
++    pub fn extra_paths(&self) -> Option<&[SystemPathBuf]> {
++        self.environment.as_ref()?.extra_paths.as_deref()
++    }
++
++    pub fn python(&self) -> Option<&SystemPath> {
++        self.environment.as_ref()?.python.as_deref()
++    }
++
++    pub fn dependencies(&self) -> Option<&[String]> {
++        self.project.as_ref()?.dependencies.as_deref()
++    }
++
++    pub fn verbose(&self) -> bool {
++        self.verbose.unwrap_or_default()
++    }
++}
++
++impl test_parser::MdtestConfig for MarkdownTestConfig {
++    fn has_dependencies(&self) -> bool {
++        self.dependencies().is_some()
++    }
++}
++
++#[derive(Deserialize, Debug, Default, Clone)]
++#[serde(rename_all = "kebab-case", deny_unknown_fields)]
++struct Environment {
++    /// Target Python version to assume when resolving types.
++    python_version: Option<PythonVersion>,
++
++    /// Target platform to assume when resolving types.
++    python_platform: Option<PythonPlatform>,
++
++    /// Path to a custom typeshed directory.
++    typeshed: Option<SystemPathBuf>,
++
++    /// Additional search paths to consider when resolving modules.
++    extra_paths: Option<Vec<SystemPathBuf>>,
++
++    /// Path to the Python environment.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    python: Option<SystemPathBuf>,
++}
++
++#[derive(Deserialize, Default, Debug, Clone)]
++#[serde(rename_all = "kebab-case", deny_unknown_fields)]
++pub struct Analysis {
++    /// Whether ty should support `type: ignore` comments.
++    pub respect_type_ignore_comments: Option<bool>,
++
++    pub allowed_unresolved_imports: Option<Vec<String>>,
++
++    pub replace_imports_with_any: Option<Vec<String>>,
++}
++
++#[derive(Deserialize, Debug, Clone)]
++#[serde(untagged)]
++pub enum Log {
++    /// Enable logging with tracing when `true`.
++    Bool(bool),
++    /// Enable logging and only show filters that match the given env-filter.
++    Filter(String),
++}
++
++/// The system to use for tests.
++#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
++#[serde(rename_all = "kebab-case")]
++pub enum SystemKind {
++    /// Use an in-memory system with a case-sensitive file system.
++    #[default]
++    InMemory,
++
++    /// Use the OS system.
++    Os,
++}
++
++/// Project configuration for tests that need external dependencies.
++#[derive(Deserialize, Debug, Default, Clone)]
++#[serde(rename_all = "kebab-case", deny_unknown_fields)]
++struct Project {
++    /// List of Python package dependencies in `pyproject.toml` format.
++    dependencies: Option<Vec<String>>,
++}
++
++/// File in a test.
++struct TestFile {
++    file: File,
++
++    /// Positional information about the code block(s) to reconstruct absolute line numbers.
++    backtick_offsets: Vec<test_parser::BacktickOffsets>,
++}
++
++#[salsa::db]
++#[derive(Clone)]
++struct Db {
++    storage: salsa::Storage<Self>,
++    files: ruff_db::files::Files,
++    system: MdtestSystem,
++    vendored: VendoredFileSystem,
++    rule_selection: Arc<RuleSelection>,
++    settings: Option<Settings>,
++}
++
++impl Db {
++    fn setup() -> Self {
++        let rule_selection =
++            RuleSelection::all(default_lint_registry(), ruff_db::diagnostic::Severity::Info);
++
++        let mut db = Self {
++            system: MdtestSystem::in_memory(),
++            storage: salsa::Storage::new(Some(Box::new({
++                move |event| {
++                    tracing::trace!("event: {:?}", event);
++                }
++            }))),
++            vendored: ty_vendored::file_system().clone(),
++            files: ruff_db::files::Files::default(),
++            rule_selection: Arc::new(rule_selection),
++            settings: None,
++        };
++
++        db.settings = Some(Settings::new(&db));
++        db
++    }
++
++    fn settings(&self) -> Settings {
++        self.settings.unwrap()
++    }
++
++    fn set_verbosity(&mut self, verbose: bool) {
++        self.settings().set_verbose(self).to(verbose);
++    }
++
++    fn update_analysis_options(&mut self, options: Option<&Analysis>) {
++        let analysis = if let Some(options) = options {
++            let AnalysisSettings {
++                respect_type_ignore_comments: respect_type_ignore_comments_default,
++                allowed_unresolved_imports: allowed_unresolved_imports_default,
++                replace_imports_with_any: replace_imports_with_any_default,
++            } = AnalysisSettings::default();
++
++            let allowed_unresolved_imports = if let Some(allowed_unresolved_imports) =
++                options.allowed_unresolved_imports.as_deref()
++            {
++                let mut builder = ModuleGlobSetBuilder::new();
++                for pattern in allowed_unresolved_imports {
++                    builder
++                        .add(pattern)
++                        .expect("Invalid `allowed-unresolved-imports` pattern `{pattern}");
++                }
++                builder.build().unwrap()
++            } else {
++                allowed_unresolved_imports_default
++            };
++
++            let replace_imports_with_any = if let Some(replace_imports_with_any) =
++                options.replace_imports_with_any.as_deref()
++            {
++                let mut builder = ModuleGlobSetBuilder::new();
++                for pattern in replace_imports_with_any {
++                    builder
++                        .add(pattern)
++                        .expect("Invalid `replace-imports-with-any` pattern `{pattern}");
++                }
++                builder.build().unwrap()
++            } else {
++                replace_imports_with_any_default
++            };
++
++            AnalysisSettings {
++                respect_type_ignore_comments: options
++                    .respect_type_ignore_comments
++                    .unwrap_or(respect_type_ignore_comments_default),
++                allowed_unresolved_imports,
++                replace_imports_with_any,
++            }
++        } else {
++            AnalysisSettings::default()
++        };
++
++        let settings = self.settings();
++        if settings.analysis(self) != &analysis {
++            settings.set_analysis(self).to(analysis);
++        }
++    }
++
++    fn use_os_system_with_temp_dir(&mut self, cwd: SystemPathBuf, temp_dir: TempDir) {
++        self.system.with_os(cwd, temp_dir);
++        ruff_db::files::Files::sync_all(self);
++    }
++
++    fn use_in_memory_system(&mut self) {
++        self.system.with_in_memory();
++        ruff_db::files::Files::sync_all(self);
++    }
++
++    fn create_directory_all(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
++        self.system.create_directory_all(path)
++    }
++}
++
++#[salsa::db]
++impl SourceDb for Db {
++    fn vendored(&self) -> &VendoredFileSystem {
++        &self.vendored
++    }
++
++    fn system(&self) -> &dyn System {
++        &self.system
++    }
++
++    fn files(&self) -> &ruff_db::files::Files {
++        &self.files
++    }
++
++    fn python_version(&self) -> PythonVersion {
++        Program::get(self).python_version(self)
++    }
++}
++
++#[salsa::db]
++impl ty_module_resolver::Db for Db {
++    fn search_paths(&self) -> &SearchPaths {
++        Program::get(self).search_paths(self)
++    }
++}
++
++#[salsa::db]
++impl ty_python_core::Db for Db {
++    fn should_check_file(&self, file: File) -> bool {
++        !file.path(self).is_vendored_path()
++    }
++}
++
++#[salsa::db]
++impl SemanticDb for Db {
++    fn rule_selection(&self, _file: File) -> &RuleSelection {
++        &self.rule_selection
++    }
++
++    fn lint_registry(&self) -> &LintRegistry {
++        default_lint_registry()
++    }
++
++    fn verbose(&self) -> bool {
++        self.settings().verbose(self)
++    }
++
++    fn analysis_settings(&self, _file: File) -> &AnalysisSettings {
++        self.settings().analysis(self)
++    }
++}
++
++#[salsa::db]
++impl salsa::Database for Db {}
++
++impl DbWithWritableSystem for Db {
++    type System = MdtestSystem;
++
++    fn writable_system(&self) -> &Self::System {
++        &self.system
++    }
++}
++
++#[salsa::input(debug)]
++struct Settings {
++    #[default]
++    #[returns(ref)]
++    analysis: AnalysisSettings,
++    #[default]
++    verbose: bool,
++}
++
++#[derive(Debug, Clone)]
++struct MdtestSystem(Arc<MdtestSystemInner>);
++
++#[derive(Debug)]
++enum MdtestSystemInner {
++    InMemory(InMemorySystem),
++    Os {
++        os_system: OsSystem,
++        _temp_dir: TempDir,
++    },
++}
++
++impl MdtestSystem {
++    fn in_memory() -> Self {
++        Self(Arc::new(MdtestSystemInner::InMemory(
++            InMemorySystem::default(),
++        )))
++    }
++
++    fn as_system(&self) -> &dyn WritableSystem {
++        match &*self.0 {
++            MdtestSystemInner::InMemory(system) => system,
++            MdtestSystemInner::Os { os_system, .. } => os_system,
++        }
++    }
++
++    fn with_os(&mut self, cwd: SystemPathBuf, temp_dir: TempDir) {
++        self.0 = Arc::new(MdtestSystemInner::Os {
++            os_system: OsSystem::new(cwd),
++            _temp_dir: temp_dir,
++        });
++    }
++
++    fn with_in_memory(&mut self) {
++        if let MdtestSystemInner::InMemory(in_memory) = &*self.0 {
++            in_memory.fs().remove_all();
++        } else {
++            self.0 = Arc::new(MdtestSystemInner::InMemory(InMemorySystem::default()));
++        }
++    }
++
++    fn normalize_path<'a>(&self, path: &'a SystemPath) -> Cow<'a, SystemPath> {
++        match &*self.0 {
++            MdtestSystemInner::InMemory(_) => Cow::Borrowed(path),
++            MdtestSystemInner::Os { os_system, .. } => {
++                let without_root: Utf8PathBuf = path
++                    .components()
++                    .skip_while(|component| {
++                        matches!(
++                            component,
++                            Utf8Component::RootDir | Utf8Component::Prefix(..)
++                        )
++                    })
++                    .collect();
++                Cow::Owned(os_system.current_directory().join(&without_root))
++            }
++        }
++    }
++}
++
++impl System for MdtestSystem {
++    fn path_metadata(
++        &self,
++        path: &SystemPath,
++    ) -> ruff_db::system::Result<ruff_db::system::Metadata> {
++        self.as_system().path_metadata(&self.normalize_path(path))
++    }
++
++    fn canonicalize_path(&self, path: &SystemPath) -> ruff_db::system::Result<SystemPathBuf> {
++        let canonicalized = self
++            .as_system()
++            .canonicalize_path(&self.normalize_path(path))?;
++
++        if let MdtestSystemInner::Os { os_system, .. } = &*self.0 {
++            Ok(canonicalized
++                .strip_prefix(os_system.current_directory())
++                .unwrap()
++                .to_owned())
++        } else {
++            Ok(canonicalized)
++        }
++    }
++
++    fn read_to_string(&self, path: &SystemPath) -> ruff_db::system::Result<String> {
++        self.as_system().read_to_string(&self.normalize_path(path))
++    }
++
++    fn read_to_notebook(&self, path: &SystemPath) -> Result<Notebook, NotebookError> {
++        self.as_system()
++            .read_to_notebook(&self.normalize_path(path))
++    }
++
++    fn read_virtual_path_to_string(
++        &self,
++        path: &ruff_db::system::SystemVirtualPath,
++    ) -> ruff_db::system::Result<String> {
++        self.as_system().read_virtual_path_to_string(path)
++    }
++
++    fn read_virtual_path_to_notebook(
++        &self,
++        path: &ruff_db::system::SystemVirtualPath,
++    ) -> Result<Notebook, NotebookError> {
++        self.as_system().read_virtual_path_to_notebook(path)
++    }
++
++    fn path_exists_case_sensitive(&self, path: &SystemPath, prefix: &SystemPath) -> bool {
++        self.as_system()
++            .path_exists_case_sensitive(&self.normalize_path(path), &self.normalize_path(prefix))
++    }
++
++    fn case_sensitivity(&self) -> CaseSensitivity {
++        self.as_system().case_sensitivity()
++    }
++
++    fn which(&self, name: &str) -> WhichResult {
++        self.as_system().which(name)
++    }
++
++    fn current_directory(&self) -> &SystemPath {
++        self.as_system().current_directory()
++    }
++
++    fn user_config_directory(&self) -> Option<SystemPathBuf> {
++        self.as_system().user_config_directory()
++    }
++
++    fn cache_dir(&self) -> Option<SystemPathBuf> {
++        self.as_system().cache_dir()
++    }
++
++    fn read_directory<'a>(
++        &'a self,
++        path: &SystemPath,
++    ) -> ruff_db::system::Result<
++        Box<dyn Iterator<Item = ruff_db::system::Result<ruff_db::system::DirectoryEntry>> + 'a>,
++    > {
++        self.as_system().read_directory(&self.normalize_path(path))
++    }
++
++    fn walk_directory(
++        &self,
++        path: &SystemPath,
++    ) -> ruff_db::system::walk_directory::WalkDirectoryBuilder {
++        self.as_system().walk_directory(&self.normalize_path(path))
++    }
++
++    fn as_writable(&self) -> Option<&dyn WritableSystem> {
++        Some(self)
++    }
++
++    fn as_any(&self) -> &dyn std::any::Any {
++        self
++    }
++
++    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
++        self
++    }
++
++    fn dyn_clone(&self) -> Box<dyn System> {
++        Box::new(self.clone())
++    }
++}
++
++impl WritableSystem for MdtestSystem {
++    fn create_new_file(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
++        self.as_system().create_new_file(&self.normalize_path(path))
++    }
++
++    fn write_file_bytes(&self, path: &SystemPath, content: &[u8]) -> ruff_db::system::Result<()> {
++        self.as_system()
++            .write_file_bytes(&self.normalize_path(path), content)
++    }
++
++    fn create_directory_all(&self, path: &SystemPath) -> ruff_db::system::Result<()> {
++        self.as_system()
++            .create_directory_all(&self.normalize_path(path))
++    }
++
++    fn dyn_clone(&self) -> Box<dyn WritableSystem> {
++        Box::new(self.clone())
++    }
++}
++
+ /// Run `path` as a markdown test suite with given `title`.
+ ///
+ /// Panic on test failure, and print failure details.
+@@ -563,7 +1070,7 @@
+ /// Values of this type are only constructed when `from_list` and
+ /// `from_resolve` are not equivalent.
+ struct ModuleInconsistency<'db> {
+-    db: &'db db::Db,
++    db: &'db Db,
+     /// The module returned from `list_module`.
+     from_list: Module<'db>,
+     /// The module returned, if any, from `resolve_module`.
+@@ -576,7 +1083,7 @@
+ /// identical module we get back from `resolve_module`. It does not
+ /// check that all possible outputs of `resolve_module` are captured by
+ /// `list_module`.
+-fn run_module_resolution_consistency_test(db: &db::Db) -> Result<(), Vec<ModuleInconsistency<'_>>> {
++fn run_module_resolution_consistency_test(db: &Db) -> Result<(), Vec<ModuleInconsistency<'_>>> {
+     let mut errs = vec![];
+     for from_list in list_modules(db) {
+         // TODO: For now list_modules does not partake in desperate module resolution so
+@@ -601,7 +1108,7 @@
+ impl std::fmt::Display for ModuleInconsistency<'_> {
+     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+         fn fmt_module(
+-            db: &db::Db,
++            db: &Db,
+             f: &mut std::fmt::Formatter,
+             module: &Module<'_>,
+         ) -> std::fmt::Result {

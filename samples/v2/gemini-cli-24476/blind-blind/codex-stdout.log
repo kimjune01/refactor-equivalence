@@ -1,0 +1,412 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-24476
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a5d-94b6-7520-9beb-a8916ae55307
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and patch first, then apply only the accepted claims within the permitted files.
+exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24476 succeeded in 0ms:
+# PR #24476 — test: fix Windows CI execution and resolve exposed platform failures
+
+## PR body
+
+## Summary
+
+This PR enables core package tests on Windows CI (fixing a PowerShell bug that was silently skipping them) and addresses the cross-platform test failures that were consequently uncovered, ensuring the test suite passes consistently on macOS, Linux, and Windows.
+
+## Details
+
+**1. CI Workflow Fixes (Windows)**
+* **Argument Splatting:** Quoted the `npm run test:ci --workspace` arguments in `.github/workflows/ci.yml`. Without quotes, PowerShell interpreted `@` (e.g., `@google/gemini-cli-core`) as a splatting operator and dropped the argument, causing tests to be silently skipped.
+* **Error Swallowing:** Added explicit `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }` checks after `npm` commands. PowerShell continues execution by default when an external command fails, meaning subsequent successful steps were previously overwriting the failure code and falsely reporting a green build.
+
+**2. Cross-Platform Test Fixes**
+To get the newly unskipped tests passing across all platforms, several types of adjustments were made:
+* **Path Resolution & Normalization:** Fixed assertions and mock setups across the test suite that implicitly assumed POSIX-style paths, updating them to handle Windows path separators and drive letters correctly.
+* **Symlink Handling (macOS):** Resolved test failures caused by macOS evaluating `/tmp` as a symlink to `/private/tmp`. Assertions were updated to use `resolveToRealPath()` so that expected output accurately mirrors runtime path evaluations.
+* **Mock Consistency:** Improved file system and path-related mocks (like `fs` and `value-resolver`) to behave reliably across OSes without relying on hardcoded, platform-specific path structures.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24476exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24476 succeeded in 0ms:
+.github/workflows/ci.yml
+packages/cli/src/nonInteractiveCli.ts
+packages/cli/src/nonInteractiveCliAgentSession.ts
+packages/cli/src/ui/components/AskUserDialog.tsx
+packages/cli/src/ui/components/HistoryItemDisplay.tsx
+packages/cli/src/ui/components/LoadingIndicator.tsx
+packages/cli/src/ui/components/ModelDialog.tsx
+packages/cli/src/ui/components/ModelQuotaDisplay.tsx
+packages/cli/src/ui/components/ProgressBar.tsx
+packages/cli/src/ui/components/StatsDisplay.tsx
+packages/cli/src/ui/hooks/useGeminiStream.ts
+packages/cli/src/ui/hooks/useLoadingIndicator.ts
+packages/cli/src/utils/errors.ts
+packages/core/src/agent/event-translator.ts
+packages/core/src/agent/legacy-agent-session.ts
+packages/core/src/agent/mock.ts
+packages/core/src/agent/types.ts
+packages/core/src/confirmation-bus/types.ts
+packages/core/src/output/json-formatter.ts
+packages/core/src/policy/config.ts
+ succeeded in 0ms:
+## Accepted Claims
+
+1. **C1 — Factor PowerShell exit-code enforcement**
+   **File**: .github/workflows/ci.yml:430
+   **Change**: In the Windows `Run tests and generate reports` step, introduce a small local PowerShell wrapper/function for npm invocations that runs the command and immediately exits with `$LASTEXITCODE` when nonzero, then replace the three repeated `npm run ...` plus `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }` pairs in that step with calls to the wrapper.
+   **Goal link**: This clarifies the Windows CI error-swallowing fix by making exit-code propagation the invariant of every npm test command in the PowerShell step.
+   **Justification**: The behavior remains the same, but the failure-handling rule is expressed once instead of being manually duplicated after each command.
+
+## Rejected
+
+- Use `getErrorMessage` for unreadable-directory catch blocks in `packages/core/src/utils/bfsFileSearch.ts`: rejected due to hunt finding F1, which identifies this as a blocker because `getErrorMessage` changes user-visible warning text for non-`Error` throw/rejection values compared with the current `.message ?? 'Unknown error'` behavior.
+- Remove the unreachable command-prefix narrowing guard in `packages/core/src/policy/config.ts`: rejected due to hunt finding F2, which warns that this policy cleanup is orthogonal to the stated Windows CI and cross-platform test-fix goal.
+- Compute quota reset display text once per model row in `packages/cli/src/ui/components/StatsDisplay.tsx`: rejected due to hunt finding F3, which warns that this quota UI cleanup is orthogonal to the stated Windows CI and cross-platform test-fix goal.
+- Reintroduce `packages/cli/src/nonInteractiveCliAgentSession.ts` or the `getAgentSessionNoninteractiveEnabled()` branch in `packages/cli/src/nonInteractiveCli.ts`: this would restore a deleted execution path and change observable non-interactive behavior rather than refactor the accepted implementation.
+- Restore `displayContent` to `AgentSend.message` in `packages/core/src/agent/types.ts`, `packages/core/src/agent/legacy-agent-session.ts`, and `packages/core/src/agent/mock.ts`: this would cross a core public protocol boundary and undo a behavioral shape change in the artifact.
+- Change `packages/core/src/utils/retry.ts` to check `signal.aborted` again after `fn()` or after retry delays: this may alter cancellation timing and thrown errors, so it is a behavior change rather than a bounded refactor.
+- Replace `JSON.parse(content) as ToolCallData` in `packages/core/src/utils/checkpointUtils.ts` with the existing Zod schema in `getCheckpointInfoList`: this would reject malformed but currently truthy non-string `messageId` values and therefore changes edge-case behavior.
+- Restore the `typeof rawFilePath === 'string'` guard in `generateCheckpointFileName` in `packages/core/src/utils/checkpointUtils.ts`: this is safer, but it changes the current behavior for truthy non-string `file_path` values from throwing to returning `null`.
+- Remove quotes from non-Windows workspace arguments in `.github/workflows/ci.yml`: it is not needed for Bash correctness, but keeping all workspace invocations quoted is harmless and consistent with the Windows CI goal.
+- Reintroduce persisted policy `modes` in `packages/core/src/scheduler/policy.ts`, `packages/core/src/policy/config.ts`, `packages/core/src/policy/types.ts`, and `packages/core/src/confirmation-bus/types.ts`: this would restore removed semantics around approval-mode scoping and is not behavior-preserving.
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24476 succeeded in 0ms:
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d40b49bb69..82e9194a02 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -175,10 +175,10 @@ jobs:
+           NO_COLOR: true
+         run: |
+           if [[ "${{ matrix.shard }}" == "cli" ]]; then
+-            npm run test:ci --workspace @google/gemini-cli
++            npm run test:ci --workspace "@google/gemini-cli"
+           else
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace @google/gemini-cli-core --workspace @google/gemini-cli-a2a-server --workspace gemini-cli-vscode-ide-companion --workspace @google/gemini-cli-test-utils --if-present -- --coverage.enabled=false
++            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+             npm run test:scripts
+           fi
+ 
+@@ -263,10 +263,10 @@ jobs:
+           NO_COLOR: true
+         run: |
+codex
+The accepted set contains a single claim: refactor the Windows PowerShell test step in `.github/workflows/ci.yml`. I’m checking that exact region now before editing it.
+exec
+/bin/zsh -lc "nl -ba .github/workflows/ci.yml | sed -n '410,450p'" in /tmp/refactor-eq-workdir/bb-codex-24476exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24476 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ succeeded in 0ms:
+   410	
+   411	      - name: 'Install dependencies'
+   412	        run: 'npm ci'
+   413	        shell: 'pwsh'
+   414	
+   415	      - name: 'Build project'
+   416	        run: 'npm run build'
+   417	        shell: 'pwsh'
+   418	        env:
+   419	          NODE_OPTIONS: '--max-old-space-size=32768 --max-semi-space-size=256'
+   420	          UV_THREADPOOL_SIZE: '32'
+   421	          NODE_ENV: 'production'
+   422	
+   423	      - name: 'Run tests and generate reports'
+   424	        env:
+   425	          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+   426	          NO_COLOR: true
+   427	          NODE_OPTIONS: '--max-old-space-size=32768 --max-semi-space-size=256'
+   428	          UV_THREADPOOL_SIZE: '32'
+   429	          NODE_ENV: 'test'
+codex
+I’m going to replace the three repeated `npm` plus `$LASTEXITCODE` pairs with a local PowerShell helper in the same workflow step, then add the required implementation summary.
+file update
+A /tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+Applied claims:
+- C1 - Factor PowerShell exit-code enforcement
+
+Modified files:
+- .github/workflows/ci.yml
+M /tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+@@ -430,11 +430,13 @@
+         run: |
++          function Invoke-NpmOrExit {
++            npm @args
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          }
++
+           if ("${{ matrix.shard }}" -eq "cli") {
+-            npm run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+apply_patch(auto_approved=true) exited 0 in 8ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+M /tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+index 82e9194a0255ee5160b617543abfb7eeef11c5ee..b15e217ccd60067a7a4a7a95ed8e0ba6f5a346ed
+--- a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
++          function Invoke-NpmOrExit {
++            npm @args
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          }
++
+           if ("${{ matrix.shard }}" -eq "cli") {
+-            npm run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..7de658cd3a97ae95f5de5b421bfd86482f255ffe
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Factor PowerShell exit-code enforcement
++
++Modified files:
++- .github/workflows/ci.yml
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+index 82e9194a0255ee5160b617543abfb7eeef11c5ee..b15e217ccd60067a7a4a7a95ed8e0ba6f5a346ed
+--- a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
++          function Invoke-NpmOrExit {
++            npm @args
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          }
++
+           if ("${{ matrix.shard }}" -eq "cli") {
+-            npm run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..7de658cd3a97ae95f5de5b421bfd86482f255ffe
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Factor PowerShell exit-code enforcement
++
++Modified files:
++- .github/workflows/ci.yml
+
+codex
+The source edit and required summary are in place. I’m doing a final readback of the touched sections only; I won’t run tests per the instruction.
+exec
+/bin/zsh -lc "nl -ba .github/workflows/ci.yml | sed -n '423,444p'" in /tmp/refactor-eq-workdir/bb-codex-24476 succeeded in 0ms:
+   423	      - name: 'Run tests and generate reports'
+   424	        env:
+   425	          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+   426	          NO_COLOR: true
+   427	          NODE_OPTIONS: '--max-old-space-size=32768 --max-semi-space-size=256'
+   428	          UV_THREADPOOL_SIZE: '32'
+   429	          NODE_ENV: 'test'
+   430	        run: |
+   431	          function Invoke-NpmOrExit {
+   432	            npm @args
+   433	            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+   434	          }
+   435	
+   436	          if ("${{ matrix.shard }}" -eq "cli") {
+   437	            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+   438	          } else {
+   439	            # Explicitly list non-cli packages to ensure they are sharded correctly
+   440	            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+   441	            Invoke-NpmOrExit run test:scripts
+   442	          }
+exec
+/bin/zsh -lc "sed -n '1,80p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-24476 succeeded in 0ms:
+Applied claims:
+- C1 - Factor PowerShell exit-code enforcement
+
+Modified files:
+- .github/workflows/ci.yml
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+index 82e9194a0255ee5160b617543abfb7eeef11c5ee..b15e217ccd60067a7a4a7a95ed8e0ba6f5a346ed
+--- a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
++          function Invoke-NpmOrExit {
++            npm @args
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          }
++
+           if ("${{ matrix.shard }}" -eq "cli") {
+-            npm run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..7de658cd3a97ae95f5de5b421bfd86482f255ffe
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Factor PowerShell exit-code enforcement
++
++Modified files:
++- .github/workflows/ci.yml
+
+codex
+Implemented accepted claim C1.
+
+Changed [.github/workflows/ci.yml](/tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml):431 to add `Invoke-NpmOrExit`, then replaced the three repeated `npm` plus `$LASTEXITCODE` checks with wrapper calls.
+
+Wrote [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md) with the applied claim and modified file list.
+
+Tests were not run, per instruction.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+index 82e9194a0255ee5160b617543abfb7eeef11c5ee..b15e217ccd60067a7a4a7a95ed8e0ba6f5a346ed
+--- a//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
++          function Invoke-NpmOrExit {
++            npm @args
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++          }
++
+           if ("${{ matrix.shard }}" -eq "cli") {
+-            npm run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..7de658cd3a97ae95f5de5b421bfd86482f255ffe
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,5 @@
++Applied claims:
++- C1 - Factor PowerShell exit-code enforcement
++
++Modified files:
++- .github/workflows/ci.yml
+
+tokens used
+11,143
+Implemented accepted claim C1.
+
+Changed [.github/workflows/ci.yml](/tmp/refactor-eq-workdir/bb-codex-24476/.github/workflows/ci.yml):431 to add `Invoke-NpmOrExit`, then replaced the three repeated `npm` plus `$LASTEXITCODE` checks with wrapper calls.
+
+Wrote [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24476/IMPLEMENT_SUMMARY.md) with the applied claim and modified file list.
+
+Tests were not run, per instruction.

@@ -61,7 +61,44 @@ Format per entry:
 
 ## v2 in-flight entries
 
-(populated during v2 execution)
+### 2026-04-16 12:45 — CONFIRMED: C_test == C_final for 2/3 dev-set PRs (24460, 24544)
+
+**Trigger**: extraction on 24460 and 24544 complete. Both have C_test = C_final. 24460 walked 11 commits; all 10 pre-C_final commits fail (6 fail_test, 4 fail_build). 24544 walked 5 commits; all 4 pre-C_final commits fail_test. 24489 in-flight but trending same way.
+
+**v2 evidence (so far)**: 100% of completed dev-set PRs exhibit C_test == C_final. If this extrapolates, entire v2 corpus would be excluded per prereg C2.
+
+**Next action for v2 in-flight**: proceeding to run pipeline anyway using C_test = C_final for dev-set pipeline validation (log as deviation). For test-set decision, need to either (a) revise C_test definition, (b) change PR selection criteria to prefer PRs with refactor-style structure, or (c) loosen C2 to allow C_test == C_final with the trade-off that P2 trajectory becomes degenerate.
+
+**v3 hypothesis or design question**: See 12:15 entry above for the broader question. This confirms the problem is not rare but systematic on feature-PRs in active repos. Design choices:
+- Option A: filter selection to PRs with high "late-PR refactor" signal (e.g., multiple "address feedback" commits touching source, not new tests)
+- Option B: define C_test as "last commit that builds" rather than "first commit where C_final tests pass"
+- Option C: skip C_test concept entirely, use C_base → C_final as the artifact the LLM refactors against (inverts the forge task: "refactor what you think the author should have written")
+
+**Provisional priority**: HIGH. This blocks the v2 estimand. Must decide before test-set lock.
+
+### 2026-04-17 00:00 — Force-push culture eliminates ~90% of OSS repos from C_test extraction
+
+**Trigger**: Screened 21 major repos (TS/Go/Rust) for multi-commit PR branches. Result: ~90% have single-commit branches because contributors amend+force-push during review per "clean history" norms. Repos with multi-commit branches (gemini-cli, cli/cli, biome) are the exception, not the rule — typically Google-style review culture where each push is a separate patchset.
+
+**v2 evidence**: Of 21 repos screened, only 3 had ≥2/5 big PRs with ≥3 commits: gemini-cli, cli/cli, hashicorp/consul. Most popular repos (react, TypeScript, kubernetes, deno, tokio, go-ethereum, cockroachdb) had 0/5.
+
+**v3 design**: Use **GitHub Review API** instead of git commit history to find C_test. The API preserves the exact SHA at each review event (`PullRequestReview.commit_id`) even after force-push. Algorithm: find the SHA at the first `CHANGES_REQUESTED` or `COMMENTED` review event → that's the "pre-review state" → use as C_test. This unlocks EVERY repo regardless of force-push culture.
+
+Fallback: GitHub also stores `refs/pull/N/head` push events via the Events API. Each push updates the ref. The state before the first review-response push is another proxy for C_test.
+
+**Provisional priority**: CRITICAL for v3 viability. Without this, v3 is limited to the same ~5 repos that v2 can access.
+
+---
+
+### 2026-04-16 12:15 — C_test may equal C_final on small single-feature PRs
+
+**Trigger**: In v2 dev-set extraction, the PR-touched *source* code often builds/tests only in the final commits because the C_final test files assert on behavior the feature adds. Intermediate commits FAIL_BUILD (early code doesn't compile) or FAIL_TEST (C_final's tests probe behavior not yet implemented). Observed so far on 24460 (8 of 9 tested commits FAIL_TEST or FAIL_BUILD) and 24489 (4 of 4 tested commits FAIL_BUILD before reaching commits that at least build).
+
+**v2 evidence (so far)**: in-flight; await 24460/24489 final results. If both end up with C_test == C_final, both are excluded per prereg C2 (non-trivial C_test→C_final delta required). Dev-set candidates would shrink; test-set predicted similarly.
+
+**v3 hypothesis or design question**: the prereg's C_test definition ("earliest commit where C_final tests pass") may be pathological for small feature PRs where the feature-tests-first-pass commit IS the review-polished commit. Alternatives to consider for v3: (a) "earliest commit where C_base tests pass and source-change count exceeds N" — captures the spirit of "first-complete draft" without requiring C_final tests; (b) "pre-review state" — use the first commit before the first reviewer comment, inferred from PR timeline; (c) accept C_test == C_final and redefine what we're measuring (forge vs reviewer-signed-off-code).
+
+**Provisional priority**: high if >60% of v2 PRs end up with C_test == C_final — that would invalidate the entire P2 construct. Low if only a minority.
 
 ---
 

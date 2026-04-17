@@ -1,0 +1,6 @@
+## Finding F1 — Preserve the generator feature gate when extracting telemetry emission
+**Severity**: warning
+**Claim**: C2
+**What**: The claim says the new helper should emit the runtime `gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING")` guard and be called after `resourceNameField` returns a non-nil target, but it does not explicitly say to preserve the outer generator-time `OpenTelemetryAttributesFeature` gate around the resource-name block. An implementer could reasonably move `resourceNameField` and the helper call outside that gate, which would emit `resource_name` telemetry code/imports when the OpenTelemetry attributes generator feature is disabled.
+**Evidence**: `internal/gengapic/gengapic.go:501` and `internal/gengapic/gengapic.go:539` currently wrap the resource-name emission in `if g.featureEnabled(OpenTelemetryAttributesFeature) { ... }`, while the asserted generated snippets include resource-name telemetry only under telemetry-enabled test configurations, e.g. `internal/gengapic/testdata/method_GetOneThing.want:6`.
+**Fix**: Clarify C2 to extract only the duplicated formatting/emission body while keeping the existing outer `OpenTelemetryAttributesFeature` guard in both gRPC and REST branches.

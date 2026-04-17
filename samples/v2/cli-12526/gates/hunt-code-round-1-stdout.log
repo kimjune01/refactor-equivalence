@@ -1,0 +1,2283 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-12526
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ac7-07fb-7c51-bc79-df8303b9275d
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/12526/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt             # files the implementer may have changed
+go build ./...                                         # full build, not just typecheck
+go test ./... -count=1 -short                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run the required checks from the cleanroom path, then inspect the goal/spec/allowed set and source evidence only as needed. No source edits.
+exec
+/bin/zsh -lc 'pwd && cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/12526
+api/queries_pr.go
+internal/prompter/prompter.go
+internal/prompter/prompter_mock.go
+internal/prompter/test.go
+pkg/cmd/pr/edit/edit.go
+pkg/cmd/pr/shared/editable.go
+pkg/cmd/pr/shared/survey.go
+pkg/cmd/preview/prompter/prompter.go
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+# PR #12526 — `gh pr edit`: new interactive prompt for assignee selection, performance and accessibility improvements
+
+## PR body
+
+## Description
+
+Implements multiselect with search for `gh pr edit` assignees, addressing performance and accessibility issues in large organizations. Part of larger work to improve the reviewer and assignee experience in `gh`.
+
+## Key changes
+
+- **New `MultiSelectWithSearch` prompter**: Adds a search sentinel option to multiselect lists, allowing dynamic fetching of assignees via API search rather than loading all org members upfront
+- **`SuggestedAssignableActors` API**: New GraphQL query to fetch suggested actors for an assignable (Issue/PR) node with optional search filtering
+- **`gh pr edit` assignee flow**: Wires up the new prompter for interactive assignee selection when `ActorIsAssignable` feature is detected
+- **Prompter interface expansion**: Both `surveyPrompter` and `accessiblePrompter` implement the new method, with full test coverage
+- **Preview command**: Adds `multi-select-with-search` to `gh preview prompter` for testing
+
+## Notes for reviewers
+
+- This PR only covers assignees for `gh pr edit`; reviewers will follow in a subsequent PR
+
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove unused reviewer search field
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
+**Change**: Delete the `ReviewerSearchFunc func(string) ([]string, []string, error)` field from `Editable`.
+**Goal link**: The goal explicitly scopes this PR to searchable assignee selection for `gh pr edit`, with reviewers deferred to a later PR.
+**Justification**: Removing unused reviewer search state avoids carrying speculative reviewer plumbing in the assignee-focused implementation without changing any call path.
+
+### C2 — Drop unused search method from metadata survey interface
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:38
+**Change**: Remove `MultiSelectWithSearch` from the `Prompt` interface in `survey.go` and remove the now-unused `internal/prompter` import from that file.
+**Goal link**: The new searchable prompt is wired for `gh pr edit` assignees, not the issue/PR creation metadata survey handled by this interface.
+**Justification**: Keeping the wider method out of an interface that never calls it preserves the local interface pattern and avoids forcing unrelated prompt implementations to satisfy unused behavior.
+
+### C3 — Collapse duplicated GraphQL actor node shapes
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
+**Change**: Inside `SuggestedAssignableActors`, introduce one local `suggestedActorNode` struct type and one local suggested-actors connection type, then use them for both `Issue.SuggestedActors.Nodes`, `PullRequest.SuggestedActors.Nodes`, and the local `nodes` variable.
+**Goal link**: The goal adds one suggested-assignable-actors query that supports both Issue and PullRequest assignables.
+**Justification**: Naming and reusing the shared node shape makes the dual Issue/PullRequest GraphQL fragments express the same API result instead of maintaining three structurally identical anonymous declarations.
+
+codex
+The spec is focused on a narrow refactor, so the main risk is accidental interface/API drift. I’m running the mandatory full build and test now, then I’ll inspect the changed files against the accepted claims and allowed set.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+diff --git a/api/queries_pr.go b/api/queries_pr.go
+index de98c661f..962999f09 100644
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -701,6 +701,111 @@ func RemovePullRequestReviews(client *Client, repo ghrepo.Interface, prNumber in
+ 	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+ }
+ 
++// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
++// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
++// If query is empty, the query variable is passed as null to omit filtering.
++func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type responseData struct {
++		Viewer struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"viewer"`
++		Node struct {
++			Issue struct {
+exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc 'go test ./... -count=1 -short' in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 4.31s:
+
+exec
+/bin/zsh -lc "nl -ba api/queries_pr.go | sed -n '700,820p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc "nl -ba internal/prompter/prompter.go | sed -n '340,510p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+   700		// The endpoint responds with the updated pull request object; we don't need it here.
+   701		return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+   702	}
+   703	
+   704	// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
+   705	// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+   706	// If query is empty, the query variable is passed as null to omit filtering.
+   707	func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
+   708		type responseData struct {
+   709			Viewer struct {
+   710				ID    string
+   711				Login string
+   712				Name  string
+   713			} `graphql:"viewer"`
+   714			Node struct {
+   715				Issue struct {
+   716					SuggestedActors struct {
+   717						Nodes []struct {
+   718						    TypeName string `graphql:"__typename"`
+   719							User struct {
+ succeeded in 0ms:
+   340		stderr    ghPrompter.FileWriter
+   341		editorCmd string
+   342	}
+   343	
+   344	func (p *surveyPrompter) Select(prompt, defaultValue string, options []string) (int, error) {
+   345		return p.prompter.Select(prompt, defaultValue, options)
+   346	}
+   347	
+   348	func (p *surveyPrompter) MultiSelect(prompt string, defaultValues, options []string) ([]int, error) {
+   349		return p.prompter.MultiSelect(prompt, defaultValues, options)
+   350	}
+   351	
+   352	func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+   353		return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
+   354	}
+   355	
+   356	type MultiSelectSearchResult struct {
+   357		Keys        []string
+   358		Labels      []string
+   359		MoreResults int
+codex
+The build has already passed with exit code 0. The test run is still moving through packages; while it runs, I’m checking whether the accepted refactor claims actually landed in the current source and collecting exact line evidence where they did not.
+exec
+/bin/zsh -lc "nl -ba pkg/cmd/pr/edit/edit.go | sed -n '320,390p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc "nl -ba pkg/cmd/preview/prompter/prompter.go | sed -n '145,190p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc "nl -ba pkg/cmd/pr/shared/editable.go | sed -n '1,80p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc "nl -ba pkg/cmd/pr/shared/survey.go | sed -n '1,80p'" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+   320			if err != nil {
+   321				return err
+   322			}
+   323			err = opts.Surveyor.EditFields(&editable, editorCommand)
+   324			if err != nil {
+   325				return err
+   326			}
+   327		}
+   328	
+   329		opts.IO.StartProgressIndicator()
+   330		err = updatePullRequest(httpClient, repo, pr.ID, pr.Number, editable)
+   331		opts.IO.StopProgressIndicator()
+   332		if err != nil {
+   333			return err
+   334		}
+   335	
+   336		fmt.Fprintln(opts.IO.Out, pr.URL)
+   337	
+   338		return nil
+   339	}
+ succeeded in 0ms:
+   145		fmt.Fprintln(io.Out, "Demonstrating Multi Select")
+   146		cuisines := []string{"Italian", "Greek", "Indian", "Japanese", "American"}
+   147		favorites, err := p.MultiSelect("Favorite cuisines?", []string{}, cuisines)
+   148		if err != nil {
+   149			return err
+   150		}
+   151		for _, f := range favorites {
+   152			fmt.Fprintf(io.Out, "Favorite cuisine: %s\n", cuisines[f])
+   153		}
+   154		return nil
+   155	}
+   156	
+   157	func runMultiSelectWithSearch(p prompter.Prompter, io *iostreams.IOStreams) error {
+   158		fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+   159		persistentOptions := []string{"persistent-option-1"}
+   160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
+   161			var searchResultKeys []string
+   162			var searchResultLabels []string
+   163	
+   164			if input == "" {
+ succeeded in 0ms:
+     1	package shared
+     2	
+     3	import (
+     4		"fmt"
+     5	
+     6		"github.com/cli/cli/v2/api"
+     7		"github.com/cli/cli/v2/internal/gh"
+     8		"github.com/cli/cli/v2/internal/ghrepo"
+     9		"github.com/cli/cli/v2/internal/prompter"
+    10		"github.com/cli/cli/v2/pkg/set"
+    11	)
+    12	
+    13	type Editable struct {
+    14		Title              EditableString
+    15		Body               EditableString
+    16		Base               EditableString
+    17		Reviewers          EditableSlice
+    18		ReviewerSearchFunc func(string) ([]string, []string, error)
+    19		Assignees          EditableAssignees
+    20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ succeeded in 0ms:
+     1	package shared
+     2	
+     3	import (
+     4		"errors"
+     5		"fmt"
+     6		"slices"
+     7		"strings"
+     8	
+     9		"github.com/cli/cli/v2/api"
+    10		"github.com/cli/cli/v2/internal/gh"
+    11		"github.com/cli/cli/v2/internal/ghrepo"
+    12		"github.com/cli/cli/v2/internal/prompter"
+    13		"github.com/cli/cli/v2/pkg/cmdutil"
+    14		"github.com/cli/cli/v2/pkg/iostreams"
+    15		"github.com/cli/cli/v2/pkg/surveyext"
+    16	)
+    17	
+    18	type Action int
+    19	
+    20	const (
+codex
+`go test` has a real failure in `pkg/cmd/factory`; it is continuing through the remaining package list, so I’m waiting for the final exit code and tail before writing the required gate file. I also found several accepted cleanup claims that remain unapplied, which I’ll list as warnings after the blocker.
+ exited 1 in 58.43s:
+ok  	github.com/cli/cli/v2/api	0.328s
+ok  	github.com/cli/cli/v2/cmd/gen-docs	0.547s
+?   	github.com/cli/cli/v2/cmd/gh	[no test files]
+ok  	github.com/cli/cli/v2/context	0.644s
+ok  	github.com/cli/cli/v2/git	7.982s
+ok  	github.com/cli/cli/v2/internal/authflow	1.053s
+?   	github.com/cli/cli/v2/internal/browser	[no test files]
+?   	github.com/cli/cli/v2/internal/build	[no test files]
+ok  	github.com/cli/cli/v2/internal/codespaces	1.316s
+ok  	github.com/cli/cli/v2/internal/codespaces/api	2.539s
+ok  	github.com/cli/cli/v2/internal/codespaces/connection	1.834s
+ok  	github.com/cli/cli/v2/internal/codespaces/portforwarder	2.029s
+ok  	github.com/cli/cli/v2/internal/codespaces/rpc	2.184s
+?   	github.com/cli/cli/v2/internal/codespaces/rpc/codespace	[no test files]
+?   	github.com/cli/cli/v2/internal/codespaces/rpc/jupyter	[no test files]
+?   	github.com/cli/cli/v2/internal/codespaces/rpc/ssh	[no test files]
+?   	github.com/cli/cli/v2/internal/codespaces/rpc/test	[no test files]
+ok  	github.com/cli/cli/v2/internal/config	2.414s
+ok  	github.com/cli/cli/v2/internal/config/migration	2.490s
+ok  	github.com/cli/cli/v2/internal/docs	2.758s
+codex
+The full test command exited 1. To make the gate file precise, I’m rerunning the two required commands with output captured so the file can include the exact exit codes and tail-50 command output instead of piecing that together from streamed chunks.
+exec
+/bin/zsh -lc 'go build ./... > /tmp/hunt-code-build-12526.log 2>&1; code=$?; printf '"'EXIT=%s\\n' \""'$code"; tail -50 /tmp/hunt-code-build-12526.log' in /tmp/refactor-eq-workdir/cleanroom-v2/12526exec
+/bin/zsh -lc 'go test ./... -count=1 -short > /tmp/hunt-code-test-12526.log 2>&1; code=$?; printf '"'EXIT=%s\\n' \""'$code"; tail -50 /tmp/hunt-code-test-12526.log' in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 1.86s:
+EXIT=0
+codex
+The captured rerun confirms `go build` exits 0 with no output. The captured `go test` run is still executing; output is redirected so I can use the exact final tail once it exits.
+ succeeded in 40.85s:
+EXIT=1
+    editor_test.go:77: 
+        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
+        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
+        	Error:      	Not equal: 
+        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
+        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
+        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
+        	Test:       	Test_GhEditor_Prompt_skip
+--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
+    editor_test.go:108: 
+        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
+        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
+        	Error:      	Not equal: 
+exec
+/bin/zsh -lc 'rg -n "FAIL|Test_ioStreams_pager|Test_GhEditor" /tmp/hunt-code-test-12526.log' in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+91:--- FAIL: Test_ioStreams_pager (0.00s)
+92:    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
+105:            	Test:       	Test_ioStreams_pager/config_pager_and_PAGER_set
+106:    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
+119:            	Test:       	Test_ioStreams_pager/only_PAGER_set
+120:FAIL
+121:FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
+302:--- FAIL: Test_GhEditor_Prompt_skip (0.00s)
+316:        	Test:       	Test_GhEditor_Prompt_skip
+317:--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
+331:        	Test:       	Test_GhEditor_Prompt_editorAppend
+332:--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
+346:        	Test:       	Test_GhEditor_Prompt_editorTruncate
+347:FAIL
+348:FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
+352:FAIL
+exec
+/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md || true' in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+ls: /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md: No such file or directory
+codex
+I’m writing the gate report now. Since the requested output file is a review artifact, I’m including the mandatory command records plus exact current-source evidence for the unapplied accepted claims.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md
+## Build: PASS
+## Tests: FAIL
+
+Required command records:
+
+```text
+$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
+api/queries_pr.go
+internal/prompter/prompter.go
+internal/prompter/prompter_mock.go
+internal/prompter/test.go
+pkg/cmd/pr/edit/edit.go
+pkg/cmd/pr/shared/editable.go
+pkg/cmd/pr/shared/survey.go
+pkg/cmd/preview/prompter/prompter.go
+```
+
+```text
+$ go build ./...
+exit code: 0
+tail -50:
+(no output)
+```
+
+```text
+$ go test ./... -count=1 -short
+exit code: 1
+tail -50:
+    editor_test.go:77: 
+        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
+        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
+        	Error:      	Not equal: 
+        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
+        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
+        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
+        	Test:       	Test_GhEditor_Prompt_skip
+--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
+    editor_test.go:108: 
+        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
+        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
+        	Error:      	Not equal: 
+        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
+        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
+        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
+        	Test:       	Test_GhEditor_Prompt_editorAppend
+--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
+    editor_test.go:139: 
+        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
+        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
+        	Error:      	Not equal: 
+        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
+        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
+        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
+        	Test:       	Test_GhEditor_Prompt_editorTruncate
+FAIL
+FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
+?   	github.com/cli/cli/v2/script	[no test files]
+?   	github.com/cli/cli/v2/test	[no test files]
+?   	github.com/cli/cli/v2/utils	[no test files]
+FAIL
+```
+
+Additional failing tests observed in the same `go test` run before the final tail:
+
+```text
+--- FAIL: Test_ioStreams_pager (0.00s)
+    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
+        default_test.go:387:
+            	Error:      	Not equal:
+            	            	expected: "CONFIG_PAGER"
+            	            	actual  : "cat"
+    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
+        default_test.go:387:
+            	Error:      	Not equal:
+            	            	expected: "PAGER"
+            	            	actual  : "cat"
+FAIL
+FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
+```
+
+## Finding F1 — Registered test command fails
+**Severity**: blocker
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
+**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
+**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
+
+## Finding F2 — Accepted claim C1 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
+**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
+
+```go
+13	type Editable struct {
+14		Title              EditableString
+15		Body               EditableString
+16		Base               EditableString
+17		Reviewers          EditableSlice
+18		ReviewerSearchFunc func(string) ([]string, []string, error)
+19		Assignees          EditableAssignees
+20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+```
+
+**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
+
+## Finding F3 — Accepted claim C2 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
+**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
+
+```go
+9		"github.com/cli/cli/v2/api"
+10		"github.com/cli/cli/v2/internal/gh"
+11		"github.com/cli/cli/v2/internal/ghrepo"
+12		"github.com/cli/cli/v2/internal/prompter"
+13		"github.com/cli/cli/v2/pkg/cmdutil"
+14		"github.com/cli/cli/v2/pkg/iostreams"
+15		"github.com/cli/cli/v2/pkg/surveyext"
+```
+
+```go
+38	type Prompt interface {
+39		Input(prompt string, defaultValue string) (string, error)
+40		Select(prompt string, defaultValue string, options []string) (int, error)
+41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+42		Confirm(prompt string, defaultValue bool) (bool, error)
+43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+45	}
+```
+
+**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
+
+## Finding F4 — Accepted claim C3 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
+**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
+
+```go
+708		type responseData struct {
+714			Node struct {
+715				Issue struct {
+716					SuggestedActors struct {
+717						Nodes []struct {
+718						    TypeName string `graphql:"__typename"`
+719							User struct {
+720								ID       string
+721								Login    string
+722								Name     string
+723							} `graphql:"... on User"`
+724							Bot struct {
+725								ID       string
+726								Login    string
+727							} `graphql:"... on Bot"`
+728						}
+```
+
+```go
+731				PullRequest struct {
+732					SuggestedActors struct {
+733						Nodes []struct {
+734						    TypeName string `graphql:"__typename"`
+735							User struct {
+736								ID       string
+737								Login    string
+738								Name     string							
+739							} `graphql:"... on User"`
+740							Bot struct {
+741								ID       string
+742								Login    string
+743							} `graphql:"... on Bot"`
+744						}
+```
+
+```go
+764		var nodes []struct {
+765			TypeName string `graphql:"__typename"`
+766			User struct {
+767				ID       string
+768				Login    string
+769				Name     string
+770			} `graphql:"... on User"`
+771			Bot struct {
+772				ID       string
+773				Login    string
+774			} `graphql:"... on Bot"`
+775		}
+```
+
+**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
+
+## Finding F5 — Accepted claims C4 and C5 were not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
+**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
+
+```go
+399			for _, k := range selectedOptions {
+400				l := optionKeyLabels[k]
+401	
+402				if l == "" {
+403					l = k
+404				}
+405	
+406				optionKeys = append(optionKeys, k)
+407				optionLabels = append(optionLabels, l)
+```
+
+```go
+417				l := optionKeyLabels[k]
+418				if l == "" {
+419					l = k
+420				}
+421				optionKeys = append(optionKeys, k)
+422				optionLabels = append(optionLabels, l)
+```
+
+```go
+487				searchResult := searchFunc(query)
+488				if searchResult.Err != nil {
+489					return nil, searchResult.Err
+490				}
+491				searchResultKeys = searchResult.Keys
+492				searchResultLabels = searchResult.Labels
+493				moreResults = searchResult.MoreResults
+494	
+495				for i, k := range searchResultKeys {
+496					optionKeyLabels[k] = searchResultLabels[i]
+497				}
+```
+
+**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
+
+## Finding F6 — Accepted claim C6 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
+**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
+
+```go
+341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
+343			actors, err := api.SuggestedAssignableActors(
+```
+
+```go
+383		}
+384		return searchFunc
+385	}
+```
+
+**Fix**: Return the closure directly from `assigneeSearchFunc`.
+
+## Finding F7 — Accepted claim C7 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
+**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
+
+```go
+160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
+161			var searchResultKeys []string
+162			var searchResultLabels []string
+163	
+164			if input == "" {
+165				moreResults := 2 // Indicate that there are more results available
+166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+168				return prompter.MultiSelectSearchResult{
+169					Keys:        searchResultKeys,
+170					Labels:      searchResultLabels,
+171					MoreResults: moreResults,
+```
+
+```go
+178			moreResults := 0
+179			searchResultKeys = []string{"search-result-1", "search-result-2"}
+180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+181			return prompter.MultiSelectSearchResult{
+182				Keys:        searchResultKeys,
+183				Labels:      searchResultLabels,
+184				MoreResults: moreResults,
+185				Err:         nil,
+```
+
+**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+apply_patch(auto_approved=true) exited 0 in 24ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/cli-12526/gates/hunt-code-round-1.md b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a89a7d6b8fec0b8a6e552325ea9caae273ad03
+--- /dev/null
++++ b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+@@ -0,0 +1,301 @@
++## Build: PASS
++## Tests: FAIL
++
++Required command records:
++
++```text
++$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
++api/queries_pr.go
++internal/prompter/prompter.go
++internal/prompter/prompter_mock.go
++internal/prompter/test.go
++pkg/cmd/pr/edit/edit.go
++pkg/cmd/pr/shared/editable.go
++pkg/cmd/pr/shared/survey.go
++pkg/cmd/preview/prompter/prompter.go
++```
++
++```text
++$ go build ./...
++exit code: 0
++tail -50:
++(no output)
++```
++
++```text
++$ go test ./... -count=1 -short
++exit code: 1
++tail -50:
++    editor_test.go:77: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_skip
++--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
++    editor_test.go:108: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorAppend
++--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
++    editor_test.go:139: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorTruncate
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
++?   	github.com/cli/cli/v2/script	[no test files]
++?   	github.com/cli/cli/v2/test	[no test files]
++?   	github.com/cli/cli/v2/utils	[no test files]
++FAIL
++```
++
++Additional failing tests observed in the same `go test` run before the final tail:
++
++```text
++--- FAIL: Test_ioStreams_pager (0.00s)
++    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "CONFIG_PAGER"
++            	            	actual  : "cat"
++    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "PAGER"
++            	            	actual  : "cat"
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
++```
++
++## Finding F1 — Registered test command fails
++**Severity**: blocker
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
++**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
++
++## Finding F2 — Accepted claim C1 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
++**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
++
++```go
++13	type Editable struct {
++14		Title              EditableString
++15		Body               EditableString
++16		Base               EditableString
++17		Reviewers          EditableSlice
++18		ReviewerSearchFunc func(string) ([]string, []string, error)
++19		Assignees          EditableAssignees
++20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++```
++
++**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
++
++## Finding F3 — Accepted claim C2 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
++**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
++
++```go
++9		"github.com/cli/cli/v2/api"
++10		"github.com/cli/cli/v2/internal/gh"
++11		"github.com/cli/cli/v2/internal/ghrepo"
++12		"github.com/cli/cli/v2/internal/prompter"
++13		"github.com/cli/cli/v2/pkg/cmdutil"
++14		"github.com/cli/cli/v2/pkg/iostreams"
++15		"github.com/cli/cli/v2/pkg/surveyext"
++```
++
++```go
++38	type Prompt interface {
++39		Input(prompt string, defaultValue string) (string, error)
++40		Select(prompt string, defaultValue string, options []string) (int, error)
++41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
++42		Confirm(prompt string, defaultValue bool) (bool, error)
++43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
++45	}
++```
++
++**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
++
++## Finding F4 — Accepted claim C3 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
++**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
++
++```go
++708		type responseData struct {
++714			Node struct {
++715				Issue struct {
++716					SuggestedActors struct {
++717						Nodes []struct {
++718						    TypeName string `graphql:"__typename"`
++719							User struct {
++720								ID       string
++721								Login    string
++722								Name     string
++723							} `graphql:"... on User"`
++724							Bot struct {
++725								ID       string
++726								Login    string
++727							} `graphql:"... on Bot"`
++728						}
++```
++
++```go
++731				PullRequest struct {
++732					SuggestedActors struct {
++733						Nodes []struct {
++734						    TypeName string `graphql:"__typename"`
++735							User struct {
++736								ID       string
++737								Login    string
++738								Name     string							
++739							} `graphql:"... on User"`
++740							Bot struct {
++741								ID       string
++742								Login    string
++743							} `graphql:"... on Bot"`
++744						}
++```
++
++```go
++764		var nodes []struct {
++765			TypeName string `graphql:"__typename"`
++766			User struct {
++767				ID       string
++768				Login    string
++769				Name     string
++770			} `graphql:"... on User"`
++771			Bot struct {
++772				ID       string
++773				Login    string
++774			} `graphql:"... on Bot"`
++775		}
++```
++
++**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
++
++## Finding F5 — Accepted claims C4 and C5 were not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
++**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
++
++```go
++399			for _, k := range selectedOptions {
++400				l := optionKeyLabels[k]
++401	
++402				if l == "" {
++403					l = k
++404				}
++405	
++406				optionKeys = append(optionKeys, k)
++407				optionLabels = append(optionLabels, l)
++```
++
++```go
++417				l := optionKeyLabels[k]
++418				if l == "" {
++419					l = k
++420				}
++421				optionKeys = append(optionKeys, k)
++422				optionLabels = append(optionLabels, l)
++```
++
++```go
++487				searchResult := searchFunc(query)
++488				if searchResult.Err != nil {
++489					return nil, searchResult.Err
++490				}
++491				searchResultKeys = searchResult.Keys
++492				searchResultLabels = searchResult.Labels
++493				moreResults = searchResult.MoreResults
++494	
++495				for i, k := range searchResultKeys {
++496					optionKeyLabels[k] = searchResultLabels[i]
++497				}
++```
++
++**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
++
++## Finding F6 — Accepted claim C6 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
++**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
++
++```go
++341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++343			actors, err := api.SuggestedAssignableActors(
++```
++
++```go
++383		}
++384		return searchFunc
++385	}
++```
++
++**Fix**: Return the closure directly from `assigneeSearchFunc`.
++
++## Finding F7 — Accepted claim C7 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
++**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
++
++```go
++160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++161			var searchResultKeys []string
++162			var searchResultLabels []string
++163	
++164			if input == "" {
++165				moreResults := 2 // Indicate that there are more results available
++166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
++167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
++168				return prompter.MultiSelectSearchResult{
++169					Keys:        searchResultKeys,
++170					Labels:      searchResultLabels,
++171					MoreResults: moreResults,
++```
++
++```go
++178			moreResults := 0
++179			searchResultKeys = []string{"search-result-1", "search-result-2"}
++180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
++181			return prompter.MultiSelectSearchResult{
++182				Keys:        searchResultKeys,
++183				Labels:      searchResultLabels,
++184				MoreResults: moreResults,
++185				Err:         nil,
++```
++
++**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+
+file update:
+diff --git a/samples/v2/cli-12526/gates/hunt-code-round-1.md b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a89a7d6b8fec0b8a6e552325ea9caae273ad03
+--- /dev/null
++++ b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+@@ -0,0 +1,301 @@
++## Build: PASS
++## Tests: FAIL
++
++Required command records:
++
++```text
++$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
++api/queries_pr.go
++internal/prompter/prompter.go
++internal/prompter/prompter_mock.go
++internal/prompter/test.go
++pkg/cmd/pr/edit/edit.go
++pkg/cmd/pr/shared/editable.go
++pkg/cmd/pr/shared/survey.go
++pkg/cmd/preview/prompter/prompter.go
++```
++
++```text
++$ go build ./...
++exit code: 0
++tail -50:
++(no output)
++```
++
++```text
++$ go test ./... -count=1 -short
++exit code: 1
++tail -50:
++    editor_test.go:77: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_skip
++--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
++    editor_test.go:108: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorAppend
++--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
++    editor_test.go:139: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorTruncate
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
++?   	github.com/cli/cli/v2/script	[no test files]
++?   	github.com/cli/cli/v2/test	[no test files]
++?   	github.com/cli/cli/v2/utils	[no test files]
++FAIL
++```
++
++Additional failing tests observed in the same `go test` run before the final tail:
++
++```text
++--- FAIL: Test_ioStreams_pager (0.00s)
++    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "CONFIG_PAGER"
++            	            	actual  : "cat"
++    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "PAGER"
++            	            	actual  : "cat"
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
++```
++
++## Finding F1 — Registered test command fails
++**Severity**: blocker
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
++**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
++
++## Finding F2 — Accepted claim C1 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
++**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
++
++```go
++13	type Editable struct {
++14		Title              EditableString
++15		Body               EditableString
++16		Base               EditableString
++17		Reviewers          EditableSlice
++18		ReviewerSearchFunc func(string) ([]string, []string, error)
++19		Assignees          EditableAssignees
++20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++```
++
++**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
++
++## Finding F3 — Accepted claim C2 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
++**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
++
++```go
++9		"github.com/cli/cli/v2/api"
++10		"github.com/cli/cli/v2/internal/gh"
++11		"github.com/cli/cli/v2/internal/ghrepo"
++12		"github.com/cli/cli/v2/internal/prompter"
++13		"github.com/cli/cli/v2/pkg/cmdutil"
++14		"github.com/cli/cli/v2/pkg/iostreams"
++15		"github.com/cli/cli/v2/pkg/surveyext"
++```
++
++```go
++38	type Prompt interface {
++39		Input(prompt string, defaultValue string) (string, error)
++40		Select(prompt string, defaultValue string, options []string) (int, error)
++41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
++42		Confirm(prompt string, defaultValue bool) (bool, error)
++43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
++45	}
++```
++
++**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
++
++## Finding F4 — Accepted claim C3 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
++**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
++
++```go
++708		type responseData struct {
++714			Node struct {
++715				Issue struct {
++716					SuggestedActors struct {
++717						Nodes []struct {
++718						    TypeName string `graphql:"__typename"`
++719							User struct {
++720								ID       string
++721								Login    string
++722								Name     string
++723							} `graphql:"... on User"`
++724							Bot struct {
++725								ID       string
++726								Login    string
++727							} `graphql:"... on Bot"`
++728						}
++```
++
++```go
++731				PullRequest struct {
++732					SuggestedActors struct {
++733						Nodes []struct {
++734						    TypeName string `graphql:"__typename"`
++735							User struct {
++736								ID       string
++737								Login    string
++738								Name     string							
++739							} `graphql:"... on User"`
++740							Bot struct {
++741								ID       string
++742								Login    string
++743							} `graphql:"... on Bot"`
++744						}
++```
++
++```go
++764		var nodes []struct {
++765			TypeName string `graphql:"__typename"`
++766			User struct {
++767				ID       string
++768				Login    string
++769				Name     string
++770			} `graphql:"... on User"`
++771			Bot struct {
++772				ID       string
++773				Login    string
++774			} `graphql:"... on Bot"`
++775		}
++```
++
++**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
++
++## Finding F5 — Accepted claims C4 and C5 were not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
++**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
++
++```go
++399			for _, k := range selectedOptions {
++400				l := optionKeyLabels[k]
++401	
++402				if l == "" {
++403					l = k
++404				}
++405	
++406				optionKeys = append(optionKeys, k)
++407				optionLabels = append(optionLabels, l)
++```
++
++```go
++417				l := optionKeyLabels[k]
++418				if l == "" {
++419					l = k
++420				}
++421				optionKeys = append(optionKeys, k)
++422				optionLabels = append(optionLabels, l)
++```
++
++```go
++487				searchResult := searchFunc(query)
++488				if searchResult.Err != nil {
++489					return nil, searchResult.Err
++490				}
++491				searchResultKeys = searchResult.Keys
++492				searchResultLabels = searchResult.Labels
++493				moreResults = searchResult.MoreResults
++494	
++495				for i, k := range searchResultKeys {
++496					optionKeyLabels[k] = searchResultLabels[i]
++497				}
++```
++
++**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
++
++## Finding F6 — Accepted claim C6 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
++**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
++
++```go
++341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++343			actors, err := api.SuggestedAssignableActors(
++```
++
++```go
++383		}
++384		return searchFunc
++385	}
++```
++
++**Fix**: Return the closure directly from `assigneeSearchFunc`.
++
++## Finding F7 — Accepted claim C7 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
++**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
++
++```go
++160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++161			var searchResultKeys []string
++162			var searchResultLabels []string
++163	
++164			if input == "" {
++165				moreResults := 2 // Indicate that there are more results available
++166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
++167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
++168				return prompter.MultiSelectSearchResult{
++169					Keys:        searchResultKeys,
++170					Labels:      searchResultLabels,
++171					MoreResults: moreResults,
++```
++
++```go
++178			moreResults := 0
++179			searchResultKeys = []string{"search-result-1", "search-result-2"}
++180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
++181			return prompter.MultiSelectSearchResult{
++182				Keys:        searchResultKeys,
++183				Labels:      searchResultLabels,
++184				MoreResults: moreResults,
++185				Err:         nil,
++```
++
++**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+## Build: PASS
+## Tests: FAIL
+
+Required command records:
+
+```text
+$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
+api/queries_pr.go
+internal/prompter/prompter.go
+internal/prompter/prompter_mock.go
+internal/prompter/test.go
+pkg/cmd/pr/edit/edit.go
+pkg/cmd/pr/shared/editable.go
+pkg/cmd/pr/shared/survey.go
+pkg/cmd/preview/prompter/prompter.go
+```
+
+```text
+$ go build ./...
+exit code: 0
+file update:
+diff --git a/samples/v2/cli-12526/gates/hunt-code-round-1.md b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a89a7d6b8fec0b8a6e552325ea9caae273ad03
+--- /dev/null
++++ b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+@@ -0,0 +1,301 @@
++## Build: PASS
++## Tests: FAIL
++
++Required command records:
++
++```text
++$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
++api/queries_pr.go
++internal/prompter/prompter.go
++internal/prompter/prompter_mock.go
++internal/prompter/test.go
++pkg/cmd/pr/edit/edit.go
++pkg/cmd/pr/shared/editable.go
++pkg/cmd/pr/shared/survey.go
++pkg/cmd/preview/prompter/prompter.go
++```
++
++```text
++$ go build ./...
++exit code: 0
++tail -50:
++(no output)
++```
++
++```text
++$ go test ./... -count=1 -short
++exit code: 1
++tail -50:
++    editor_test.go:77: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_skip
++--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
++    editor_test.go:108: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorAppend
++--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
++    editor_test.go:139: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorTruncate
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
++?   	github.com/cli/cli/v2/script	[no test files]
++?   	github.com/cli/cli/v2/test	[no test files]
++?   	github.com/cli/cli/v2/utils	[no test files]
++FAIL
++```
++
++Additional failing tests observed in the same `go test` run before the final tail:
++
++```text
++--- FAIL: Test_ioStreams_pager (0.00s)
++    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "CONFIG_PAGER"
++            	            	actual  : "cat"
++    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "PAGER"
++            	            	actual  : "cat"
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
++```
++
++## Finding F1 — Registered test command fails
++**Severity**: blocker
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
++**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
++
++## Finding F2 — Accepted claim C1 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
++**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
++
++```go
++13	type Editable struct {
++14		Title              EditableString
++15		Body               EditableString
++16		Base               EditableString
++17		Reviewers          EditableSlice
++18		ReviewerSearchFunc func(string) ([]string, []string, error)
++19		Assignees          EditableAssignees
++20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++```
++
++**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
++
++## Finding F3 — Accepted claim C2 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
++**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
++
++```go
++9		"github.com/cli/cli/v2/api"
++10		"github.com/cli/cli/v2/internal/gh"
++11		"github.com/cli/cli/v2/internal/ghrepo"
++12		"github.com/cli/cli/v2/internal/prompter"
++13		"github.com/cli/cli/v2/pkg/cmdutil"
++14		"github.com/cli/cli/v2/pkg/iostreams"
++15		"github.com/cli/cli/v2/pkg/surveyext"
++```
++
++```go
++38	type Prompt interface {
++39		Input(prompt string, defaultValue string) (string, error)
++40		Select(prompt string, defaultValue string, options []string) (int, error)
++41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
++42		Confirm(prompt string, defaultValue bool) (bool, error)
++43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
++45	}
++```
++
++**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
++
++## Finding F4 — Accepted claim C3 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
++**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
++
++```go
++708		type responseData struct {
++714			Node struct {
++715				Issue struct {
++716					SuggestedActors struct {
++717						Nodes []struct {
++718						    TypeName string `graphql:"__typename"`
++719							User struct {
++720								ID       string
++721								Login    string
++722								Name     string
++723							} `graphql:"... on User"`
++724							Bot struct {
++725								ID       string
++726								Login    string
++727							} `graphql:"... on Bot"`
++728						}
++```
++
++```go
++731				PullRequest struct {
++732					SuggestedActors struct {
++733						Nodes []struct {
++734						    TypeName string `graphql:"__typename"`
++735							User struct {
++736								ID       string
++737								Login    string
++738								Name     string							
++739							} `graphql:"... on User"`
++740							Bot struct {
++741								ID       string
++742								Login    string
++743							} `graphql:"... on Bot"`
++744						}
++```
++
++```go
++764		var nodes []struct {
++765			TypeName string `graphql:"__typename"`
++766			User struct {
++767				ID       string
++768				Login    string
++769				Name     string
++770			} `graphql:"... on User"`
++771			Bot struct {
++772				ID       string
++773				Login    string
++774			} `graphql:"... on Bot"`
++775		}
++```
++
++**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
++
++## Finding F5 — Accepted claims C4 and C5 were not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
++**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
++
++```go
++399			for _, k := range selectedOptions {
++400				l := optionKeyLabels[k]
++401	
++402				if l == "" {
++403					l = k
++404				}
++405	
++406				optionKeys = append(optionKeys, k)
++407				optionLabels = append(optionLabels, l)
++```
++
++```go
++417				l := optionKeyLabels[k]
++418				if l == "" {
++419					l = k
++420				}
++421				optionKeys = append(optionKeys, k)
++422				optionLabels = append(optionLabels, l)
++```
++
++```go
++487				searchResult := searchFunc(query)
++488				if searchResult.Err != nil {
++489					return nil, searchResult.Err
++490				}
++491				searchResultKeys = searchResult.Keys
++492				searchResultLabels = searchResult.Labels
++493				moreResults = searchResult.MoreResults
++494	
++495				for i, k := range searchResultKeys {
++496					optionKeyLabels[k] = searchResultLabels[i]
++497				}
++```
++
++**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
++
++## Finding F6 — Accepted claim C6 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
++**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
++
++```go
++341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++343			actors, err := api.SuggestedAssignableActors(
++```
++
++```go
++383		}
++384		return searchFunc
++385	}
++```
++
++**Fix**: Return the closure directly from `assigneeSearchFunc`.
++
++## Finding F7 — Accepted claim C7 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
++**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
++
++```go
++160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++161			var searchResultKeys []string
++162			var searchResultLabels []string
++163	
++164			if input == "" {
++165				moreResults := 2 // Indicate that there are more results available
++166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
++167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
++168				return prompter.MultiSelectSearchResult{
++169					Keys:        searchResultKeys,
++170					Labels:      searchResultLabels,
++171					MoreResults: moreResults,
++```
++
++```go
++178			moreResults := 0
++179			searchResultKeys = []string{"search-result-1", "search-result-2"}
++180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
++181			return prompter.MultiSelectSearchResult{
++182				Keys:        searchResultKeys,
++183				Labels:      searchResultLabels,
++184				MoreResults: moreResults,
++185				Err:         nil,
++```
++
++**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+
+exec
+/bin/zsh -lc "sed -n '260,520p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/12526 succeeded in 0ms:
+```
+
+```go
+383		}
+384		return searchFunc
+385	}
+```
+
+**Fix**: Return the closure directly from `assigneeSearchFunc`.
+
+## Finding F7 — Accepted claim C7 was not applied
+**Severity**: warning
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
+**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
+
+```go
+160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
+161			var searchResultKeys []string
+162			var searchResultLabels []string
+163	
+file update:
+diff --git a/samples/v2/cli-12526/gates/hunt-code-round-1.md b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a89a7d6b8fec0b8a6e552325ea9caae273ad03
+--- /dev/null
++++ b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+@@ -0,0 +1,301 @@
++## Build: PASS
++## Tests: FAIL
++
++Required command records:
++
++```text
++$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
++api/queries_pr.go
++internal/prompter/prompter.go
++internal/prompter/prompter_mock.go
++internal/prompter/test.go
++pkg/cmd/pr/edit/edit.go
++pkg/cmd/pr/shared/editable.go
++pkg/cmd/pr/shared/survey.go
++pkg/cmd/preview/prompter/prompter.go
++```
++
++```text
++$ go build ./...
++exit code: 0
++tail -50:
++(no output)
++```
++
++```text
++$ go test ./... -count=1 -short
++exit code: 1
++tail -50:
++    editor_test.go:77: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_skip
++--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
++    editor_test.go:108: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorAppend
++--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
++    editor_test.go:139: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorTruncate
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
++?   	github.com/cli/cli/v2/script	[no test files]
++?   	github.com/cli/cli/v2/test	[no test files]
++?   	github.com/cli/cli/v2/utils	[no test files]
++FAIL
++```
++
++Additional failing tests observed in the same `go test` run before the final tail:
++
++```text
++--- FAIL: Test_ioStreams_pager (0.00s)
++    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "CONFIG_PAGER"
++            	            	actual  : "cat"
++    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "PAGER"
++            	            	actual  : "cat"
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
++```
++
++## Finding F1 — Registered test command fails
++**Severity**: blocker
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
++**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
++
++## Finding F2 — Accepted claim C1 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
++**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
++
++```go
++13	type Editable struct {
++14		Title              EditableString
++15		Body               EditableString
++16		Base               EditableString
++17		Reviewers          EditableSlice
++18		ReviewerSearchFunc func(string) ([]string, []string, error)
++19		Assignees          EditableAssignees
++20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++```
++
++**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
++
++## Finding F3 — Accepted claim C2 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
++**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
++
++```go
++9		"github.com/cli/cli/v2/api"
++10		"github.com/cli/cli/v2/internal/gh"
++11		"github.com/cli/cli/v2/internal/ghrepo"
++12		"github.com/cli/cli/v2/internal/prompter"
++13		"github.com/cli/cli/v2/pkg/cmdutil"
++14		"github.com/cli/cli/v2/pkg/iostreams"
++15		"github.com/cli/cli/v2/pkg/surveyext"
++```
++
++```go
++38	type Prompt interface {
++39		Input(prompt string, defaultValue string) (string, error)
++40		Select(prompt string, defaultValue string, options []string) (int, error)
++41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
++42		Confirm(prompt string, defaultValue bool) (bool, error)
++43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
++45	}
++```
++
++**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
++
++## Finding F4 — Accepted claim C3 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
++**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
++
++```go
++708		type responseData struct {
++714			Node struct {
++715				Issue struct {
++716					SuggestedActors struct {
++717						Nodes []struct {
++718						    TypeName string `graphql:"__typename"`
++719							User struct {
++720								ID       string
++721								Login    string
++722								Name     string
++723							} `graphql:"... on User"`
++724							Bot struct {
++725								ID       string
++726								Login    string
++727							} `graphql:"... on Bot"`
++728						}
++```
++
++```go
++731				PullRequest struct {
++732					SuggestedActors struct {
++733						Nodes []struct {
++734						    TypeName string `graphql:"__typename"`
++735							User struct {
++736								ID       string
++737								Login    string
++738								Name     string							
++739							} `graphql:"... on User"`
++740							Bot struct {
++741								ID       string
++742								Login    string
++743							} `graphql:"... on Bot"`
++744						}
++```
++
++```go
++764		var nodes []struct {
++765			TypeName string `graphql:"__typename"`
++766			User struct {
++767				ID       string
++768				Login    string
++769				Name     string
++770			} `graphql:"... on User"`
++771			Bot struct {
++772				ID       string
++773				Login    string
++774			} `graphql:"... on Bot"`
++775		}
++```
++
++**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
++
++## Finding F5 — Accepted claims C4 and C5 were not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
++**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
++
++```go
++399			for _, k := range selectedOptions {
++400				l := optionKeyLabels[k]
++401	
++402				if l == "" {
++403					l = k
++404				}
++405	
++406				optionKeys = append(optionKeys, k)
++407				optionLabels = append(optionLabels, l)
++```
++
++```go
++417				l := optionKeyLabels[k]
++418				if l == "" {
++419					l = k
++420				}
++421				optionKeys = append(optionKeys, k)
++422				optionLabels = append(optionLabels, l)
++```
++
++```go
++487				searchResult := searchFunc(query)
++488				if searchResult.Err != nil {
++489					return nil, searchResult.Err
++490				}
++491				searchResultKeys = searchResult.Keys
++492				searchResultLabels = searchResult.Labels
++493				moreResults = searchResult.MoreResults
++494	
++495				for i, k := range searchResultKeys {
++496					optionKeyLabels[k] = searchResultLabels[i]
++497				}
++```
++
++**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
++
++## Finding F6 — Accepted claim C6 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
++**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
++
++```go
++341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++343			actors, err := api.SuggestedAssignableActors(
++```
++
++```go
++383		}
++384		return searchFunc
++385	}
++```
++
++**Fix**: Return the closure directly from `assigneeSearchFunc`.
++
++## Finding F7 — Accepted claim C7 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
++**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
++
++```go
++160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++161			var searchResultKeys []string
++162			var searchResultLabels []string
++163	
++164			if input == "" {
++165				moreResults := 2 // Indicate that there are more results available
++166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
++167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
++168				return prompter.MultiSelectSearchResult{
++169					Keys:        searchResultKeys,
++170					Labels:      searchResultLabels,
++171					MoreResults: moreResults,
++```
++
++```go
++178			moreResults := 0
++179			searchResultKeys = []string{"search-result-1", "search-result-2"}
++180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
++181			return prompter.MultiSelectSearchResult{
++182				Keys:        searchResultKeys,
++183				Labels:      searchResultLabels,
++184				MoreResults: moreResults,
++185				Err:         nil,
++```
++
++**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+
+codex
+Wrote the review findings to [/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md).
+
+Results:
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: FAIL, exit code 1
+
+Primary blocker is the registered test command failure. I also recorded warnings for accepted claims C1-C7 that remain unapplied, each with exact current-source line evidence as requested. No source files were edited.
+file update:
+diff --git a/samples/v2/cli-12526/gates/hunt-code-round-1.md b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a89a7d6b8fec0b8a6e552325ea9caae273ad03
+--- /dev/null
++++ b/samples/v2/cli-12526/gates/hunt-code-round-1.md
+@@ -0,0 +1,301 @@
++## Build: PASS
++## Tests: FAIL
++
++Required command records:
++
++```text
++$ cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/inputs/allowed-files.txt
++api/queries_pr.go
++internal/prompter/prompter.go
++internal/prompter/prompter_mock.go
++internal/prompter/test.go
++pkg/cmd/pr/edit/edit.go
++pkg/cmd/pr/shared/editable.go
++pkg/cmd/pr/shared/survey.go
++pkg/cmd/preview/prompter/prompter.go
++```
++
++```text
++$ go build ./...
++exit code: 0
++tail -50:
++(no output)
++```
++
++```text
++$ go test ./... -count=1 -short
++exit code: 1
++tail -50:
++    editor_test.go:77: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_skip
++--- FAIL: Test_GhEditor_Prompt_editorAppend (0.01s)
++    editor_test.go:108: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:108
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch vim, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch vim, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch vim, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch vim, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorAppend
++--- FAIL: Test_GhEditor_Prompt_editorTruncate (0.02s)
++    editor_test.go:139: 
++        	Error Trace:	/private/tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:139
++        	            				/opt/homebrew/Cellar/go/1.26.0/libexec/src/runtime/asm_arm64.s:1447
++        	Error:      	Not equal: 
++        	            	expected: "\x1b[0G\x1b[2K\x1b[0;1;92m? \x1b[0m\x1b[0;1;99mBody \x1b[0m\x1b[0;36m[(e) to launch nano, enter to skip] \x1b[0m"
++        	            	actual  : "\x1b[0G\x1b[2K? Body [(e) to launch nano, enter to skip] "
++        	            	
++        	            	Diff:
++        	            	--- Expected
++        	            	+++ Actual
++        	            	@@ -1 +1 @@
++        	            	-[0G[2K[0;1;92m? [0m[0;1;99mBody [0m[0;36m[(e) to launch nano, enter to skip] [0m
++        	            	+[0G[2K? Body [(e) to launch nano, enter to skip] 
++        	Test:       	Test_GhEditor_Prompt_editorTruncate
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/surveyext	2.174s
++?   	github.com/cli/cli/v2/script	[no test files]
++?   	github.com/cli/cli/v2/test	[no test files]
++?   	github.com/cli/cli/v2/utils	[no test files]
++FAIL
++```
++
++Additional failing tests observed in the same `go test` run before the final tail:
++
++```text
++--- FAIL: Test_ioStreams_pager (0.00s)
++    --- FAIL: Test_ioStreams_pager/config_pager_and_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "CONFIG_PAGER"
++            	            	actual  : "cat"
++    --- FAIL: Test_ioStreams_pager/only_PAGER_set (0.00s)
++        default_test.go:387:
++            	Error:      	Not equal:
++            	            	expected: "PAGER"
++            	            	actual  : "cat"
++FAIL
++FAIL	github.com/cli/cli/v2/pkg/cmd/factory	2.272s
++```
++
++## Finding F1 — Registered test command fails
++**Severity**: blocker
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/surveyext/editor_test.go:77
++**What**: `go test ./... -count=1 -short` exits 1. The final tail shows `pkg/surveyext` editor prompt output tests failing because the actual prompt omits ANSI styling. The same run also failed `pkg/cmd/factory` pager tests, where the actual pager was `cat` instead of the expected configured pager values.
++**Fix**: Restore the expected test environment or implementation behavior so the registered test command passes end-to-end.
++
++## Finding F2 — Accepted claim C1 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
++**What**: C1 says to delete `ReviewerSearchFunc`, but the current `Editable` type still contains it:
++
++```go
++13	type Editable struct {
++14		Title              EditableString
++15		Body               EditableString
++16		Base               EditableString
++17		Reviewers          EditableSlice
++18		ReviewerSearchFunc func(string) ([]string, []string, error)
++19		Assignees          EditableAssignees
++20		AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
++```
++
++**Fix**: Remove the unused `ReviewerSearchFunc` field from `Editable`.
++
++## Finding F3 — Accepted claim C2 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:12
++**What**: C2 says to remove `MultiSelectWithSearch` from this local `Prompt` interface and remove the now-unused `internal/prompter` import, but both remain:
++
++```go
++9		"github.com/cli/cli/v2/api"
++10		"github.com/cli/cli/v2/internal/gh"
++11		"github.com/cli/cli/v2/internal/ghrepo"
++12		"github.com/cli/cli/v2/internal/prompter"
++13		"github.com/cli/cli/v2/pkg/cmdutil"
++14		"github.com/cli/cli/v2/pkg/iostreams"
++15		"github.com/cli/cli/v2/pkg/surveyext"
++```
++
++```go
++38	type Prompt interface {
++39		Input(prompt string, defaultValue string) (string, error)
++40		Select(prompt string, defaultValue string, options []string) (int, error)
++41		MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
++42		Confirm(prompt string, defaultValue bool) (bool, error)
++43		MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++44		MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
++45	}
++```
++
++**Fix**: Remove the unused interface method and then remove the unused `internal/prompter` import.
++
++## Finding F4 — Accepted claim C3 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
++**What**: C3 says to collapse the duplicated suggested actor node shapes into one local node type and one connection type. The current code still declares three structurally identical anonymous node shapes:
++
++```go
++708		type responseData struct {
++714			Node struct {
++715				Issue struct {
++716					SuggestedActors struct {
++717						Nodes []struct {
++718						    TypeName string `graphql:"__typename"`
++719							User struct {
++720								ID       string
++721								Login    string
++722								Name     string
++723							} `graphql:"... on User"`
++724							Bot struct {
++725								ID       string
++726								Login    string
++727							} `graphql:"... on Bot"`
++728						}
++```
++
++```go
++731				PullRequest struct {
++732					SuggestedActors struct {
++733						Nodes []struct {
++734						    TypeName string `graphql:"__typename"`
++735							User struct {
++736								ID       string
++737								Login    string
++738								Name     string							
++739							} `graphql:"... on User"`
++740							Bot struct {
++741								ID       string
++742								Login    string
++743							} `graphql:"... on Bot"`
++744						}
++```
++
++```go
++764		var nodes []struct {
++765			TypeName string `graphql:"__typename"`
++766			User struct {
++767				ID       string
++768				Login    string
++769				Name     string
++770			} `graphql:"... on User"`
++771			Bot struct {
++772				ID       string
++773				Login    string
++774			} `graphql:"... on Bot"`
++775		}
++```
++
++**Fix**: Introduce a shared local `suggestedActorNode` type and shared connection type inside `SuggestedAssignableActors`, then use those for both GraphQL fragments and the local `nodes` variable.
++
++## Finding F5 — Accepted claims C4 and C5 were not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go:399
++**What**: C4 says to centralize label fallback in a local `labelFor` helper, and C5 says to factor repeated successful search-result state assignment. The current code still repeats label fallback blocks and still assigns `searchResultKeys`, `searchResultLabels`, `moreResults`, and `optionKeyLabels` in both search paths:
++
++```go
++399			for _, k := range selectedOptions {
++400				l := optionKeyLabels[k]
++401	
++402				if l == "" {
++403					l = k
++404				}
++405	
++406				optionKeys = append(optionKeys, k)
++407				optionLabels = append(optionLabels, l)
++```
++
++```go
++417				l := optionKeyLabels[k]
++418				if l == "" {
++419					l = k
++420				}
++421				optionKeys = append(optionKeys, k)
++422				optionLabels = append(optionLabels, l)
++```
++
++```go
++487				searchResult := searchFunc(query)
++488				if searchResult.Err != nil {
++489					return nil, searchResult.Err
++490				}
++491				searchResultKeys = searchResult.Keys
++492				searchResultLabels = searchResult.Labels
++493				moreResults = searchResult.MoreResults
++494	
++495				for i, k := range searchResultKeys {
++496					optionKeyLabels[k] = searchResultLabels[i]
++497				}
++```
++
++**Fix**: Add the local `labelFor` helper and a small helper that applies successful `MultiSelectSearchResult` state, then use them in all repeated paths.
++
++## Finding F6 — Accepted claim C6 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go:342
++**What**: C6 says to return the anonymous closure directly. The current code still assigns it to `searchFunc` and returns the variable:
++
++```go
++341	func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
++342		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++343			actors, err := api.SuggestedAssignableActors(
++```
++
++```go
++383		}
++384		return searchFunc
++385	}
++```
++
++**Fix**: Return the closure directly from `assigneeSearchFunc`.
++
++## Finding F7 — Accepted claim C7 was not applied
++**Severity**: warning
++**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go:161
++**What**: C7 says to return the two static `MultiSelectSearchResult` values directly. The current preview fixture still uses temporary result slices and `moreResults` variables:
++
++```go
++160		searchFunc := func(input string) prompter.MultiSelectSearchResult {
++161			var searchResultKeys []string
++162			var searchResultLabels []string
++163	
++164			if input == "" {
++165				moreResults := 2 // Indicate that there are more results available
++166				searchResultKeys = []string{"initial-result-1", "initial-result-2"}
++167				searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
++168				return prompter.MultiSelectSearchResult{
++169					Keys:        searchResultKeys,
++170					Labels:      searchResultLabels,
++171					MoreResults: moreResults,
++```
++
++```go
++178			moreResults := 0
++179			searchResultKeys = []string{"search-result-1", "search-result-2"}
++180			searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
++181			return prompter.MultiSelectSearchResult{
++182				Keys:        searchResultKeys,
++183				Labels:      searchResultLabels,
++184				MoreResults: moreResults,
++185				Err:         nil,
++```
++
++**Fix**: Return the two `prompter.MultiSelectSearchResult` literals directly in the blank-input and non-blank-input branches.
+
+tokens used
+47,695
+Wrote the review findings to [/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-12526/gates/hunt-code-round-1.md).
+
+Results:
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: FAIL, exit code 1
+
+Primary blocker is the registered test command failure. I also recorded warnings for accepted claims C1-C7 that remain unapplied, each with exact current-source line evidence as requested. No source files were edited.

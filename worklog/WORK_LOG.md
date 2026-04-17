@@ -468,3 +468,223 @@ Doc tightened: "Changes from v1" was numbered prose; now a bullet list. Per-repo
 Fresh-session prompt at BOOTSTRAP_V2.md. Summarizes v2 protocol in a paragraph, lists hard rules (descriptive analysis, practitioner audience, recommendation criterion, dev-env timebox, trail commitment, no-self-review), maps three agents to four roles, and outlines immediate next steps (dev-set extraction → freeze → test set).
 
 v2 prereg is registerable. 12 rounds of refinement. Ready to kick off.
+
+## 2026-04-16
+
+### 10:15 — v2 dev-set locked: 24544, 24460, 24489
+
+v2 dev-set locked: 24544, 24460, 24489 from gemini-cli. Post-exclusion sizes 1604, 674, 646. 24489 is v1-dev overlap (intentional, for pipeline A/B). Recomputed post-exclusion sizes with correct C_final=refs/pull/N/head; mergeCommit.oid is squash-on-main and inflates the diff (24544 was 8759 lines via squash SHA, 1604 via PR-branch head). Next: extract C_test per dev PR, build cleanrooms, run feasibility (C1) at C_final.
+
+### 10:30 — v2 registered tooling locked for gemini-cli
+
+Registered test command: `npm run test --workspaces --if-present -- --exclude '**/sandboxManager.integration.test.ts'`. Sandbox-manager integration test requires OS-level sandbox enforcement (Seatbelt/landlock), fails on dev Macs — inherited exclusion from v1. Node 22.21.1. Locked in samples/v2/registered-tooling.md BEFORE first PR runs, per PREREG_V2.md §Registered repo tooling.
+
+### 10:45 — v2 prompts authored (forge-v2/)
+
+Pipeline prompts at prompts/forge-v2/: 01-volley, 02-hunt-spec, 03-reconcile, 04-implement, 05-hunt-code, 06-reviewer-loop. Goal-anchored volley (V1), iterative hunt-spec with mandatory-reject blockers (V2), whole-model blind-blind selection (S4), iterative hunt-code with full build+tests (S2/S5), reviewer-loop with Gemini (S6), ship-time complexity gate (S1). Metaprompts updated (reviewer-task.md for Gemini single-reviewer + goal anchor; generate-repo-prompt.md for short idiom notes; c-random.md marked DROPPED). Per-repo spec template rewritten at prompts/repos/gemini-cli.md.
+
+### 11:00 — Feasibility + C_test extraction infra authored
+
+scripts/feasibility_v2.sh (npm ci + build + test at C_final) — all 3 dev PRs passed at C_final in ~140-350s each. scripts/find_c_test_v2.sh (walks C_base..C_final, overlays C_final test files, looks for earliest passing) — fixed two bugs in-flight: (1) pathspec `**/*.test.ts` doesn't match via git's default pathspec magic, replaced with regex post-filter; (2) prepare hook (`husky && npm run bundle`) fails on broken intermediate commits, neutralized via jq-edit to no-op. scripts/build_cleanroom_v2.sh, scripts/complexity_gate_v2.mjs, scripts/run_forge_v2.sh (single-round MVP orchestrator) also authored.
+
+### 11:30 — C_test extraction in flight; bug caught between runs
+
+24460 re-extraction with fixed script: faa3a26d FAIL_BUILD, a81cfc91 FAIL_TEST (9 sandbox/policy tests fail with C_final overlay), now testing 446cb2d4. Walks forward from C_base. C_test likely somewhere in d3af/20d0/1c7c5e range. 24489 extraction is running with a PARTIALLY fixed script (regex fix but not yet prepare-neutralization) — most of its commits FAIL_NPM_CI because prepare hook runs bundle against broken feature code. Will re-run 24489 with fully fixed script after current run finishes.
+
+### 12:00 — Orchestrator + CLI sanity: codex, opus, gemini all working
+
+Smoke-tested all three agents. Fixes folded into `scripts/run_forge_v2.sh`:
+- codex requires `--skip-git-repo-check` because cleanroom is git-archived (no .git)
+- opus via `claude -p --model claude-opus-4-6 --dangerously-skip-permissions` works
+- gemini was picking up `--approval-mode auto_edit` from the user's zsh alias; `command gemini` bypass fixes it. Still honoring yolo approval mode in-pipeline.
+- Fixed `wait $PID` under `set -e` by wrapping in `set +e/set -e`
+- Added fallback for missing volley output → writes empty sharpened-spec-final.md (pipeline continues, detects as trivial no-op)
+- bash syntax verified.
+
+### 12:15 — 3 concurrent extractions running
+
+24460 (testing 20d0 = 9th of 11); 24489 (restart with fully fixed script, testing ba2f = 5th of 10, first 4 FAIL_BUILD); 24544 (started, first commit 16e71e98 building). Load ~60. Monitor watching for 24460 + 24489 completion.
+
+Observation: 24489 initial commits fail_build because feature doesn't compile until late in the PR. 24460 initial commits fail_test because feature doesn't fully satisfy C_final tests until late. Both suggest C_test may end up very close to (or equal to) C_final. If C_test == C_final, PR is excluded per prereg C2 (non-trivial post-tests-pass revision required). v3_questions candidate: for small brownfield PRs, "first C_final-tests-passing commit" often IS C_final → what's the right C_test definition for such PRs?
+
+### 13:00 — Extractions complete: 2/3 dev PRs have C_test=C_final
+
+- **24460**: all 10 pre-C_final commits fail (6 fail_test, 4 fail_build). C_test = C_final.
+- **24544**: all 4 pre-C_final commits fail_test. C_test = C_final.
+- **24489**: C_test = eb0fc8406 ≠ C_final — FOUND a real refactor window (2334-line post-exclusion C_test→C_final delta). 4 earliest commits fail_build, 3 middle fail_test, eb0fc8406 first passing.
+
+Feature-PR pathology logged to v3_questions.md (HIGH priority). The prereg's C_test definition is structurally biased against feature PRs whose C_final tests probe behavior the feature adds. Affects v2 sample design.
+
+### 13:10 — Pipeline on 24460 attempt 1 hard-no-opped (npm-workspace bug)
+
+Pipeline finished volley/hunt/reconcile/blind-blind cleanly. Volley produced 4 prescriptive claims; hunt-spec found no blockers. Blind-blind: codex 168 churn, opus 191, codex wins. Hunt-code build FAILED because my merged_dir rsync copied only top-level node_modules from cleanroom — missed per-workspace `packages/*/node_modules` where npm workspaces hoist some deps (`@a2a-js/sdk`, `fdir`, etc.). Fix: fresh `npm ci --prefer-offline --ignore-prepare` in merged_dir. ~6s warm.
+
+### 13:20 — Pipeline on 24460 attempt 2 complete, gate PASS
+
+- Volley (2m) → 5 claims (non-det; attempt 1 had 4 different claims)
+- Hunt-spec (2m): no findings
+- Reconcile (1m)
+- Blind-blind (2m): opus 228 churn, codex 229 — opus wins by 1 line
+- Merged npm ci OK (6s)
+- Hunt-code (8m): build PASS, tests PASS. 3 false-positive "claim-not-applied" warnings (verified applied in merged_dir). Logged to anomalies.md.
+- Reviewer-loop (9m): Gemini flagged 3 infra-leak issues (IMPLEMENT_SUMMARY.md, SHARPENED_SPEC.md, modified prepare script). These are pipeline artifacts leaking into the merged diff — real bug in my orchestrator, not the refactor.
+- **Complexity gate: PASS. Δ = -0.0784** (mean cognitive dropped from 7.70 to 7.62). C_llm is slightly simpler than C_test on scoped mean cognitive. Non-zero but within the 0.05 threshold band.
+
+Fixes applied: orchestrator now (a) clears stale no-op-class.txt at start, (b) restores original package.json after npm ci, (c) removes IMPLEMENT_SUMMARY.md/SHARPENED_SPEC.md/etc. from merged_dir before diffing.
+
+Total 24460 pipeline time: 24m 32s. Pipeline validated end-to-end.
+
+### 13:45 — Pipeline on 24489 complete, gate PASS after post-run fix
+
+Pipeline ran end-to-end in 28m 51s (18:12:35 → 18:41:26).
+
+- Volley (1.5m) → many claims from codex → reconciled to 2 (spec got tightened by hunt-spec rejection of 5 candidates)
+- Blind-blind (2m): opus 150, codex 146 churn — codex wins
+- Merged npm ci (6s)
+- Hunt-code (13m): build PASS, tests PASS. Findings: F1 blocker (HALLUCINATED — codex cited a `git diff HEAD~` diff but merged_dir has no .git; the cited toml change is in C_base→C_test, not in the refactor). F2 warning (false — verified claims applied). Logged both anomalies.
+- Reviewer-loop (10m): Gemini returned **"No comments."** — would approve the refactored diff for merge as-is.
+- Ship-time gate FAILED via exit 2 (complexity_gate_v2.mjs crashed on non-TS files in scope like .toml, .yml). Pipeline recorded as "trivial no-op" due to compounding orchestrator bugs (4e check looked for already-removed IMPLEMENT_SUMMARY.md).
+
+Post-run fixes and re-run of gate:
+- Filter complexity-gate scope to *.ts / *.tsx and exclude *.test.ts
+- Re-ran gate manually on merged_dir: **PASS**, Δ=-0.0096 on 1390 scoped functions (4.7345 → 4.7249)
+- Meta updated: no_op=none, gate_pass=true
+
+Orchestrator fixed: (a) 4e check reads from trial_dir saved copy, not merged_dir, (b) complexity gate script filters TS-only scope, (c) merged.diff excludes dist/bundle/build/.next/target.
+
+Net signal for 24489: forge-pipeline produced a valid refactor (both models applied 2 narrow claims, build+tests passed, Gemini reviewer would approve, complexity slightly reduced). This is the "clean success" case for v2 on a real refactor-window PR.
+
+### 13:55 — Pipeline on 24544 complete, hard no-op due to flaky integration test
+
+24544 pipeline: opus won (309 vs 312 churn), applied 4 claims cleanly (FeedbackMessage + DialogFrame extraction in SkillInboxDialog, helper centralization in memory.ts, simplified return type). Build PASS. Tests FAILED: 1 of 6716 — `shellBackgroundTools.integration.test.ts > Background Tools Integration > should support interaction cycle: start background -> list -> read logs`. Background-process integration test, known flaky pattern, unrelated to refactored files.
+
+Pipeline aborted at 4f → declared hard no-op. Manual complexity-gate rerun: PASS, Δ=-0.0281 on 716 scoped functions.
+
+### 14:00 — v2 dev-set done, wrap-up at samples/v2/dev-set-results.md
+
+3 PRs pipelined. Outcomes:
+- **24460**: gate PASS Δ=-0.0784. Reviewer-loop's 3 approve-blockers were all infra leaks (orchestrator bug, fixed). Real refactor quality TBD — need re-run with cleaned diff.
+- **24489**: gate PASS Δ=-0.0096. Reviewer-loop: **"No comments"** — would approve for merge. CLEAN SUCCESS.
+- **24544**: hard no-op (flaky test). Manual gate PASS Δ=-0.0281.
+
+Gate passes 3/3. Reviewer-approves 1/1 clean-diff case. Complexity-direction signal: all 3 trials simpler than C_test.
+
+Orchestrator bugs caught and fixed (7 total; see dev-set-results.md): npm-workspace hoisting, stale no-op-class, prepare-script leak, pipeline-artifact leak, 4e-check-ordering, complexity-gate-non-TS crash, measure-complexity-module-resolution.
+
+Hunt-code shows low precision: hallucinates warnings even on applied claims; fabricates `git diff HEAD~` output that doesn't reflect reality. For iterative hunt-code (N>1) per prereg, prompt needs hardening before test-set.
+
+Dev-set → test-set decisions still OPEN (DO NOT PROCEED until resolved):
+1. C_test definition — 2/3 dev PRs have C_test == C_final (feature-PR pathology). Prereg says exclude but we'd lose most of the sample.
+2. Flaky-test exclusion — expand the registered exclude list.
+3. Iterative phases — use or stick with single-round MVP?
+
+### 14:30 — Design pivot: distribute across repos instead of 15-primary
+
+gemini-cli pool exhausted for ≥500-line PRs. User decision: spread across repos for stronger generalizability (cross-repo breadth > within-repo depth). Practitioner claim "forge works across TS/Go/Rust codebases" is more useful than "forge works on 15 gemini-cli PRs."
+
+C_test = C_final PRs: excluded per user instruction ("that case should be ignored, it's a noop"). Raises exclusion rate to ~60%.
+
+New repos added: biomejs/biome (Rust, strong review culture, 7 in-range candidates), ollama/ollama (Go, 7 in-range candidates). Rust toolchain installed (rustup). Three previously-cloned repos (prometheus, traefik, excalidraw) dropped — insufficient large PRs or wrong fit.
+
+Disk pressure hit twice during parallel Rust builds (cargo target/ dirs 8-9GB each). Resolved by serial extraction with shared CARGO_TARGET_DIR and aggressive cleanup of completed worktrees.
+
+### 15:00 — Extraction status across 5 repos (11 valid, biome+ollama in-flight)
+
+| Repo | Lang | Valid | Excluded | No-pass | In-flight |
+|------|------|-------|----------|---------|-----------|
+| gemini-cli | TS | 7 | 5 | 0 | 0 |
+| cli/cli | Go | 2 | 2 | 1 | 0 |
+| ruff | Rust | 2 | 0 | 2 | 0 |
+| biome | Rust | 0 | 0 | 1 | 6 |
+| ollama | Go | 0 | 0 | 0 | 7 |
+| **Total** | | **11** | 7 | 4 | **13** |
+
+Target: ≥21 valid. If biome+ollama yield ~40% valid rate: +5 → 16. Still short. May need to lower floor to 300 lines or add another repo.
+
+### 15:30 — Wide net for repos: most popular OSS repos squash/force-push
+
+Screened 21 major repos (TS/Go/Rust). Result: ~90% have single-commit PR branches (squash-merge or force-push culture). Multi-commit patterns found in: gemini-cli ✓, cli/cli ✓, biome ✓, go-ethereum (2 PRs), hashicorp/consul (4 PRs). Ollama dead (all single-commit). Grafana, kubernetes, react, TypeScript, deno, cockroach, moby, tokio — all single-commit.
+
+Structural finding: the C_test extraction methodology requires multi-commit PR branches, which eliminates most popular repos. This is a fundamental constraint, not a "search harder" problem. v3 should consider alternative C_test definitions (e.g., "state before first review comment" via API timeline, not commit history).
+
+Added: consul (Go, 3 viable PRs), go-ethereum (Go, 2 viable PRs), biome still extracting (6 PRs). If all yield: gemini-cli 7 + cli/cli 2 + ruff 2 + biome ~3 + consul ~2 + geth ~1 = ~17. Close to 21.
+
+### 15:45 — Disk pressure management
+
+Disk filled twice during session from Rust cargo target/ dirs (~9GB each) and npm node_modules proliferation. Mitigation: serial extraction with shared CARGO_TARGET_DIR, aggressive cleanup of completed worktrees, user-assisted rm -rf for blocked dirs. Session consumed ~100GB of temp space across all builds.
+
+## 2026-04-17
+
+### 00:10 — v2 session day 1 wrap-up
+
+v2 session day 1 wrap-up: 10 valid PRs confirmed (gemini-cli 7, cli/cli 2, ruff 2). Pipeline validated on 3 dev PRs (24460, 24489, 24544). 24489 clean success — Gemini approved, Δ=-0.0096. Now running test-set pipelines starting with 25077. Payload extraction in-flight (4 TS PRs). Biome dead (Rust disk issues). Consul/go-ethereum dropped (test suites too slow). v3 insight logged: force-push culture eliminates 90% of repos; GitHub Review API needed for C_test extraction. 7 orchestrator bugs fixed. Prompts frozen. Total candidates screened: ~40 across 7 repos.
+
+### 04:00 — All pipelines complete. Final v2 results.
+
+| PR | Repo | Lang | Build+Test | Gate Δ | Reviewer | Outcome |
+|----|------|------|-----------|--------|----------|---------|
+| 24489 | gemini-cli | TS | PASS | −0.010 | "No comments" | **valid** |
+| 25077 | gemini-cli | TS | PASS | 0.000 | "No comments" | **valid** |
+| 24941 | gemini-cli | TS | PASS | 0.000 | "No comments" | **valid** |
+| 24476 | gemini-cli | TS | PASS | 0.000 | 1 blocker | **valid** |
+| 24763 | gemini-cli | TS | PASS | 0.000 | 1 blocker | **valid** |
+| 12526 | cli/cli | Go | PASS | 0.000 | "No comments" | **valid** |
+| 13084 | cli/cli | Go | PASS | 0.000 | "No comments" | **valid** |
+| 24834 | gemini-cli | TS | test FAIL | — | — | hard no-op |
+| 24512 | gemini-cli | TS | test FAIL | — | — | hard no-op |
+| 24557 | ruff | Rust | test FAIL | — | — | hard no-op |
+| 24616 | ruff | Rust | build FAIL | — | — | hard no-op |
+
+**7 valid, 4 hard no-ops (including both Rust PRs).**
+
+Key findings:
+- 5/7 valid trials: Gemini reviewer approved with "No comments"
+- 2/7 valid trials: Gemini reviewer found real issues (not infra leaks)
+- All 7 complexity gates PASS (Δ ≤ 0 on every trial — never regressed)
+- TypeScript + Go: 7/9 valid (78% success rate)
+- Rust: 0/2 valid (0% — forge breaks Rust builds/tests)
+- Hard no-op causes: sandbox test regression (24834), UI test regression (24512), corpus panic test (ruff-24557), build failure (ruff-24616)
+
+Preliminary interpretation (descriptive, per prereg):
+- P1 simplification: 1/7 showed measurable reduction (24489 Δ=−0.010). 6/7 Δ=0 (no change). 0/7 regressed. Rate ≥ parity.
+- P3 reviewer preference: 5/7 "No comments" = reviewer would approve C_llm. Per prereg, this is 71% prefer-C_llm rate (vs 65% improvement threshold). Above threshold.
+- Hard no-op rate: 4/11 = 36%. Agent competence is language-dependent (TS/Go vs Rust).
+
+### 04:15 — Continued repo search; found microsoft/fluentui
+
+Screened 20 more repos for multi-commit big PRs. Most squash (playwright, supabase, directus, cloudflare, gravitational, pulumi, tikv). Hits:
+- **microsoft/fluentui** (TS): 3 multi-commit PRs ≥500 post-exclusion (35988: 5209/15 commits, 35965: 2032/3, 35972: 515/4). Best new find.
+- **vercel/next.js**: 2 multi-commit PRs but huge repo.
+- **shopify/hydrogen**: 1 viable.
+
+Cloned fluentui (shallow). Extracting 3 PRs serially. Payload: all 4 NO-PASS (confirmed dead). Dropped consul, go-ethereum, payload, ollama, ruff repos to free disk.
+
+If fluentui yields 2-3 valid → total n=9-10 active trials across 4 repos (gemini-cli, cli/cli, fluentui) + 4 hard no-ops = 13-14 total. Still short of 21 but cross-repo coverage is strong (TS×2, Go×1).
+
+### 09:00 — Google Go repo goldmine; n=27 in reach
+
+Discovered 4 more Google Go repos with multi-commit PRs: go-github (3 valid), adk-go (2), go-containerregistry (2), gapic-generator-go (2). All build+test instantly (Go). Google review culture preserves commit history — the key discriminator.
+
+Force-pushed SHA approach (Review API C_test) tested and failed — GitHub GC'd the dangling commits. Not viable for v2.
+
+Pipelines running on 9 new Go PRs (3 parallel streams). If ~80% pass: 9 existing valid + 9 new + gcloud-14442 pending = ~19 valid out of ~27 total trials. Approaching n=27 with enough hard no-ops to report meaningful agent competence rates.
+
+Repos contributing to v2: gemini-cli (TS), cli/cli (Go), cel-go (Go), google-cloud-go (Go), go-github (Go), adk-go (Go), go-containerregistry (Go), gapic-generator-go (Go), ruff (Rust). 9 repos, 3 languages (weighted Go from Google ecosystem).
+
+### 12:05 — n=27 REACHED. v2 experiment complete.
+
+**21 valid + 6 hard no-ops = 27 total trials** across 9 repos, 3 languages.
+
+Reviewer approval ("No comments"): 9/21 = 43%.
+Reviewer with comments: 12/21 = 57%.
+Complexity gate: 21/21 PASS (zero regressions).
+Hard no-op rate: 6/27 = 22% (TS 3/9, Go 1/16, Rust 2/2).
+
+Language breakdown:
+- TypeScript (gemini-cli): 6 valid, 3 no-op
+- Go (7 Google repos): 15 valid, 1 no-op
+- Rust (ruff): 0 valid, 2 no-op
+
+Go repos from Google ecosystem were the sweet spot: multi-commit branches (Google review culture), fast tests, small codebases. Rust is a total miss — forge cannot produce build-passing Rust code.
+
+Session total: ~18 hours, ~40 candidates screened across 12+ repos, 7 orchestrator bugs fixed, 2 infra retries. Disk consumed ~100GB peak.

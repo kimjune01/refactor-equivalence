@@ -1,0 +1,1008 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-24834
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a84-e4b6-7883-b233-9972f438565d
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and patch artifact first, then apply only the accepted claims in order within the allowed files.
+exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24834exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name the path-resolution helpers by boundary role
+**File**: packages/core/src/services/sandboxManager.ts:364
+**Change**: In `resolveSandboxPaths`, rename the local `expand` helper to `expandSandboxPathSet` and the local `filter` helper to `filterOutWorkspaceAndForbidden`, then update only their in-function call sites with no logic changes.
+**Goal link**: This clarifies the centralized path resolution architecture by making the two local operations express symlink expansion and boundary filtering directly.
+**Justification**: Replacing generic helper names with goal-specific names removes reader-dependent interpretation while preserving the exact resolved path sets returned today.
+
+### C2 — Remove stale step numbering from Windows sandbox preparation comments
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283
+**Change**: In `prepareCommand`, remove the numeric prefixes from the phase comments around workspace access, global includes, policy allowed paths, additional write paths, secret scanning, governance files, manifest creation, and helper command construction.
+**Goal link**: This keeps the Windows manager focused on consuming the pre-resolved path struct rather than implying an outdated ordered algorithm.
+**Justification**: The current comments repeat and skip numbers after the refactor, so removing the numbering reduces accidental structure without changing any code path.
+
+### C3 — Return the sanitized Windows environment directly
+**File**: packages/core/src/sandbox/windows/WindowsSandboxManager.ts:419
+**Change**: Delete the `const finalEnv = { ...sanitizedEnv };` temporary in `prepareCommand` and set the returned `env` field to `sanitizedEnv` directly.
+**Goal link**: This streamlines the Windows sandbox manager around the actual sandbox preparation work after path resolution.
+**Justification**: `finalEnv` is a one-use shallow copy of a local object, so removing it eliminates unnecessary state without changing the environment values returned to callers.
+
+ succeeded in 0ms:
+# PR #24834 — fix(core): resolve windows symlink bypass and stabilize sandbox integration tests
+
+## PR body
+
+## Summary
+
+This PR resolves persistent flakiness and 60-second timeouts in the `sandboxManager.integration.test.ts` suite on Windows CI runners, and fixes a critical vulnerability where Windows sandboxed processes could bypass `forbiddenPaths` restrictions by accessing files via symlinks.
+
+To achieve this, we optimized the test workspace isolation strategy and fundamentally refactored how the sandbox manages path resolution across all operating systems to ensure symlink targets are explicitly evaluated and secured.
+
+## Details
+
+**1. Centralized Path Resolution Architecture:**
+- Introduced `ResolvedSandboxPaths`, a structured interface that acts as the "Source of Truth" for all sandbox boundaries (workspace, global includes, policy-allowed paths, and dynamic read/write permissions).
+- Refactored `resolveSandboxPaths` to centralize all symlink expansion, absolute path enforcement, and deduplication logic. Every path category now automatically yields both the symlink and its real target, preventing bypasses across all OS sandbox engines.
+- Streamlined `WindowsSandboxManager` to fully consume the pre-resolved struct, eliminating redundant local loops and improving the robustness of ACL applications (e.g., distinguishing between files and directories for inheritance flags).
+- *Note:* macOS and Linux managers have been minimally updated to consume the new interface fields. A follow-up PR will fully refactor their internal profile builders to remove remaining redundant path logic.
+
+**2. Stabilized Sandbox Integration Tests:**
+- **Isolated Workspaces:** Replaced `process.cwd()` with isolated temporary directories. This prevents false positives and massively speeds up `icacls` execution on Windows runners by using `os.tmpdir()`.
+exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+.gemini/settings.json
+.github/workflows/memory-nightly.yml
+GEMINI.md
+integration-tests/browser-agent.concurrent.responses
+memory-tests/baselines.json
+memory-tests/globalSetup.ts
+memory-tests/memory.idle-startup.responses
+memory-tests/memory.multi-function-call.responses
+memory-tests/memory.multi-turn.responses
+memory-tests/memory.simple-prompt.responses
+memory-tests/tsconfig.json
+memory-tests/vitest.config.ts
+package-lock.json
+package.json
+packages/a2a-server/package.json
+packages/cli/package.json
+packages/cli/src/acp/commandHandler.ts
+packages/cli/src/acp/commands/help.ts
+packages/cli/src/acp/commands/memory.ts
+packages/cli/src/config/settingsSchema.ts
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+diff --git a/.gemini/settings.json b/.gemini/settings.json
+index 6a0121df17..eb7741997b 100644
+--- a/.gemini/settings.json
++++ b/.gemini/settings.json
+@@ -2,6 +2,7 @@
+   "experimental": {
+     "extensionReloading": true,
+     "modelSteering": true,
++    "memoryManager": false,
+     "topicUpdateNarration": true
+   },
+   "general": {
+diff --git a/.github/workflows/memory-nightly.yml b/.github/workflows/memory-nightly.yml
+deleted file mode 100644
+index ee4e5e589c..0000000000
+--- a/.github/workflows/memory-nightly.yml
++++ /dev/null
+@@ -1,33 +0,0 @@
+-name: 'Memory Tests: Nightly'
+-
+codex
+The accepted scope is narrow: two source files plus the required implementation summary. I’m ignoring the unrelated artifact hunks because the sharpened spec explicitly rejected those areas.
+exec
+/bin/zsh -lc "nl -ba packages/core/src/services/sandboxManager.ts | sed -n '330,430p'" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+   330	    return false;
+   331	  }
+   332	
+   333	  isDangerousCommand(_args: string[]): boolean {
+   334	    return false;
+   335	  }
+   336	
+   337	  parseDenials(): undefined {
+   338	    return undefined;
+   339	  }
+   340	
+   341	  getWorkspace(): string {
+   342	    return this.options?.workspace ?? process.cwd();
+   343	  }
+   344	
+   345	  getOptions(): GlobalSandboxOptions | undefined {
+   346	    return this.options;
+   347	  }
+   348	}
+   349	
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24834 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+exec
+/bin/zsh -lc "nl -ba packages/core/src/sandbox/windows/WindowsSandboxManager.ts | sed -n '250,460p'" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+   250	        ],
+   251	        write: [
+   252	          ...(persistentPermissions?.fileSystem?.write ?? []),
+   253	          ...(req.policy?.additionalPermissions?.fileSystem?.write ?? []),
+   254	        ],
+   255	      },
+   256	      network:
+   257	        isYolo ||
+   258	        persistentPermissions?.network ||
+   259	        req.policy?.additionalPermissions?.network ||
+   260	        false,
+   261	    };
+   262	
+   263	    if (req.command === '__read' && req.args[0]) {
+   264	      mergedAdditional.fileSystem!.read!.push(req.args[0]);
+   265	    } else if (req.command === '__write' && req.args[0]) {
+   266	      mergedAdditional.fileSystem!.write!.push(req.args[0]);
+   267	    }
+   268	
+   269	    const defaultNetwork =
+codex
+I found the exact helper names and stale comments. I’m making only identifier/comment cleanup plus the one-use environment temporary removal, with no logic or API changes.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -282,3 +282,3 @@
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+@@ -296,3 +296,3 @@
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+@@ -302,3 +302,3 @@
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+@@ -316,3 +316,3 @@
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+@@ -337,3 +337,3 @@
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+@@ -385,3 +385,3 @@
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+@@ -394,3 +394,3 @@
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+@@ -405,3 +405,3 @@
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+@@ -417,4 +417,2 @@
+     ];
+-
+-    const finalEnv = { ...sanitizedEnv };
+ 
+@@ -423,3 +421,3 @@
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+A /tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+Applied claims:
+- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
+- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
+- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
+
+Modified files:
+- packages/core/src/services/sandboxManager.ts
+- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+M /tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+@@ -363,3 +363,3 @@
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+@@ -376,8 +376,8 @@
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+@@ -385,3 +385,3 @@
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+@@ -396,3 +396,3 @@
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+@@ -407,6 +407,6 @@
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+apply_patch(auto_approved=true) exited 0 in 20ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+M /tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+M /tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f8f9e6be12096ef30d14ad0ce721d1f2ce430c3
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,8 @@
++Applied claims:
++- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
++- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++
++Modified files:
++- packages/core/src/services/sandboxManager.ts
++- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+index b01daaa09198713695df295588839a94177e2692..5a23a36551dd02445da9a2d04f943136aaf5f62e
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -280,7 +280,7 @@
+     // New files created within these roots will inherit the Low label.
+     const writableRoots: string[] = [];
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+       ? await isStrictlyApproved(
+           command,
+@@ -294,13 +294,13 @@
+       writableRoots.push(resolvedPaths.workspace);
+     }
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+       await this.grantLowIntegrityAccess(includeDir);
+       writableRoots.push(includeDir);
+     }
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+       try {
+         await fs.promises.access(allowedPath, fs.constants.F_OK);
+@@ -314,7 +314,7 @@
+       writableRoots.push(allowedPath);
+     }
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+       try {
+         await fs.promises.access(writePath, fs.constants.F_OK);
+@@ -335,7 +335,7 @@
+       }
+     }
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+     // processes to ensure they cannot be read or written.
+     const secretsToBlock: string[] = [];
+@@ -383,7 +383,7 @@
+       }
+     }
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+     // the sandboxed process from creating them with Low integrity.
+     // By being created as Medium integrity, they are write-protected from Low processes.
+@@ -392,7 +392,7 @@
+       this.touch(filePath, file.isDirectory);
+     }
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+     const allForbidden = Array.from(
+       new Set([...secretsToBlock, ...resolvedPaths.forbidden]),
+@@ -403,7 +403,7 @@
+     const manifestPath = path.join(tempDir, 'manifest.txt');
+     fs.writeFileSync(manifestPath, allForbidden.join('\n'));
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+     const program = this.helperPath;
+ 
+@@ -415,13 +415,11 @@
+       command,
+       ...args,
+     ];
+-
+-    const finalEnv = { ...sanitizedEnv };
+ 
+     return {
+       program,
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+       cleanup: () => {
+         try {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+index b4b8e974511762121f5e54000741a529aa5f290f..9c04ada826f4b99d669665f4010c13bc4b474893
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+@@ -361,7 +361,7 @@
+    * Helper that expands each path to include its realpath (if it's a symlink)
+    * and pipes the result through sanitizePaths for deduplication and absolute path enforcement.
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+     const expanded = paths.flatMap((p) => {
+       try {
+@@ -374,16 +374,16 @@
+     return sanitizePaths(expanded);
+   };
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+       req.policy?.additionalPermissions?.fileSystem?.read,
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+       req.policy?.additionalPermissions?.fileSystem?.write,
+   );
+@@ -394,7 +394,7 @@
+   /**
+    * Filters out any paths that are explicitly forbidden or match the workspace root.
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+       const identity = getPathIdentity(p);
+       return (
+@@ -405,10 +405,10 @@
+   return {
+     workspace,
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+ }
+ /**
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f8f9e6be12096ef30d14ad0ce721d1f2ce430c3
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,8 @@
++Applied claims:
++- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
++- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++
++Modified files:
++- packages/core/src/services/sandboxManager.ts
++- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+index b01daaa09198713695df295588839a94177e2692..5a23a36551dd02445da9a2d04f943136aaf5f62e
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -280,7 +280,7 @@
+     // New files created within these roots will inherit the Low label.
+     const writableRoots: string[] = [];
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+       ? await isStrictlyApproved(
+           command,
+@@ -294,13 +294,13 @@
+       writableRoots.push(resolvedPaths.workspace);
+     }
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+       await this.grantLowIntegrityAccess(includeDir);
+       writableRoots.push(includeDir);
+     }
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+       try {
+         await fs.promises.access(allowedPath, fs.constants.F_OK);
+@@ -314,7 +314,7 @@
+       writableRoots.push(allowedPath);
+     }
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+       try {
+         await fs.promises.access(writePath, fs.constants.F_OK);
+@@ -335,7 +335,7 @@
+       }
+     }
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+     // processes to ensure they cannot be read or written.
+     const secretsToBlock: string[] = [];
+@@ -383,7 +383,7 @@
+       }
+     }
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+     // the sandboxed process from creating them with Low integrity.
+     // By being created as Medium integrity, they are write-protected from Low processes.
+@@ -392,7 +392,7 @@
+       this.touch(filePath, file.isDirectory);
+     }
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+     const allForbidden = Array.from(
+       new Set([...secretsToBlock, ...resolvedPaths.forbidden]),
+@@ -403,7 +403,7 @@
+     const manifestPath = path.join(tempDir, 'manifest.txt');
+     fs.writeFileSync(manifestPath, allForbidden.join('\n'));
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+     const program = this.helperPath;
+ 
+@@ -415,13 +415,11 @@
+       command,
+       ...args,
+     ];
+-
+-    const finalEnv = { ...sanitizedEnv };
+ 
+     return {
+       program,
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+       cleanup: () => {
+         try {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+index b4b8e974511762121f5e54000741a529aa5f290f..9c04ada826f4b99d669665f4010c13bc4b474893
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+@@ -361,7 +361,7 @@
+    * Helper that expands each path to include its realpath (if it's a symlink)
+    * and pipes the result through sanitizePaths for deduplication and absolute path enforcement.
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+     const expanded = paths.flatMap((p) => {
+       try {
+@@ -374,16 +374,16 @@
+     return sanitizePaths(expanded);
+   };
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+       req.policy?.additionalPermissions?.fileSystem?.read,
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+       req.policy?.additionalPermissions?.fileSystem?.write,
+   );
+@@ -394,7 +394,7 @@
+   /**
+    * Filters out any paths that are explicitly forbidden or match the workspace root.
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+       const identity = getPathIdentity(p);
+       return (
+@@ -405,10 +405,10 @@
+   return {
+     workspace,
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+ }
+ /**
+
+codex
+The source edits and `IMPLEMENT_SUMMARY.md` are in place. I’m doing a quick textual verification now; per instruction, I’m not running tests.
+exec
+/bin/zsh -lc "rg -n \"const (expand|filter)\\b|finalEnv|// [0-9]+\\. (Workspace access|Globally included|Explicitly allowed|Additional write|Collect secret|Protected governance|Forbidden paths manifest|Construct the helper)\" packages/core/src/services/sandboxManager.ts packages/core/src/sandbox/windows/WindowsSandboxManager.ts" in /tmp/refactor-eq-workdir/bb-codex-24834 exited 1 in 0ms:
+
+exec
+/bin/zsh -lc "sed -n '1,120p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+Applied claims:
+- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
+- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
+- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
+
+Modified files:
+- packages/core/src/services/sandboxManager.ts
+- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+exec
+/bin/zsh -lc 'rg -n "expandSandboxPathSet|filterOutWorkspaceAndForbidden|env: sanitizedEnv|// Workspace access|// Globally included directories|// Explicitly allowed paths|// Additional write paths|// Collect secret files|// Protected governance files|// Forbidden paths manifest|// Construct the helper command" packages/core/src/services/sandboxManager.ts packages/core/src/sandbox/windows/WindowsSandboxManager.ts' in /tmp/refactor-eq-workdir/bb-codex-24834 succeeded in 0ms:
+packages/core/src/services/sandboxManager.ts:290:      env: sanitizedEnv,
+packages/core/src/services/sandboxManager.ts:364:  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+packages/core/src/services/sandboxManager.ts:377:  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+packages/core/src/services/sandboxManager.ts:379:  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
+packages/core/src/services/sandboxManager.ts:380:  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+packages/core/src/services/sandboxManager.ts:382:  const policyRead = expandSandboxPathSet(
+packages/core/src/services/sandboxManager.ts:386:  const policyWrite = expandSandboxPathSet(
+packages/core/src/services/sandboxManager.ts:397:  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+packages/core/src/services/sandboxManager.ts:408:    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
+packages/core/src/services/sandboxManager.ts:409:    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
+packages/core/src/services/sandboxManager.ts:410:    policyRead: filterOutWorkspaceAndForbidden(policyRead),
+packages/core/src/services/sandboxManager.ts:411:    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:283:    // Workspace access
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:297:    // Globally included directories
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:303:    // Explicitly allowed paths from the request policy
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:317:    // Additional write paths (e.g. from internal __write command)
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:338:    // Collect secret files and apply protective ACLs
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:386:    // Protected governance files
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:395:    // Forbidden paths manifest
+packages/core/src/sandbox/windows/WindowsSandboxManager.ts:406:    // Construct the helper command
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f8f9e6be12096ef30d14ad0ce721d1f2ce430c3
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,8 @@
++Applied claims:
++- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
++- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++
++Modified files:
++- packages/core/src/services/sandboxManager.ts
++- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+index b01daaa09198713695df295588839a94177e2692..5a23a36551dd02445da9a2d04f943136aaf5f62e
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -280,7 +280,7 @@
+     // New files created within these roots will inherit the Low label.
+     const writableRoots: string[] = [];
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+       ? await isStrictlyApproved(
+           command,
+@@ -294,13 +294,13 @@
+       writableRoots.push(resolvedPaths.workspace);
+     }
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+       await this.grantLowIntegrityAccess(includeDir);
+       writableRoots.push(includeDir);
+     }
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+       try {
+         await fs.promises.access(allowedPath, fs.constants.F_OK);
+@@ -314,7 +314,7 @@
+       writableRoots.push(allowedPath);
+     }
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+       try {
+         await fs.promises.access(writePath, fs.constants.F_OK);
+@@ -335,7 +335,7 @@
+       }
+     }
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+     // processes to ensure they cannot be read or written.
+     const secretsToBlock: string[] = [];
+@@ -383,7 +383,7 @@
+       }
+     }
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+     // the sandboxed process from creating them with Low integrity.
+     // By being created as Medium integrity, they are write-protected from Low processes.
+@@ -392,7 +392,7 @@
+       this.touch(filePath, file.isDirectory);
+     }
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+     const allForbidden = Array.from(
+       new Set([...secretsToBlock, ...resolvedPaths.forbidden]),
+@@ -403,7 +403,7 @@
+     const manifestPath = path.join(tempDir, 'manifest.txt');
+     fs.writeFileSync(manifestPath, allForbidden.join('\n'));
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+     const program = this.helperPath;
+ 
+@@ -415,13 +415,11 @@
+       command,
+       ...args,
+     ];
+-
+-    const finalEnv = { ...sanitizedEnv };
+ 
+     return {
+       program,
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+       cleanup: () => {
+         try {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+index b4b8e974511762121f5e54000741a529aa5f290f..9c04ada826f4b99d669665f4010c13bc4b474893
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+@@ -361,7 +361,7 @@
+    * Helper that expands each path to include its realpath (if it's a symlink)
+    * and pipes the result through sanitizePaths for deduplication and absolute path enforcement.
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+     const expanded = paths.flatMap((p) => {
+       try {
+@@ -374,16 +374,16 @@
+     return sanitizePaths(expanded);
+   };
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+       req.policy?.additionalPermissions?.fileSystem?.read,
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+       req.policy?.additionalPermissions?.fileSystem?.write,
+   );
+@@ -394,7 +394,7 @@
+   /**
+    * Filters out any paths that are explicitly forbidden or match the workspace root.
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+       const identity = getPathIdentity(p);
+       return (
+@@ -405,10 +405,10 @@
+   return {
+     workspace,
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+ }
+ /**
+
+codex
+Implemented all accepted claims.
+
+Modified:
+- [sandboxManager.ts](/tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts)
+- [WindowsSandboxManager.ts](/tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts)
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md)
+
+Verification was textual only. I did not run tests, per instruction.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f8f9e6be12096ef30d14ad0ce721d1f2ce430c3
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,8 @@
++Applied claims:
++- C1: Renamed the local path expansion and filtering helpers in packages/core/src/services/sandboxManager.ts.
++- C2: Removed stale numeric prefixes from Windows sandbox preparation comments in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++- C3: Returned the sanitized Windows environment directly in packages/core/src/sandbox/windows/WindowsSandboxManager.ts.
++
++Modified files:
++- packages/core/src/services/sandboxManager.ts
++- packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+index b01daaa09198713695df295588839a94177e2692..5a23a36551dd02445da9a2d04f943136aaf5f62e
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -280,7 +280,7 @@
+     // New files created within these roots will inherit the Low label.
+     const writableRoots: string[] = [];
+ 
+-    // 1. Workspace access
++    // Workspace access
+     const isApproved = allowOverrides
+       ? await isStrictlyApproved(
+           command,
+@@ -294,13 +294,13 @@
+       writableRoots.push(resolvedPaths.workspace);
+     }
+ 
+-    // 2. Globally included directories
++    // Globally included directories
+     for (const includeDir of resolvedPaths.globalIncludes) {
+       await this.grantLowIntegrityAccess(includeDir);
+       writableRoots.push(includeDir);
+     }
+ 
+-    // 3. Explicitly allowed paths from the request policy
++    // Explicitly allowed paths from the request policy
+     for (const allowedPath of resolvedPaths.policyAllowed) {
+       try {
+         await fs.promises.access(allowedPath, fs.constants.F_OK);
+@@ -314,7 +314,7 @@
+       writableRoots.push(allowedPath);
+     }
+ 
+-    // 4. Additional write paths (e.g. from internal __write command)
++    // Additional write paths (e.g. from internal __write command)
+     for (const writePath of resolvedPaths.policyWrite) {
+       try {
+         await fs.promises.access(writePath, fs.constants.F_OK);
+@@ -335,7 +335,7 @@
+       }
+     }
+ 
+-    // 2. Collect secret files and apply protective ACLs
++    // Collect secret files and apply protective ACLs
+     // On Windows, we explicitly deny access to secret files for Low Integrity
+     // processes to ensure they cannot be read or written.
+     const secretsToBlock: string[] = [];
+@@ -383,7 +383,7 @@
+       }
+     }
+ 
+-    // 3. Protected governance files
++    // Protected governance files
+     // These must exist on the host before running the sandbox to prevent
+     // the sandboxed process from creating them with Low integrity.
+     // By being created as Medium integrity, they are write-protected from Low processes.
+@@ -392,7 +392,7 @@
+       this.touch(filePath, file.isDirectory);
+     }
+ 
+-    // 4. Forbidden paths manifest
++    // Forbidden paths manifest
+     // We use a manifest file to avoid command-line length limits.
+     const allForbidden = Array.from(
+       new Set([...secretsToBlock, ...resolvedPaths.forbidden]),
+@@ -403,7 +403,7 @@
+     const manifestPath = path.join(tempDir, 'manifest.txt');
+     fs.writeFileSync(manifestPath, allForbidden.join('\n'));
+ 
+-    // 5. Construct the helper command
++    // Construct the helper command
+     // GeminiSandbox.exe <network:0|1> <cwd> --forbidden-manifest <path> <command> [args...]
+     const program = this.helperPath;
+ 
+@@ -415,13 +415,11 @@
+       command,
+       ...args,
+     ];
+-
+-    const finalEnv = { ...sanitizedEnv };
+ 
+     return {
+       program,
+       args: finalArgs,
+-      env: finalEnv,
++      env: sanitizedEnv,
+       cwd: req.cwd,
+       cleanup: () => {
+         try {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+index b4b8e974511762121f5e54000741a529aa5f290f..9c04ada826f4b99d669665f4010c13bc4b474893
+--- a//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts
+@@ -361,7 +361,7 @@
+    * Helper that expands each path to include its realpath (if it's a symlink)
+    * and pipes the result through sanitizePaths for deduplication and absolute path enforcement.
+    */
+-  const expand = (paths?: string[] | null): string[] => {
++  const expandSandboxPathSet = (paths?: string[] | null): string[] => {
+     if (!paths || paths.length === 0) return [];
+     const expanded = paths.flatMap((p) => {
+       try {
+@@ -374,16 +374,16 @@
+     return sanitizePaths(expanded);
+   };
+ 
+-  const forbidden = expand(await options.forbiddenPaths?.());
++  const forbidden = expandSandboxPathSet(await options.forbiddenPaths?.());
+ 
+-  const globalIncludes = expand(options.includeDirectories);
+-  const policyAllowed = expand(req.policy?.allowedPaths);
++  const globalIncludes = expandSandboxPathSet(options.includeDirectories);
++  const policyAllowed = expandSandboxPathSet(req.policy?.allowedPaths);
+ 
+-  const policyRead = expand(
++  const policyRead = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.read ??
+       req.policy?.additionalPermissions?.fileSystem?.read,
+   );
+-  const policyWrite = expand(
++  const policyWrite = expandSandboxPathSet(
+     overridePermissions?.fileSystem?.write ??
+       req.policy?.additionalPermissions?.fileSystem?.write,
+   );
+@@ -394,7 +394,7 @@
+   /**
+    * Filters out any paths that are explicitly forbidden or match the workspace root.
+    */
+-  const filter = (paths: string[]) =>
++  const filterOutWorkspaceAndForbidden = (paths: string[]) =>
+     paths.filter((p) => {
+       const identity = getPathIdentity(p);
+       return (
+@@ -405,10 +405,10 @@
+   return {
+     workspace,
+     forbidden,
+-    globalIncludes: filter(globalIncludes),
+-    policyAllowed: filter(policyAllowed),
+-    policyRead: filter(policyRead),
+-    policyWrite: filter(policyWrite),
++    globalIncludes: filterOutWorkspaceAndForbidden(globalIncludes),
++    policyAllowed: filterOutWorkspaceAndForbidden(policyAllowed),
++    policyRead: filterOutWorkspaceAndForbidden(policyRead),
++    policyWrite: filterOutWorkspaceAndForbidden(policyWrite),
+   };
+ }
+ /**
+
+tokens used
+18,973
+Implemented all accepted claims.
+
+Modified:
+- [sandboxManager.ts](/tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/services/sandboxManager.ts)
+- [WindowsSandboxManager.ts](/tmp/refactor-eq-workdir/bb-codex-24834/packages/core/src/sandbox/windows/WindowsSandboxManager.ts)
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24834/IMPLEMENT_SUMMARY.md)
+
+Verification was textual only. I did not run tests, per instruction.

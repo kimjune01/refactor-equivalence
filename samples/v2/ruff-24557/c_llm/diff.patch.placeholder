@@ -1,0 +1,1802 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 62a205395b..af77f19aef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4666,7 +4666,6 @@ dependencies = [
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_site_packages",
+- "ty_static",
+  "ty_test",
+  "ty_vendored",
+ ]
+@@ -4762,6 +4761,7 @@ dependencies = [
+  "rustc-stable-hash",
+  "salsa",
+  "serde",
++ "similar 3.1.0",
+  "smallvec",
+  "tempfile",
+  "thiserror 2.0.18",
+@@ -4770,7 +4770,6 @@ dependencies = [
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_python_semantic",
+- "ty_static",
+  "ty_vendored",
+ ]
+ 
+diff --git a/crates/ruff_index/src/slice.rs b/crates/ruff_index/src/slice.rs
+index 75f52c2368..be4f002c02 100644
+--- a/crates/ruff_index/src/slice.rs
++++ b/crates/ruff_index/src/slice.rs
+@@ -45,6 +45,16 @@ impl<I: Idx, T> IndexSlice<I, T> {
+         self.raw.first()
+     }
+ 
++    #[inline]
++    pub const fn last(&self) -> Option<&T> {
++        self.raw.last()
++    }
++
++    #[inline]
++    pub const fn last_mut(&mut self) -> Option<&mut T> {
++        self.raw.last_mut()
++    }
++
+     #[inline]
+     pub const fn len(&self) -> usize {
+         self.raw.len()
+diff --git a/crates/ty_python_semantic/Cargo.toml b/crates/ty_python_semantic/Cargo.toml
+index 61541f01bd..8219d11170 100644
+--- a/crates/ty_python_semantic/Cargo.toml
++++ b/crates/ty_python_semantic/Cargo.toml
+@@ -50,7 +50,6 @@ tracing = { workspace = true }
+ ruff_db = { workspace = true, features = ["testing", "os"] }
+ ruff_python_parser = { workspace = true }
+ test-case = { workspace = true }
+-ty_static = { workspace = true }
+ ty_test = { workspace = true }
+ ty_vendored = { workspace = true }
+ 
+diff --git a/crates/ty_python_semantic/tests/mdtest.rs b/crates/ty_python_semantic/tests/mdtest.rs
+index 62579bb74a..0292734f6c 100644
+--- a/crates/ty_python_semantic/tests/mdtest.rs
++++ b/crates/ty_python_semantic/tests/mdtest.rs
+@@ -1,8 +1,12 @@
+ use anyhow::anyhow;
+ use camino::Utf8Path;
+-use ty_static::EnvVars;
+ use ty_test::OutputFormat;
+ 
++/// Switch mdtest output format to GitHub Actions annotations.
++///
++/// If set (to any value), mdtest will output errors in GitHub Actions format.
++const MDTEST_GITHUB_ANNOTATIONS_FORMAT: &str = "MDTEST_GITHUB_ANNOTATIONS_FORMAT";
++
+ /// See `crates/ty_test/README.md` for documentation on these tests.
+ #[expect(clippy::needless_pass_by_value)]
+ fn mdtest(fixture_path: &Utf8Path, content: String) -> datatest_stable::Result<()> {
+@@ -21,7 +25,7 @@ fn mdtest(fixture_path: &Utf8Path, content: String) -> datatest_stable::Result<(
+         .unwrap_or(fixture_path)
+         .as_str();
+ 
+-    let output_format = if std::env::var(EnvVars::MDTEST_GITHUB_ANNOTATIONS_FORMAT).is_ok() {
++    let output_format = if std::env::var(MDTEST_GITHUB_ANNOTATIONS_FORMAT).is_ok() {
+         OutputFormat::GitHub
+     } else {
+         OutputFormat::Cli
+diff --git a/crates/ty_static/src/env_vars.rs b/crates/ty_static/src/env_vars.rs
+index 8ffcb73fc5..381623820d 100644
+--- a/crates/ty_static/src/env_vars.rs
++++ b/crates/ty_static/src/env_vars.rs
+@@ -73,18 +73,6 @@ impl EnvVars {
+     /// Used to determine the root install path of Conda.
+     pub const CONDA_ROOT: &'static str = "_CONDA_ROOT";
+ 
+-    /// Filter which tests to run in mdtest.
+-    ///
+-    /// Only tests whose names contain this filter string will be executed.
+-    #[attr_hidden]
+-    pub const MDTEST_TEST_FILTER: &'static str = "MDTEST_TEST_FILTER";
+-
+-    /// Switch mdtest output format to GitHub Actions annotations.
+-    ///
+-    /// If set (to any value), mdtest will output errors in GitHub Actions format.
+-    #[attr_hidden]
+-    pub const MDTEST_GITHUB_ANNOTATIONS_FORMAT: &'static str = "MDTEST_GITHUB_ANNOTATIONS_FORMAT";
+-
+     // Externally defined environment variables
+ 
+     /// Specifies an upper limit for the number of threads ty uses when performing work in parallel.
+diff --git a/crates/ty_test/Cargo.toml b/crates/ty_test/Cargo.toml
+index c3106b80ea..da537b2388 100644
+--- a/crates/ty_test/Cargo.toml
++++ b/crates/ty_test/Cargo.toml
+@@ -24,7 +24,6 @@ ruff_source_file = { workspace = true }
+ ruff_text_size = { workspace = true }
+ ty_module_resolver = { workspace = true }
+ ty_python_semantic = { workspace = true, features = ["serde", "testing"] }
+-ty_static = { workspace = true }
+ ty_vendored = { workspace = true }
+ ty_python_core = { workspace = true }
+ 
+@@ -40,6 +39,7 @@ rustc-hash = { workspace = true }
+ rustc-stable-hash = { workspace = true }
+ salsa = { workspace = true }
+ serde = { workspace = true }
++similar = { workspace = true }
+ smallvec = { workspace = true }
+ tempfile = { workspace = true }
+ thiserror = { workspace = true }
+diff --git a/crates/ty_test/src/lib.rs b/crates/ty_test/src/lib.rs
+index f18e93d068..a2ae8620c7 100644
+--- a/crates/ty_test/src/lib.rs
++++ b/crates/ty_test/src/lib.rs
+@@ -1,6 +1,7 @@
+ use crate::config::Log;
+ use crate::db::Db;
+-use crate::parser::{BacktickOffsets, EmbeddedFileSourceMap};
++use crate::matcher::Failure;
++use crate::parser::{BacktickOffsets, CodeBlock, EmbeddedFileSourceMap};
+ use anyhow::anyhow;
+ use camino::Utf8Path;
+ use colored::Colorize;
+@@ -10,10 +11,14 @@ use ruff_db::Db as _;
+ use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig};
+ use ruff_db::files::{File, FileRootKind, system_path_to_file};
+ use ruff_db::panic::{PanicError, catch_unwind};
++use ruff_db::parsed::parsed_module;
++use ruff_db::source::line_index;
+ use ruff_db::system::{DbWithWritableSystem as _, SystemPath, SystemPathBuf};
+ use ruff_db::testing::{setup_logging, setup_logging_with_filter};
+ use ruff_diagnostics::Applicability;
+ use ruff_source_file::{LineIndex, OneIndexed};
++use ruff_text_size::{Ranged, TextRange};
++use similar::{ChangeTag, TextDiff};
+ use std::backtrace::BacktraceStatus;
+ use std::fmt::{Display, Write};
+ use ty_module_resolver::{
+@@ -27,15 +32,23 @@ use ty_python_semantic::{
+     PythonEnvironment, PythonVersionSource, PythonVersionWithSource, SysPrefixPathOrigin,
+ };
+ 
+-mod assertion;
+ mod config;
+ mod db;
+ mod diagnostic;
+ mod external_dependencies;
+ mod matcher;
+ mod parser;
++mod pragma_comments;
+ 
+-use ty_static::EnvVars;
++/// Filter which tests to run in mdtest.
++///
++/// Only tests whose names contain this filter string will be executed.
++const MDTEST_TEST_FILTER: &str = "MDTEST_TEST_FILTER";
++
++/// If set, updates the content of inline snapshots.
++const MDTEST_UPDATE_SNAPSHOTS: &str = "MDTEST_UPDATE_SNAPSHOTS";
++
++const MDTEST_EXTERNAL: &str = "MDTEST_EXTERNAL";
+ 
+ /// Run `path` as a markdown test suite with given `title`.
+ ///
+@@ -53,8 +66,9 @@ pub fn run(
+         .map_err(|err| anyhow!("Failed to parse fixture: {err}"))?;
+ 
+     let mut db = db::Db::setup();
++    let mut markdown_edits = vec![];
+ 
+-    let filter = std::env::var(EnvVars::MDTEST_TEST_FILTER).ok();
++    let filter = std::env::var(MDTEST_TEST_FILTER).ok();
+     let mut any_failures = false;
+     let mut assertion = String::new();
+     for test in suite.tests() {
+@@ -77,7 +91,15 @@ pub fn run(
+             snapshot_path,
+             &test,
+         );
+-        let inconsistencies = if result.as_ref().is_ok_and(|t| t.has_been_skipped()) {
++
++        if let Ok((_, edits)) = &result {
++            markdown_edits.extend(edits.iter().cloned());
++        }
++
++        let inconsistencies = if result
++            .as_ref()
++            .is_ok_and(|(outcome, _)| outcome.has_been_skipped())
++        {
+             Ok(())
+         } else {
+             run_module_resolution_consistency_test(&db)
+@@ -94,12 +116,14 @@ pub fn run(
+             let md_index = LineIndex::from_source_text(source);
+ 
+             for test_failures in failures {
+-                let source_map =
+-                    EmbeddedFileSourceMap::new(&md_index, test_failures.backtick_offsets);
+-
+                 for (relative_line_number, failures) in test_failures.by_line.iter() {
+                     let file = relative_fixture_path.as_str();
+ 
++                    let source_map = EmbeddedFileSourceMap::new(
++                        &md_index,
++                        test_failures.backtick_offsets.clone(),
++                    );
++
+                     let absolute_line_number =
+                         match source_map.to_absolute_line_number(relative_line_number) {
+                             Ok(line_number) => line_number,
+@@ -108,9 +132,11 @@ pub fn run(
+                                     &mut assertion,
+                                     file,
+                                     last_line_number,
+-                                    "Found a trailing assertion comment \
++                                    &Failure::new(
++                                        "Found a trailing assertion comment \
+                                         (e.g., `# revealed:` or `# error:`) \
+                                         not followed by any statement.",
++                                    ),
+                                 );
+ 
+                                 continue;
+@@ -144,20 +170,22 @@ pub fn run(
+             let _ = writeln!(
+                 assertion,
+                 "\nTo rerun this specific test, \
+-                set the environment variable: {}='{escaped_test_name}'",
+-                EnvVars::MDTEST_TEST_FILTER,
++                set the environment variable: {MDTEST_TEST_FILTER}='{escaped_test_name}'",
+             );
+             let _ = writeln!(
+                 assertion,
+-                "{}='{escaped_test_name}' cargo test -p ty_python_semantic \
++                "{MDTEST_TEST_FILTER}='{escaped_test_name}' cargo test -p ty_python_semantic \
+                 --test mdtest -- {test_name}",
+-                EnvVars::MDTEST_TEST_FILTER,
+             );
+ 
+             let _ = writeln!(assertion, "\n{}", "-".repeat(50));
+         }
+     }
+ 
++    if !markdown_edits.is_empty() {
++        try_apply_markdown_edits(absolute_fixture_path, source, markdown_edits);
++    }
++
+     assert!(!any_failures, "{}", &assertion);
+ 
+     Ok(())
+@@ -193,18 +221,25 @@ impl OutputFormat {
+         assertion_buf: &mut String,
+         file: &str,
+         line: OneIndexed,
+-        failure: impl Display,
++        failure: &Failure,
+     ) {
+         match self {
+             OutputFormat::Cli => {
+                 let _ = writeln!(
+                     assertion_buf,
+-                    "  {file_line} {failure}",
+-                    file_line = format!("{file}:{line}").cyan()
++                    "  {file_line} {message}",
++                    file_line = format!("{file}:{line}").cyan(),
++                    message = failure.message()
+                 );
++                if let Some((expected, actual)) = failure.diff() {
++                    let _ = render_diff(assertion_buf, actual, expected);
++                }
+             }
+             OutputFormat::GitHub => {
+-                println!("::error file={file},line={line}::{failure}");
++                println!(
++                    "::error file={file},line={line}::{message}",
++                    message = failure.message()
++                );
+             }
+         }
+     }
+@@ -244,13 +279,19 @@ impl TestOutcome {
+     }
+ }
+ 
++#[derive(Debug, Clone)]
++struct MarkdownEdit {
++    range: TextRange,
++    replacement: String,
++}
++
+ fn run_test(
+     db: &mut db::Db,
+     absolute_fixture_path: &Utf8Path,
+     relative_fixture_path: &Utf8Path,
+     snapshot_path: &Utf8Path,
+     test: &parser::MarkdownTest,
+-) -> Result<TestOutcome, Failures> {
++) -> Result<(TestOutcome, Vec<MarkdownEdit>), Failures> {
+     // Initialize the system and remove all files and directories to reset the system to a clean state.
+     match test.configuration().system.unwrap_or_default() {
+         SystemKind::InMemory => {
+@@ -284,8 +325,8 @@ fn run_test(
+     // Setup virtual environment with dependencies if specified
+     let venv_for_external_dependencies = SystemPathBuf::from("/.venv");
+     if let Some(dependencies) = test.configuration().dependencies() {
+-        if !std::env::var("MDTEST_EXTERNAL").is_ok_and(|v| v == "1") {
+-            return Ok(TestOutcome::Skipped);
++        if !std::env::var(MDTEST_EXTERNAL).is_ok_and(|v| v == "1") {
++            return Ok((TestOutcome::Skipped, vec![]));
+         }
+ 
+         let python_platform = test.configuration().python_platform().expect(
+@@ -308,7 +349,7 @@ fn run_test(
+     let mut typeshed_files = vec![];
+     let mut has_custom_versions_file = false;
+ 
+-    let test_files: Vec<_> = test
++    let test_files: Vec<TestFile<'_>> = test
+         .files()
+         .filter_map(|embedded| {
+             if embedded.lang == "ignore" {
+@@ -378,7 +419,7 @@ fn run_test(
+ 
+             Some(TestFile {
+                 file,
+-                backtick_offsets: embedded.backtick_offsets.clone(),
++                code_blocks: embedded.code_blocks.clone(),
+             })
+         })
+         .collect();
+@@ -472,6 +513,9 @@ fn run_test(
+     // all diagnostics. Otherwise it remains empty.
+     let mut snapshot_diagnostics = vec![];
+ 
++    // Edits for updating changed inline snapshots.
++    let mut markdown_edits = vec![];
++
+     let mut any_pull_types_failures = false;
+     let mut panic_info = None;
+ 
+@@ -491,10 +535,19 @@ fn run_test(
+                 }
+             };
+ 
+-            let failure = match matcher::match_file(db, test_file.file, &diagnostics) {
++            let failure = match matcher::match_file(db, test_file.file, &diagnostics).and_then(
++                |inline_diagnostics| {
++                    validate_inline_snapshot(
++                        db,
++                        test_file,
++                        &inline_diagnostics,
++                        &mut markdown_edits,
++                    )
++                },
++            ) {
+                 Ok(()) => None,
+                 Err(line_failures) => Some(FileFailures {
+-                    backtick_offsets: test_file.backtick_offsets.clone(),
++                    backtick_offsets: test_file.to_code_block_backtick_offsets(),
+                     by_line: line_failures,
+                 }),
+             };
+@@ -502,10 +555,15 @@ fn run_test(
+             // Filter out `revealed-type` and `undefined-reveal` diagnostics from snapshots,
+             // since they make snapshots very noisy!
+             if test.should_snapshot_diagnostics() {
+-                snapshot_diagnostics.extend(diagnostics.into_iter().filter(|diagnostic| {
+-                    diagnostic.id() != DiagnosticId::RevealedType
+-                        && !diagnostic.id().is_lint_named(&UNDEFINED_REVEAL.name())
+-                }));
++                snapshot_diagnostics.extend(
++                    diagnostics
++                        .iter()
++                        .filter(|diagnostic| {
++                            diagnostic.id() != DiagnosticId::RevealedType
++                                && !diagnostic.id().is_lint_named(&UNDEFINED_REVEAL.name())
++                        })
++                        .cloned(),
++                );
+             }
+ 
+             let pull_types_result = attempt_test(db, pull_types, test_file);
+@@ -567,14 +625,13 @@ fn run_test(
+         let mut by_line = matcher::FailuresByLine::default();
+         by_line.push(
+             OneIndexed::from_zero_indexed(0),
+-            vec![
++            vec![Failure::new(
+                 "Remove the `<!-- pull-types:skip -->` directive from this test: pulling types \
+-                 succeeded for all files in the test."
+-                    .to_string(),
+-            ],
++                 succeeded for all files in the test.",
++            )],
+         );
+         let failure = FileFailures {
+-            backtick_offsets: test_files[0].backtick_offsets.clone(),
++            backtick_offsets: test_files[0].to_code_block_backtick_offsets(),
+             by_line,
+         };
+         failures.push(failure);
+@@ -601,7 +658,7 @@ fn run_test(
+     }
+ 
+     if failures.is_empty() {
+-        Ok(TestOutcome::Success)
++        Ok((TestOutcome::Success, markdown_edits))
+     } else {
+         Err(failures)
+     }
+@@ -698,6 +755,7 @@ impl std::fmt::Display for ModuleInconsistency<'_> {
+ type Failures = Vec<FileFailures>;
+ 
+ /// The failures for a single file in a test by line number.
++#[derive(Debug)]
+ struct FileFailures {
+     /// Positional information about the code block(s) to reconstruct absolute line numbers.
+     backtick_offsets: Vec<BacktickOffsets>,
+@@ -707,11 +765,219 @@ struct FileFailures {
+ }
+ 
+ /// File in a test.
+-struct TestFile {
++struct TestFile<'a> {
+     file: File,
+ 
+-    /// Positional information about the code block(s) to reconstruct absolute line numbers.
+-    backtick_offsets: Vec<BacktickOffsets>,
++    /// Information about the checkable code block(s) that compose this file.
++    code_blocks: Vec<CodeBlock<'a>>,
++}
++
++impl TestFile<'_> {
++    pub(crate) fn to_code_block_backtick_offsets(&self) -> Vec<BacktickOffsets> {
++        self.code_blocks
++            .iter()
++            .map(parser::CodeBlock::backtick_offsets)
++            .collect()
++    }
++}
++
++fn diagnostic_display_config() -> DisplayDiagnosticConfig {
++    DisplayDiagnosticConfig::new("ty")
++        .color(false)
++        .show_fix_diff(true)
++        .with_fix_applicability(Applicability::DisplayOnly)
++}
++
++fn render_diagnostic(db: &mut Db, diagnostic: &Diagnostic) -> String {
++    diagnostic
++        .display(db, &diagnostic_display_config())
++        .to_string()
++}
++
++fn render_diagnostics(db: &mut Db, diagnostics: &[Diagnostic]) -> String {
++    let mut rendered = String::new();
++    for (index, diag) in diagnostics.iter().enumerate() {
++        if index > 0 {
++            writeln!(rendered).unwrap();
++        }
++        write!(rendered, "{}", render_diagnostic(db, diag)).unwrap();
++    }
++    rendered.trim_end_matches('\n').to_string()
++}
++
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++
++fn validate_inline_snapshot(
++    db: &mut db::Db,
++    test_file: &TestFile<'_>,
++    inline_diagnostics: &[Diagnostic],
++    markdown_edits: &mut Vec<MarkdownEdit>,
++) -> Result<(), matcher::FailuresByLine> {
++    let update_snapshots = is_update_inline_snapshots_enabled();
++    let line_index = line_index(db, test_file.file);
++    let mut failures = matcher::FailuresByLine::default();
++    let mut inline_diagnostics = inline_diagnostics;
++
++    // Group the inline diagnostics by code block. We do this by using the code blocks
++    // start offsets. All diagnostics between the current's and next code blocks offset belong to the current code block.
++    for (index, code_block) in test_file.code_blocks.iter().enumerate() {
++        let next_block_start_offset = test_file
++            .code_blocks
++            .get(index + 1)
++            .map_or(ruff_text_size::TextSize::new(u32::MAX), |next_code_block| {
++                next_code_block.embedded_start_offset()
++            });
++
++        // Find the offset of the first diagnostic that belongs to the next code block.
++        let diagnostics_end = inline_diagnostics
++            .iter()
++            .position(|diagnostic| {
++                diagnostic
++                    .primary_span()
++                    .and_then(|span| span.range())
++                    .map(TextRange::start)
++                    .is_some_and(|offset| offset >= next_block_start_offset)
++            })
++            .unwrap_or(inline_diagnostics.len());
++
++        let (block_diagnostics, remaining_diagnostics) =
++            inline_diagnostics.split_at(diagnostics_end);
++        inline_diagnostics = remaining_diagnostics;
++
++        let failure_line = line_index.line_index(code_block.embedded_start_offset());
++
++        let Some(first_diagnostic) = block_diagnostics.first() else {
++            // If there are no inline diagnostics (no usages of `# snapshot`) but the code block has a
++            // diagnostics section, mark it as unnecessary or remove it.
++            if let Some(snapshot_code_block) = code_block.inline_snapshot_block() {
++                if update_snapshots {
++                    markdown_edits.push(MarkdownEdit {
++                        range: snapshot_code_block.range(),
++                        replacement: String::new(),
++                    });
++                } else {
++                    failures.push(
++                        failure_line,
++                        vec![Failure::new(
++                            "This code block has a `diagnostics` block but no `# snapshot` assertions. Remove the `diagnostics` block or add a `# snapshot` comment.",
++                        )],
++                    );
++                }
++            }
++
++            continue;
++        };
++
++        let actual = render_diagnostics(db, block_diagnostics);
++
++        let Some(snapshot_code_block) = code_block.inline_snapshot_block() else {
++            if update_snapshots {
++                markdown_edits.push(MarkdownEdit {
++                    range: TextRange::empty(code_block.backtick_offsets().end()),
++                    replacement: format!("\n\n```diagnostics\n{actual}\n```"),
++                });
++            } else {
++                let first_range = first_diagnostic.primary_span().unwrap().range().unwrap();
++                let line = line_index.line_index(first_range.start());
++                failures.push(
++                    line,
++                    vec![Failure::new(format!(
++                        "Add a `diagnostics` block for this `# snapshot` assertion, or set `{MDTEST_UPDATE_SNAPSHOTS}` to insert one automatically",
++                    ))],
++                );
++            }
++            continue;
++        };
++
++        if snapshot_code_block.expected == actual {
++            continue;
++        }
++
++        if update_snapshots {
++            markdown_edits.push(MarkdownEdit {
++                range: snapshot_code_block.range(),
++                replacement: format!("```diagnostics\n{actual}\n```"),
++            });
++        } else {
++            failures.push(
++                failure_line,
++                vec![Failure::new(format_args!(
++                        "inline diagnostics snapshot are out of date; set `{MDTEST_UPDATE_SNAPSHOTS}` to update the `diagnostics` block",
++                    )).with_diff(snapshot_code_block.expected.to_string(), actual)],
++                );
++        }
++    }
++
++    if failures.is_empty() {
++        Ok(())
++    } else {
++        Err(failures)
++    }
++}
++
++fn render_diff(f: &mut dyn std::fmt::Write, expected: &str, actual: &str) -> std::fmt::Result {
++    let diff = TextDiff::from_lines(expected, actual);
++
++    writeln!(f, "{}", "--- expected".red())?;
++    writeln!(f, "{}", "+++ actual".green())?;
++
++    let mut unified = diff.unified_diff();
++    let unified = unified.header("expected", "actual");
++
++    for hunk in unified.iter_hunks() {
++        writeln!(f, "{}", hunk.header())?;
++
++        for change in hunk.iter_changes() {
++            let value = change.value();
++            match change.tag() {
++                ChangeTag::Equal => write!(f, " {value}")?,
++                ChangeTag::Delete => {
++                    write!(f, "{}{}", "-".red(), value.red())?;
++                }
++                ChangeTag::Insert => {
++                    write!(f, "{}{}", "+".green(), value.green()).unwrap();
++                }
++            }
++
++            if !diff.newline_terminated() || change.missing_newline() {
++                writeln!(f)?;
++            }
++        }
++    }
++
++    Ok(())
++}
++
++fn try_apply_markdown_edits(
++    absolute_fixture_path: &Utf8Path,
++    source: &str,
++    mut edits: Vec<MarkdownEdit>,
++) {
++    edits.sort_unstable_by_key(|edit| edit.range.start());
++
++    let mut updated = source.to_string();
++    for edit in edits.into_iter().rev() {
++        updated.replace_range(
++            edit.range.start().to_usize()..edit.range.end().to_usize(),
++            &edit.replacement,
++        );
++    }
++
++    if let Err(err) = std::fs::write(absolute_fixture_path, updated) {
++        tracing::error!("Failed to write updated inline snapshots in: {err}");
++    }
+ }
+ 
+ fn create_diagnostic_snapshot(
+@@ -720,11 +986,6 @@ fn create_diagnostic_snapshot(
+     test: &parser::MarkdownTest,
+     diagnostics: impl IntoIterator<Item = Diagnostic>,
+ ) -> String {
+-    let display_config = DisplayDiagnosticConfig::new("ty")
+-        .color(false)
+-        .show_fix_diff(true)
+-        .with_fix_applicability(Applicability::DisplayOnly);
+-
+     let mut snapshot = String::new();
+     writeln!(snapshot).unwrap();
+     writeln!(snapshot, "---").unwrap();
+@@ -756,12 +1017,12 @@ fn create_diagnostic_snapshot(
+ 
+     writeln!(snapshot, "# Diagnostics").unwrap();
+     writeln!(snapshot).unwrap();
+-    for (i, diag) in diagnostics.into_iter().enumerate() {
+-        if i > 0 {
++    for (index, diagnostic) in diagnostics.into_iter().enumerate() {
++        if index > 0 {
+             writeln!(snapshot).unwrap();
+         }
+         writeln!(snapshot, "```").unwrap();
+-        write!(snapshot, "{}", diag.display(db, &display_config)).unwrap();
++        write!(snapshot, "{}", render_diagnostic(db, &diagnostic)).unwrap();
+         writeln!(snapshot, "```").unwrap();
+     }
+     snapshot
+@@ -776,7 +1037,7 @@ fn create_diagnostic_snapshot(
+ fn attempt_test<'db, 'a, T, F>(
+     db: &'db Db,
+     test_fn: F,
+-    test_file: &'a TestFile,
++    test_file: &'a TestFile<'a>,
+ ) -> Result<T, AttemptTestError<'a>>
+ where
+     F: FnOnce(&'db dyn ty_python_semantic::Db, File) -> T + std::panic::UnwindSafe,
+@@ -787,7 +1048,7 @@ where
+ 
+ struct AttemptTestError<'a> {
+     info: PanicError,
+-    test_file: &'a TestFile,
++    test_file: &'a TestFile<'a>,
+ }
+ 
+ impl AttemptTestError<'_> {
+@@ -802,34 +1063,34 @@ impl AttemptTestError<'_> {
+         let mut by_line = matcher::FailuresByLine::default();
+         let mut messages = vec![];
+         match info.location {
+-            Some(location) => messages.push(format!(
++            Some(location) => messages.push(Failure::new(format_args!(
+                 "Attempting to {action} caused a panic at {location}"
+-            )),
+-            None => messages.push(format!(
++            ))),
++            None => messages.push(Failure::new(format_args!(
+                 "Attempting to {action} caused a panic at an unknown location",
+-            )),
++            ))),
+         }
+         if let Some(clarification) = clarification {
+-            messages.push(clarification.to_string());
++            messages.push(Failure::new(clarification));
+         }
+-        messages.push(String::new());
++        messages.push(Failure::new(""));
+         match info.payload.as_str() {
+-            Some(message) => messages.push(message.to_string()),
++            Some(message) => messages.push(Failure::new(message)),
+             // Mimic the default panic hook's rendering of the panic payload if it's
+             // not a string.
+-            None => messages.push("Box<dyn Any>".to_string()),
++            None => messages.push(Failure::new("Box<dyn Any>")),
+         }
+-        messages.push(String::new());
++        messages.push(Failure::new(""));
+ 
+         if let Some(backtrace) = info.backtrace {
+             match backtrace.status() {
+                 BacktraceStatus::Disabled => {
+-                    let msg =
+-                        "run with `RUST_BACKTRACE=1` environment variable to display a backtrace";
+-                    messages.push(msg.to_string());
++                    let msg = "run with `RUST_BACKTRACE=1` environment variable to \
++                         a backtrace";
++                    messages.push(Failure::new(msg));
+                 }
+                 BacktraceStatus::Captured => {
+-                    messages.extend(backtrace.to_string().split('\n').map(String::from));
++                    messages.extend(backtrace.to_string().split('\n').map(Failure::new));
+                 }
+                 _ => {}
+             }
+@@ -837,14 +1098,14 @@ impl AttemptTestError<'_> {
+ 
+         if let Some(backtrace) = info.salsa_backtrace {
+             salsa::attach(db, || {
+-                messages.extend(format!("{backtrace:#}").split('\n').map(String::from));
++                messages.extend(format!("{backtrace:#}").split('\n').map(Failure::new));
+             });
+         }
+ 
+         by_line.push(OneIndexed::from_zero_indexed(0), messages);
+ 
+         FileFailures {
+-            backtick_offsets: self.test_file.backtick_offsets.clone(),
++            backtick_offsets: self.test_file.to_code_block_backtick_offsets(),
+             by_line,
+         }
+     }
+diff --git a/crates/ty_test/src/matcher.rs b/crates/ty_test/src/matcher.rs
+index ab42e4406e..5e465a4cf1 100644
+--- a/crates/ty_test/src/matcher.rs
++++ b/crates/ty_test/src/matcher.rs
+@@ -13,19 +13,22 @@ use ruff_db::files::File;
+ use ruff_db::parsed::parsed_module;
+ use ruff_db::source::{SourceText, line_index, source_text};
+ use ruff_source_file::{LineIndex, OneIndexed};
++use smallvec::SmallVec;
+ 
+-use crate::assertion::{InlineFileAssertions, ParsedAssertion, UnparsedAssertion};
+ use crate::db::Db;
+ use crate::diagnostic::SortedDiagnostics;
++use crate::pragma_comments::{
++    LinePragmaComments, ParsedAssertion, TestPragmaComments, UnparsedAssertion,
++};
+ 
+ #[derive(Debug, Default)]
+ pub(super) struct FailuresByLine {
+-    failures: Vec<String>,
++    failures: Vec<Failure>,
+     lines: Vec<LineFailures>,
+ }
+ 
+ impl FailuresByLine {
+-    pub(super) fn iter(&self) -> impl Iterator<Item = (OneIndexed, &[String])> {
++    pub(super) fn iter(&self) -> impl Iterator<Item = (OneIndexed, &[Failure])> {
+         self.lines.iter().map(|line_failures| {
+             (
+                 line_failures.line_number,
+@@ -34,7 +37,7 @@ impl FailuresByLine {
+         })
+     }
+ 
+-    pub(super) fn push(&mut self, line_number: OneIndexed, messages: Vec<String>) {
++    pub(super) fn push(&mut self, line_number: OneIndexed, messages: Vec<Failure>) {
+         let start = self.failures.len();
+         self.failures.extend(messages);
+         self.lines.push(LineFailures {
+@@ -43,11 +46,43 @@ impl FailuresByLine {
+         });
+     }
+ 
+-    fn is_empty(&self) -> bool {
++    pub(super) fn is_empty(&self) -> bool {
+         self.lines.is_empty()
+     }
+ }
+ 
++#[derive(Debug, Clone)]
++pub(super) struct Failure {
++    message: String,
++    /// Optional diff that is shown alongside the error message.
++    /// The tuple represents the (expected, actual) values for the diff.
++    diff: Option<(String, String)>,
++}
++
++impl Failure {
++    pub(super) fn new(message: impl std::fmt::Display) -> Self {
++        Self {
++            message: message.to_string(),
++            diff: None,
++        }
++    }
++
++    pub(super) fn message(&self) -> &str {
++        &self.message
++    }
++
++    pub(super) fn diff(&self) -> Option<(&str, &str)> {
++        self.diff
++            .as_ref()
++            .map(|(expected, actual)| (expected.as_str(), actual.as_str()))
++    }
++
++    pub(super) fn with_diff(mut self, expected: String, actual: String) -> Self {
++        self.diff = Some((expected, actual));
++        self
++    }
++}
++
+ #[derive(Debug)]
+ struct LineFailures {
+     line_number: OneIndexed,
+@@ -58,64 +93,75 @@ pub(super) fn match_file(
+     db: &Db,
+     file: File,
+     diagnostics: &[Diagnostic],
+-) -> Result<(), FailuresByLine> {
++) -> Result<Vec<Diagnostic>, FailuresByLine> {
+     // Parse assertions from comments in the file, and get diagnostics from the file; both
+     // ordered by line number.
+     let source = source_text(db, file);
+-    let file_index = line_index(db, file);
+     let parsed = parsed_module(db, file).load(db);
+-    let assertions = InlineFileAssertions::from_file(&source, &parsed, &file_index);
++    let pragmas = TestPragmaComments::from_file(&source, &parsed, &line_index(db, file));
+ 
+     let diagnostics = SortedDiagnostics::new(diagnostics, &line_index(db, file));
+ 
+-    // Get iterators over assertions and diagnostics grouped by line, in ascending line order.
+-    let mut line_assertions = assertions.iter();
+     let mut line_diagnostics = diagnostics.iter_lines();
+ 
+-    let mut current_assertions = line_assertions.next();
++    // Get iterators over assertions and diagnostics grouped by line, in ascending line order.
++    let mut line_pragmas = pragmas.into_iter();
++    let mut current_pragmas = line_pragmas.next();
+     let mut current_diagnostics = line_diagnostics.next();
+ 
+     let matcher = Matcher::from_file(db, file);
+     let mut failures = FailuresByLine::default();
++    let mut snapshot_diagnostics: Vec<Diagnostic> = Vec::new();
+ 
+     loop {
+-        match (&current_assertions, &current_diagnostics) {
+-            (Some(assertions), Some(diagnostics)) => {
+-                match assertions.line_number.cmp(&diagnostics.line_number) {
++        match (&current_pragmas, &current_diagnostics) {
++            (Some(pragmas), Some(diagnostics)) => {
++                match pragmas.line_number.cmp(&diagnostics.line_number) {
+                     Ordering::Equal => {
+                         // We have assertions and diagnostics on the same line; check for
+                         // matches and error on any that don't match, then advance both
+                         // iterators.
+-                        matcher
+-                            .match_line(diagnostics, assertions)
+-                            .unwrap_or_else(|messages| {
+-                                failures.push(assertions.line_number, messages);
+-                            });
+-                        current_assertions = line_assertions.next();
++                        match matcher.match_line(diagnostics, pragmas) {
++                            Ok(inline_diagnostics) => {
++                                snapshot_diagnostics.extend(inline_diagnostics);
++                            }
++                            Err(messages) => {
++                                failures.push(pragmas.line_number, messages);
++                            }
++                        }
++
++                        current_pragmas = line_pragmas.next();
+                         current_diagnostics = line_diagnostics.next();
+                     }
+                     Ordering::Less => {
+-                        // We have assertions on an earlier line than diagnostics; report these
+-                        // assertions as all unmatched, and advance the assertions iterator.
+-                        failures.push(assertions.line_number, unmatched(assertions));
+-                        current_assertions = line_assertions.next();
++                        // We have pragmas on an earlier line than diagnostics; report these
++                        // pragmas as all unmatched, and advance the assertions iterator.
++
++                        failures.push(pragmas.line_number, unmatched(&pragmas.assertions));
++                        current_pragmas = line_pragmas.next();
+                     }
+                     Ordering::Greater => {
+-                        // We have diagnostics on an earlier line than assertions; report these
++                        // We have diagnostics on an earlier line than pragmas; report these
+                         // diagnostics as all unmatched, and advance the diagnostics iterator.
+                         failures.push(diagnostics.line_number, unmatched(diagnostics));
+                         current_diagnostics = line_diagnostics.next();
+                     }
+                 }
+             }
+-            (Some(assertions), None) => {
+-                // We've exhausted diagnostics but still have assertions; report these assertions
+-                // as unmatched and advance the assertions iterator.
+-                failures.push(assertions.line_number, unmatched(assertions));
+-                current_assertions = line_assertions.next();
++            (Some(pragmas), None) => {
++                // We've exhausted diagnostics but still have pragmas; report these pragmas
++                // as unmatched and advance the pragmas iterator.
++                let mut errors = unmatched(&pragmas.assertions);
++
++                if pragmas.snapshot_pragmas > 0 {
++                    errors.push(Failure::new("unmatched snapshot comment:".red()));
++                }
++
++                failures.push(pragmas.line_number, errors);
++                current_pragmas = line_pragmas.next();
+             }
+             (None, Some(diagnostics)) => {
+-                // We've exhausted assertions but still have diagnostics; report these
++                // We've exhausted pragmas but still have diagnostics; report these
+                 // diagnostics as unmatched and advance the diagnostics iterator.
+                 failures.push(diagnostics.line_number, unmatched(diagnostics));
+                 current_diagnostics = line_diagnostics.next();
+@@ -126,22 +172,22 @@ pub(super) fn match_file(
+     }
+ 
+     if failures.is_empty() {
+-        Ok(())
++        Ok(snapshot_diagnostics)
+     } else {
+         Err(failures)
+     }
+ }
+ 
+ trait Unmatched {
+-    fn unmatched(&self) -> String;
++    fn unmatched(&self) -> Failure;
+ }
+ 
+-fn unmatched<'a, T: Unmatched + 'a>(unmatched: &'a [T]) -> Vec<String> {
++fn unmatched<'a, T: Unmatched + 'a>(unmatched: &'a [T]) -> Vec<Failure> {
+     unmatched.iter().map(Unmatched::unmatched).collect()
+ }
+ 
+ trait UnmatchedWithColumn {
+-    fn unmatched_with_column(&self, column: OneIndexed) -> String;
++    fn unmatched_with_column(&self, column: OneIndexed) -> Failure;
+ }
+ 
+ // This is necessary since we only parse assertions lazily,
+@@ -152,33 +198,33 @@ trait UnmatchedWithColumn {
+ // being invalid if we detect that they'll be unmatched before parsing them.
+ // That's perhaps not the best user experience.
+ impl Unmatched for UnparsedAssertion<'_> {
+-    fn unmatched(&self) -> String {
+-        format!("{} {self}", "unmatched assertion:".red())
++    fn unmatched(&self) -> Failure {
++        Failure::new(format_args!("{} {self}", "unmatched assertion:".red()))
+     }
+ }
+ 
+ impl Unmatched for ParsedAssertion<'_> {
+-    fn unmatched(&self) -> String {
+-        format!("{} {self}", "unmatched assertion:".red())
++    fn unmatched(&self) -> Failure {
++        Failure::new(format_args!("{} {self}", "unmatched assertion:".red()))
+     }
+ }
+ 
+ fn maybe_add_undefined_reveal_clarification(
+     diagnostic: &Diagnostic,
+     original: std::fmt::Arguments,
+-) -> String {
++) -> Failure {
+     if diagnostic.id().is_lint_named("undefined-reveal") {
+-        format!(
++        Failure::new(format_args!(
+             "{} add a `# revealed` assertion on this line (original diagnostic: {original})",
+             "used built-in `reveal_type`:".yellow()
+-        )
++        ))
+     } else {
+-        format!("{} {original}", "unexpected error:".red())
++        Failure::new(format_args!("{} {original}", "unexpected error:".red()))
+     }
+ }
+ 
+ impl Unmatched for &Diagnostic {
+-    fn unmatched(&self) -> String {
++    fn unmatched(&self) -> Failure {
+         maybe_add_undefined_reveal_clarification(
+             self,
+             format_args!(
+@@ -191,7 +237,7 @@ impl Unmatched for &Diagnostic {
+ }
+ 
+ impl UnmatchedWithColumn for &Diagnostic {
+-    fn unmatched_with_column(&self, column: OneIndexed) -> String {
++    fn unmatched_with_column(&self, column: OneIndexed) -> Failure {
+         maybe_add_undefined_reveal_clarification(
+             self,
+             format_args!(
+@@ -280,30 +326,50 @@ impl Matcher {
+     fn match_line<'a, 'b>(
+         &self,
+         diagnostics: &'a [&'a Diagnostic],
+-        assertions: &'a [UnparsedAssertion<'b>],
+-    ) -> Result<(), Vec<String>>
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
+     where
+         'b: 'a,
+     {
+         let mut failures = vec![];
+         let mut unmatched = diagnostics.to_vec();
+-        for assertion in assertions {
++        let mut snapshot_diagnostics: SmallVec<[Diagnostic; 2]> = SmallVec::new();
++        for assertion in &pragmas.assertions {
+             match assertion.parse() {
+-                Ok(assertion) => {
+-                    if !self.matches(&assertion, &mut unmatched) {
++                Ok(assertion) => match self.matches(&assertion, &mut unmatched) {
++                    None => {
+                         failures.push(assertion.unmatched());
+                     }
+-                }
++                    Some(diagnostic) => {
++                        if pragmas.snapshot_pragmas > 0 {
++                            snapshot_diagnostics.push(diagnostic);
++                        }
++                    }
++                },
+                 Err(error) => {
+-                    failures.push(format!("{} {}", "invalid assertion:".red(), error));
++                    failures.push(Failure::new(format_args!(
++                        "{} {}",
++                        "invalid assertion:".red(),
++                        error
++                    )));
+                 }
+             }
+         }
++
++        if pragmas.snapshot_pragmas > 1 {
++            failures.push(Failure::new(format_args!(
++                "{} {}",
++                "unnecessary `# snapshot` comment:".red(),
++                "line has multiple `# snapshot` comments"
++            )));
++        }
++
+         for diagnostic in unmatched {
+             failures.push(diagnostic.unmatched_with_column(self.column(diagnostic)));
+         }
++
+         if failures.is_empty() {
+-            Ok(())
++            Ok(snapshot_diagnostics)
+         } else {
+             Err(failures)
+         }
+@@ -323,15 +389,19 @@ impl Matcher {
+ 
+     /// Check if `assertion` matches any [`Diagnostic`]s in `unmatched`.
+     ///
+-    /// If so, return `true` and remove the matched diagnostics from `unmatched`. Otherwise, return
+-    /// `false`.
++    /// If so, return `Some` and remove the matched diagnostics from `unmatched`. Otherwise, return
++    /// `None`.
+     ///
+     /// An `Error` assertion can only match one diagnostic; even if it could match more than one,
+     /// we short-circuit after the first match.
+     ///
+     /// A `Revealed` assertion must match a revealed-type diagnostic, and may also match an
+     /// undefined-reveal diagnostic, if present.
+-    fn matches(&self, assertion: &ParsedAssertion, unmatched: &mut Vec<&Diagnostic>) -> bool {
++    fn matches(
++        &self,
++        assertion: &ParsedAssertion,
++        unmatched: &mut Vec<&Diagnostic>,
++    ) -> Option<Diagnostic> {
+         match assertion {
+             ParsedAssertion::Error(error) => {
+                 let position = unmatched.iter().position(|diagnostic| {
+@@ -346,12 +416,7 @@ impl Matcher {
+                     });
+                     lint_name_matches && column_matches && message_matches
+                 });
+-                if let Some(position) = position {
+-                    unmatched.swap_remove(position);
+-                    true
+-                } else {
+-                    false
+-                }
++                position.map(|position| unmatched.swap_remove(position).clone())
+             }
+             ParsedAssertion::Revealed(expected_type) => {
+                 let expected_type = discard_todo_metadata(expected_type);
+@@ -391,28 +456,32 @@ impl Matcher {
+                     false
+                 };
+ 
++                // Try to match against any reveal-type diagnostic.
++                // If the `undefined-reveal` diagnostic is present, we also match against it.
+                 let mut matched_revealed_type = None;
+-                let mut matched_undefined_reveal = None;
+-                for (index, diagnostic) in unmatched.iter().enumerate() {
++                let mut matched_undefined_reveal = false;
++                let mut i = 0;
++
++                while i < unmatched.len() {
++                    let diagnostic = &unmatched[i];
++
+                     if matched_revealed_type.is_none() && diagnostic_matches_reveal(diagnostic) {
+-                        matched_revealed_type = Some(index);
+-                    } else if matched_undefined_reveal.is_none()
++                        matched_revealed_type = Some(unmatched.swap_remove(i).clone());
++                    } else if !matched_undefined_reveal
+                         && diagnostic.id().is_lint_named("undefined-reveal")
+                     {
+-                        matched_undefined_reveal = Some(index);
++                        unmatched.swap_remove(i);
++                        matched_undefined_reveal = true;
++                    } else {
++                        i += 1;
+                     }
+-                    if matched_revealed_type.is_some() && matched_undefined_reveal.is_some() {
++
++                    if matched_revealed_type.is_some() && matched_undefined_reveal {
+                         break;
+                     }
+                 }
+-                let mut idx = 0;
+-                unmatched.retain(|_| {
+-                    let retain =
+-                        Some(idx) != matched_revealed_type && Some(idx) != matched_undefined_reveal;
+-                    idx += 1;
+-                    retain
+-                });
+-                matched_revealed_type.is_some()
++
++                matched_revealed_type
+             }
+         }
+     }
+@@ -470,7 +539,7 @@ mod tests {
+     fn get_result(
+         source: &str,
+         expected_diagnostics: Vec<ExpectedDiagnostic>,
+-    ) -> Result<(), FailuresByLine> {
++    ) -> Result<Vec<Diagnostic>, FailuresByLine> {
+         colored::control::set_override(false);
+ 
+         let mut db = crate::db::Db::setup();
+@@ -494,7 +563,7 @@ mod tests {
+         super::match_file(&db, file, &diagnostics)
+     }
+ 
+-    fn assert_fail(result: Result<(), FailuresByLine>, messages: &[(usize, &[&str])]) {
++    fn assert_fail(result: Result<Vec<Diagnostic>, FailuresByLine>, messages: &[(usize, &[&str])]) {
+         let Err(failures) = result else {
+             panic!("expected a failure");
+         };
+@@ -510,13 +579,20 @@ mod tests {
+             .collect();
+         let failures: Vec<(OneIndexed, Vec<String>)> = failures
+             .iter()
+-            .map(|(idx, msgs)| (idx, msgs.to_vec()))
++            .map(|(idx, msgs)| {
++                (
++                    idx,
++                    msgs.iter()
++                        .map(|failure| failure.message().to_string())
++                        .collect(),
++                )
++            })
+             .collect();
+ 
+         assert_eq!(failures, expected);
+     }
+ 
+-    fn assert_ok(result: &Result<(), FailuresByLine>) {
++    fn assert_ok(result: &Result<Vec<Diagnostic>, FailuresByLine>) {
+         assert!(result.is_ok(), "{result:?}");
+     }
+ 
+diff --git a/crates/ty_test/src/parser.rs b/crates/ty_test/src/parser.rs
+index 0256287a63..e2192dc81e 100644
+--- a/crates/ty_test/src/parser.rs
++++ b/crates/ty_test/src/parser.rs
+@@ -14,7 +14,7 @@ use ruff_index::{IndexVec, newtype_index};
+ use ruff_python_ast::PySourceType;
+ use ruff_python_trivia::Cursor;
+ use ruff_source_file::{LineIndex, LineRanges, OneIndexed};
+-use ruff_text_size::{TextLen, TextRange, TextSize};
++use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
+ use rustc_stable_hash::{FromStableHash, SipHasher128Hash, StableSipHasher128};
+ 
+ /// Parse the Markdown `source` as a test suite with given `title`.
+@@ -214,9 +214,30 @@ struct EmbeddedFileId;
+ /// Holds information about the start and the end of a code block in a Markdown file.
+ ///
+ /// The start is the offset of the first triple-backtick in the code block, and the end is the
+-/// offset of the (start of the) closing triple-backtick.
++/// offset immediately after the closing triple-backtick.
++#[derive(Debug, Copy, Clone)]
++pub(crate) struct BacktickOffsets(TextRange);
++
++impl Ranged for BacktickOffsets {
++    fn range(&self) -> TextRange {
++        self.0
++    }
++}
++
+ #[derive(Debug, Clone)]
+-pub(crate) struct BacktickOffsets(TextSize, TextSize);
++pub(crate) struct InlineSnapshotBlock<'s> {
++    /// The expected snapshot content.
++    pub(crate) expected: &'s str,
++
++    /// The range of the inline snapshot block, including both fences.
++    pub(crate) range: BacktickOffsets,
++}
++
++impl Ranged for InlineSnapshotBlock<'_> {
++    fn range(&self) -> TextRange {
++        self.range.0
++    }
++}
+ 
+ /// Holds information about the position and length of all code blocks that are part of
+ /// a single embedded file in a Markdown file. This is used to reconstruct absolute line
+@@ -264,8 +285,8 @@ impl EmbeddedFileSourceMap {
+             start_line_and_line_count: dimensions
+                 .into_iter()
+                 .map(|d| {
+-                    let start_line = md_index.line_index(d.0).get();
+-                    let end_line = md_index.line_index(d.1).get();
++                    let start_line = md_index.line_index(d.start()).get();
++                    let end_line = md_index.line_index(d.end()).get();
+                     let code_line_count = (end_line - start_line) - 1;
+                     (start_line, code_line_count)
+                 })
+@@ -352,7 +373,8 @@ pub(crate) struct EmbeddedFile<'s> {
+     path: EmbeddedFilePath<'s>,
+     pub(crate) lang: &'s str,
+     pub(crate) code: Cow<'s, str>,
+-    pub(crate) backtick_offsets: Vec<BacktickOffsets>,
++    /// The checkable code blocks
++    pub(crate) code_blocks: Vec<CodeBlock<'s>>,
+ }
+ 
+ impl EmbeddedFile<'_> {
+@@ -363,11 +385,16 @@ impl EmbeddedFile<'_> {
+             return;
+         }
+ 
+-        self.backtick_offsets.push(backtick_offsets);
+-
+         let existing_code = self.code.to_mut();
+         existing_code.push('\n');
++        let start_offset = existing_code.text_len();
+         existing_code.push_str(new_code);
++
++        self.code_blocks.push(CodeBlock {
++            backticks: backtick_offsets,
++            embedded_start_offset: start_offset,
++            inline_snapshot_block: None,
++        });
+     }
+ 
+     pub(crate) fn relative_path(&self) -> &str {
+@@ -385,6 +412,35 @@ impl EmbeddedFile<'_> {
+             project_root.join(relative_path)
+         }
+     }
++
++    pub(crate) fn is_checkable(&self) -> bool {
++        matches!(self.lang, "py" | "python" | "pyi")
++    }
++}
++
++#[derive(Debug, Clone)]
++pub(crate) struct CodeBlock<'s> {
++    /// The offsets of the code block's code fences in the markdown source.
++    backticks: BacktickOffsets,
++    /// The offset in the concatenated file source at which this code block starts.
++    embedded_start_offset: TextSize,
++
++    /// The code block's associated inline snapshot block (where inline snapshots are stored).
++    inline_snapshot_block: Option<InlineSnapshotBlock<'s>>,
++}
++
++impl<'s> CodeBlock<'s> {
++    pub(crate) fn backtick_offsets(&self) -> BacktickOffsets {
++        self.backticks
++    }
++
++    pub(crate) fn embedded_start_offset(&self) -> TextSize {
++        self.embedded_start_offset
++    }
++
++    pub(crate) fn inline_snapshot_block(&self) -> Option<&InlineSnapshotBlock<'s>> {
++        self.inline_snapshot_block.as_ref()
++    }
+ }
+ 
+ #[derive(Debug)]
+@@ -634,12 +690,15 @@ impl<'s> Parser<'s> {
+                                 code = &code[..code.len() - '\n'.len_utf8()];
+                             }
+ 
+-                            let backtick_offset_end = self.cursor.offset() - "```".text_len();
++                            let backtick_offset_end = self.cursor.offset();
+ 
+                             self.process_code_block(
+                                 lang,
+                                 code,
+-                                BacktickOffsets(backtick_offset_start, backtick_offset_end),
++                                BacktickOffsets(TextRange::new(
++                                    backtick_offset_start,
++                                    backtick_offset_end,
++                                )),
+                             )?;
+                         } else {
+                             let code_block_start = self.cursor.token_len();
+@@ -740,6 +799,10 @@ impl<'s> Parser<'s> {
+             return Ok(());
+         }
+ 
++        if lang == "diagnostics" {
++            return self.process_inline_snapshot(code, backtick_offsets);
++        }
++
+         if let Some(explicit_path) = self.explicit_path {
+             let expected_extension = if lang == "python" { "py" } else { lang };
+ 
+@@ -749,7 +812,7 @@ impl<'s> Parser<'s> {
+                     .extension()
+                     .is_none_or(|extension| extension.eq_ignore_ascii_case(expected_extension))
+             {
+-                let backtick_start = self.line_index(backtick_offsets.0);
++                let backtick_start = self.line_index(backtick_offsets.start());
+                 bail!(
+                     "File extension of test file path `{explicit_path}` in test `{test_name}` does not match language specified `{lang}` of code block at line `{backtick_start}`"
+                 );
+@@ -798,8 +861,13 @@ impl<'s> Parser<'s> {
+                     section,
+                     lang,
+                     code: Cow::Borrowed(code),
+-                    backtick_offsets: vec![backtick_offsets],
++                    code_blocks: vec![CodeBlock {
++                        backticks: backtick_offsets,
++                        embedded_start_offset: TextSize::new(0),
++                        inline_snapshot_block: None,
++                    }],
+                 });
++
+                 entry.insert(index);
+             }
+             Entry::Occupied(entry) => {
+@@ -833,7 +901,7 @@ impl<'s> Parser<'s> {
+     fn current_section_has_merged_snippets(&self) -> bool {
+         self.current_section_files
+             .values()
+-            .any(|id| self.files[*id].backtick_offsets.len() > 1)
++            .any(|id| self.files[*id].code_blocks.len() > 1)
+     }
+ 
+     fn process_config_block(&mut self, code: &str) -> anyhow::Result<()> {
+@@ -861,6 +929,40 @@ impl<'s> Parser<'s> {
+         Ok(())
+     }
+ 
++    fn process_inline_snapshot(
++        &mut self,
++        code: &'s str,
++        offsets: BacktickOffsets,
++    ) -> anyhow::Result<()> {
++        let Some(file) = self.files.last_mut() else {
++            bail!(
++                "Inline diagnostics block must follow a checkable Python file in the same section."
++            );
++        };
++
++        if !file.is_checkable() {
++            bail!(
++                "Inline diagnostics block must follow a checkable Python file block in the same section but it follows a {} block.",
++                file.lang
++            );
++        }
++
++        let code_block = file.code_blocks.last_mut().unwrap();
++
++        anyhow::ensure!(
++            code_block.inline_snapshot_block.as_ref().is_none(),
++            "File `{}` has more than one inline diagnostics block.",
++            file.relative_path(),
++        );
++
++        code_block.inline_snapshot_block = Some(InlineSnapshotBlock {
++            expected: code,
++            range: offsets,
++        });
++
++        Ok(())
++    }
++
+     fn process_mdtest_directive(
+         &mut self,
+         directive: MdtestDirective,
+diff --git a/crates/ty_test/src/assertion.rs b/crates/ty_test/src/pragma_comments.rs
+similarity index 83%
+rename from crates/ty_test/src/assertion.rs
+rename to crates/ty_test/src/pragma_comments.rs
+index e3f72a4565..b17a78889b 100644
+--- a/crates/ty_test/src/assertion.rs
++++ b/crates/ty_test/src/pragma_comments.rs
+@@ -40,31 +40,40 @@ use ruff_python_trivia::{CommentRanges, Cursor};
+ use ruff_source_file::{LineIndex, OneIndexed};
+ use ruff_text_size::{Ranged, TextRange, TextSize};
+ use smallvec::SmallVec;
+-use std::ops::Deref;
+ use std::str::FromStr;
+ 
+-/// Diagnostic assertion comments in a single embedded file.
++/// Test pragma comments a single embedded file.
+ #[derive(Debug)]
+-pub(crate) struct InlineFileAssertions<'s> {
+-    assertions: Vec<LineAssertions<'s>>,
++pub(crate) struct TestPragmaComments<'s> {
++    by_line: Vec<LinePragmaComments<'s>>,
+ }
+ 
+-impl<'s> InlineFileAssertions<'s> {
++impl<'s> TestPragmaComments<'s> {
+     pub(crate) fn from_file(
+         source: &'s str,
+         parsed: &ParsedModuleRef,
+         file_index: &LineIndex,
+     ) -> Self {
+-        let mut assertions = Vec::new();
+-        let mut file_assertions = UnparsedAssertionIter {
++        let mut pragmas_by_line = Vec::new();
++        let mut pragma_comments = PragmaCommentsIter {
+             tokens: parsed.tokens().iter(),
+             source,
+         }
+         .peekable();
+ 
+-        while let Some(ranged_assertion) = file_assertions.next() {
++        while let Some(ranged_pragma) = pragma_comments.next() {
+             let mut collector = AssertionVec::new();
+-            let mut line_number = file_index.line_index(ranged_assertion.start());
++            let mut line_number = file_index.line_index(ranged_pragma.start());
++            let mut snapshots = 0usize;
++
++            let mut push_pragma = |comment: UnparsedPragmaComment<'s>| match comment {
++                UnparsedPragmaComment::Snapshot => {
++                    snapshots += 1;
++                }
++                UnparsedPragmaComment::Assertion(assertion) => {
++                    collector.push(assertion);
++                }
++            };
+ 
+             // Collect all own-line comments on consecutive lines; these all apply to the same line of
+             // code. For example:
+@@ -75,74 +84,90 @@ impl<'s> InlineFileAssertions<'s> {
+             // reveal_type(x)
+             // ```
+             //
+-            if CommentRanges::is_own_line(ranged_assertion.start(), source) {
+-                collector.push(ranged_assertion.into());
++            if CommentRanges::is_own_line(ranged_pragma.start(), source) {
++                push_pragma(ranged_pragma.into_comment());
+                 let mut only_own_line = true;
+-                while let Some(ranged_assertion) = file_assertions.peek() {
++
++                while let Some(ranged_pragma) = pragma_comments.next_if(|next_pragma| {
+                     let next_line_number = line_number.saturating_add(1);
+-                    if file_index.line_index(ranged_assertion.start()) == next_line_number {
+-                        if !CommentRanges::is_own_line(ranged_assertion.start(), source) {
+-                            only_own_line = false;
+-                        }
++
++                    if file_index.line_index(next_pragma.start()) == next_line_number {
+                         line_number = next_line_number;
+-                        collector.push(file_assertions.next().unwrap().into());
+-                        // If we see an end-of-line comment, it has to be the end of the stack,
+-                        // otherwise we'd botch this case, attributing all three errors to the `bar`
+-                        // line:
+-                        //
+-                        // ```py
+-                        // # error:
+-                        // foo  # error:
+-                        // bar  # error:
+-                        // ```
+-                        //
+-                        if !only_own_line {
+-                            break;
+-                        }
++                        true
+                     } else {
++                        false
++                    }
++                }) {
++                    if !CommentRanges::is_own_line(ranged_pragma.start(), source) {
++                        only_own_line = false;
++                    }
++
++                    push_pragma(ranged_pragma.into_comment());
++
++                    // If we see an end-of-line comment, it has to be the end of the stack,
++                    // otherwise we'd botch this case, attributing all three errors to the `bar`
++                    // line:
++                    //
++                    // ```py
++                    // # error:
++                    // foo  # error:
++                    // bar  # error:
++                    // ```
++                    //
++                    if !only_own_line {
+                         break;
+                     }
+                 }
++
+                 if only_own_line {
+                     // The collected comments apply to the _next_ line in the code.
+                     line_number = line_number.saturating_add(1);
+                 }
+             } else {
+                 // We have a line-trailing comment; it applies to its own line, and is not grouped.
+-                collector.push(ranged_assertion.into());
++                push_pragma(ranged_pragma.into_comment());
+             }
+ 
+-            assertions.push(LineAssertions {
++            pragmas_by_line.push(LinePragmaComments {
+                 line_number,
+                 assertions: collector,
++                snapshot_pragmas: snapshots,
+             });
+         }
+ 
+-        Self { assertions }
++        Self {
++            by_line: pragmas_by_line,
++        }
+     }
++}
++
++impl<'a, 's> IntoIterator for &'a TestPragmaComments<'s> {
++    type Item = &'a LinePragmaComments<'s>;
+ 
+-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, LineAssertions<'s>> {
+-        self.assertions.iter()
++    type IntoIter = std::slice::Iter<'a, LinePragmaComments<'s>>;
++
++    fn into_iter(self) -> Self::IntoIter {
++        self.by_line.iter()
+     }
+ }
+ 
+-impl<'a, 's> IntoIterator for &'a InlineFileAssertions<'s> {
+-    type Item = &'a LineAssertions<'s>;
++impl<'s> IntoIterator for TestPragmaComments<'s> {
++    type Item = LinePragmaComments<'s>;
+ 
+-    type IntoIter = std::slice::Iter<'a, LineAssertions<'s>>;
++    type IntoIter = std::vec::IntoIter<LinePragmaComments<'s>>;
+ 
+     fn into_iter(self) -> Self::IntoIter {
+-        self.assertions.iter()
++        self.by_line.into_iter()
+     }
+ }
+ 
+-struct UnparsedAssertionIter<'a, 's> {
++struct PragmaCommentsIter<'a, 's> {
+     source: &'s str,
+     tokens: std::slice::Iter<'a, Token>,
+ }
+ 
+-impl<'s> Iterator for UnparsedAssertionIter<'_, 's> {
+-    type Item = AssertionWithRange<'s>;
++impl<'s> Iterator for PragmaCommentsIter<'_, 's> {
++    type Item = PragmaCommentWithRange<'s>;
+ 
+     fn next(&mut self) -> Option<Self::Item> {
+         loop {
+@@ -152,8 +177,8 @@ impl<'s> Iterator for UnparsedAssertionIter<'_, 's> {
+             }
+ 
+             let comment_text = &self.source[token.range()];
+-            if let Some(assertion) = UnparsedAssertion::from_comment(comment_text) {
+-                return Some(AssertionWithRange(assertion, token.range()));
++            if let Some(pragma) = UnparsedPragmaComment::from_comment(comment_text) {
++                return Some(PragmaCommentWithRange(pragma, token.range()));
+             }
+         }
+     }
+@@ -161,75 +186,94 @@ impl<'s> Iterator for UnparsedAssertionIter<'_, 's> {
+ 
+ /// An [`UnparsedAssertion`] with the [`TextRange`] of its original inline comment.
+ #[derive(Debug)]
+-struct AssertionWithRange<'a>(UnparsedAssertion<'a>, TextRange);
++struct PragmaCommentWithRange<'a>(UnparsedPragmaComment<'a>, TextRange);
+ 
+-impl<'a> Deref for AssertionWithRange<'a> {
+-    type Target = UnparsedAssertion<'a>;
+-
+-    fn deref(&self) -> &Self::Target {
+-        &self.0
++impl<'a> PragmaCommentWithRange<'a> {
++    fn into_comment(self) -> UnparsedPragmaComment<'a> {
++        self.0
+     }
+ }
+ 
+-impl Ranged for AssertionWithRange<'_> {
++impl Ranged for PragmaCommentWithRange<'_> {
+     fn range(&self) -> TextRange {
+         self.1
+     }
+ }
+ 
+-impl<'a> From<AssertionWithRange<'a>> for UnparsedAssertion<'a> {
+-    fn from(value: AssertionWithRange<'a>) -> Self {
+-        value.0
+-    }
+-}
+-
+ /// A vector of [`UnparsedAssertion`]s belonging to a single line.
+ ///
+ /// Most lines will have zero or one assertion, so we use a [`SmallVec`] optimized for a single
+ /// element to avoid most heap vector allocations.
+ type AssertionVec<'a> = SmallVec<[UnparsedAssertion<'a>; 1]>;
+ 
+-/// One or more assertions referring to the same line of code.
++/// One or more pragma comment referring to the same line of code.
+ #[derive(Debug)]
+-pub(crate) struct LineAssertions<'a> {
++pub(crate) struct LinePragmaComments<'a> {
+     /// The line these assertions refer to.
+     ///
+     /// Not necessarily the same line the assertion comment is located on; for an own-line comment,
+     /// it's the next non-assertion line.
+     pub(crate) line_number: OneIndexed,
+ 
+-    /// The assertions referring to this line.
++    /// The comments referring to this line.
+     pub(crate) assertions: AssertionVec<'a>,
++
++    /// The number of snapshot comments on this line.
++    pub(crate) snapshot_pragmas: usize,
++}
++
++#[derive(Debug)]
++pub(crate) enum UnparsedPragmaComment<'a> {
++    /// A `# snapshot` pragma comment.
++    Snapshot,
++
++    Assertion(UnparsedAssertion<'a>),
+ }
+ 
+-impl<'a> Deref for LineAssertions<'a> {
+-    type Target = [UnparsedAssertion<'a>];
++impl<'a> UnparsedPragmaComment<'a> {
++    /// Returns `Some(_)` if the comment starts with `# snapshot`, `# error:` or `# revealed:`,
++    /// indicating that it is a pragma comment.
++    fn from_comment(comment: &'a str) -> Option<Self> {
++        let comment = comment.trim().strip_prefix('#')?.trim();
++        if comment == "snapshot" {
++            return Some(Self::Snapshot);
++        }
+ 
+-    fn deref(&self) -> &Self::Target {
+-        &self.assertions
++        UnparsedAssertion::from_comment(comment).map(Self::Assertion)
+     }
+ }
+ 
+-/// A single diagnostic assertion comment.
++/// A single assertion comment.
+ ///
+-/// This type represents an *attempted* assertion, but not necessarily a *valid* assertion.
++/// This type represents an *attempted* assertion comment, but not necessarily a *valid* assertion comment.
+ /// Parsing is done lazily in `matcher.rs`; this allows us to emit nicer error messages
+-/// in the event of an invalid assertion
++/// in the event of an invalid comment.
+ #[derive(Debug)]
+ pub(crate) enum UnparsedAssertion<'a> {
+     /// A `# revealed:` assertion.
+     Revealed(&'a str),
+-
+     /// An `# error:` assertion.
+     Error(&'a str),
+ }
+ 
++impl std::fmt::Display for UnparsedAssertion<'_> {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::Revealed(expected_type) => {
++                write!(f, "revealed: {expected_type}")
++            }
++            Self::Error(assertion) => write!(f, "error: {assertion}"),
++        }
++    }
++}
++
+ impl<'a> UnparsedAssertion<'a> {
+     /// Returns `Some(_)` if the comment starts with `# error:` or `# revealed:`,
+-    /// indicating that it is an assertion comment.
+-    fn from_comment(comment: &'a str) -> Option<Self> {
+-        let comment = comment.trim().strip_prefix('#')?.trim();
+-        let (keyword, body) = comment.split_once(':')?;
++    /// indicating that it is a assertion comment.
++    fn from_comment(comment_body: &'a str) -> Option<Self> {
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
+         let keyword = keyword.trim();
+ 
+         // Support other pragma comments coming after `error` or `revealed`, e.g.
+@@ -266,15 +310,6 @@ impl<'a> UnparsedAssertion<'a> {
+     }
+ }
+ 
+-impl std::fmt::Display for UnparsedAssertion<'_> {
+-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+-        match self {
+-            Self::Revealed(expected_type) => write!(f, "revealed: {expected_type}"),
+-            Self::Error(assertion) => write!(f, "error: {assertion}"),
+-        }
+-    }
+-}
+-
+ /// An assertion comment that has been parsed and validated for correctness.
+ #[derive(Debug)]
+ pub(crate) enum ParsedAssertion<'a> {
+@@ -493,7 +528,7 @@ mod tests {
+     use ty_python_core::program::{FallibleStrategy, Program, ProgramSettings};
+     use ty_python_semantic::PythonVersionWithSource;
+ 
+-    fn get_assertions(source: &str) -> InlineFileAssertions<'_> {
++    fn get_assertions(source: &str) -> TestPragmaComments<'_> {
+         let mut db = Db::setup();
+ 
+         let settings = ProgramSettings {
+@@ -508,11 +543,11 @@ mod tests {
+         db.write_file("/src/test.py", source).unwrap();
+         let file = system_path_to_file(&db, "/src/test.py").unwrap();
+         let parsed = parsed_module(&db, file).load(&db);
+-        InlineFileAssertions::from_file(source, &parsed, &line_index(&db, file))
++        TestPragmaComments::from_file(source, &parsed, &line_index(&db, file))
+     }
+ 
+-    fn into_vec(assertions: InlineFileAssertions<'_>) -> Vec<LineAssertions<'_>> {
+-        assertions.assertions
++    fn into_vec(assertions: TestPragmaComments<'_>) -> Vec<LinePragmaComments<'_>> {
++        assertions.by_line
+     }
+ 
+     #[test]

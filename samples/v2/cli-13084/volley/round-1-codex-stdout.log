@@ -1,0 +1,512 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/13084
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ad3-23ec-7380-b243-ba1e3bffe250
+--------
+user
+# Volley — goal-anchored refactor spec
+
+You are sharpening a refactor spec into specific, testable claims against a concrete goal. Do not edit code. Produce a markdown document.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/goal/GOAL.md` — concatenation of: linked issue(s) title + body (if any), PR title, PR body. This is what the PR is *trying* to accomplish.
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/diff-base-to-test.patch` — the first-pass implementation that made tests pass. A working draft, not the final shape.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/allowed-files.txt` — source files changed from C_base to C_test (post-exclusion). You may only propose edits to files in this set.
+- **Cleanroom source tree** rooted at `/tmp/refactor-eq-workdir/cleanroom-v2/13084/` — the repo at C_test. You may grep it for patterns, imports, and idioms.
+
+Read all inputs. You may grep the wider codebase.
+
+## Task
+
+Produce a sharpened list of **prescriptive, bounded refactor claims** that, if applied, would move the artifact closer to a cleaner expression of the goal — without changing behavior.
+
+"Closer to the goal" means:
+- The implementation expresses the intent of the goal more directly (less accidental structure, fewer indirections that don't serve the goal).
+- The code is more idiomatic to the surrounding codebase at C_test.
+- Accidental complexity added during the first-pass (helper duplication, stray dead code, over-abstracted for one call site, unnecessary state) is removed.
+
+Each claim must be:
+- **Specific**: names a file, a function/block, and the change.
+- **Bounded**: one independent change, applicable without forward reference to later claims.
+- **Testable against the existing suite**: behavior preserved; the full test suite at C_test continues to pass.
+- **Justified against the goal**: one sentence on *which goal aspect* this clarifies and *why* it reduces complexity.
+- **Within scope**: only touches files in `allowed-files.txt`; never any `*.test.ts`, `*.test.tsx`, or other test files.
+
+**Empty Accepted Claims is permitted.** If the artifact is already a clean expression of the goal and no prescriptive changes are warranted, say so explicitly. Do not invent claims.
+
+List rejected candidate claims with reasons (e.g., "would cross a public API boundary", "out of allowed edit set", "would change observable behavior in test X").
+
+## Output
+
+Write to `/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md`, where N is passed in the task environment.
+
+Format:
+
+```
+## Accepted Claims
+
+### C1 — <title>
+**File**: <path>:<line>
+**Change**: <prescriptive description>
+**Goal link**: <which aspect of the goal this clarifies>
+**Justification**: <one sentence>
+
+### C2 — ...
+
+## Rejected
+
+- <claim candidate>: <reason>
+```
+
+No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the goal, patch, allowed file list, and relevant code around the changed areas, then write only the requested claims document.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+# PR #13084 — Add `discussion list` command
+
+## PR body
+
+## Summary
+
+Implements `gh discussion list` — the first user-facing command in the discussion group (PR 2 of 11).
+
+### Features
+
+- **Listing:** `repository.discussions` GraphQL query with state, category, answered, sort, and order filters
+- **Search:** Falls back to `search(type: DISCUSSION)` when `--author`, `--label`, or `--search` are provided (same dual-path pattern as `gh issue list`)
+- **Pagination:** `--after` cursor flag for paginating through results; `next` cursor in JSON output envelope
+- **Category resolution:** Matches `--category` by slug first, then name (case-insensitive). Errors with sorted available slugs on mismatch. Lives in `shared/` for reuse by other commands.
+- **TTY output:** Colored table with ID, TITLE, CATEGORY, LABELS, ANSWERED (✓), UPDATED columns
+- **Non-TTY output:** Tab-separated with STATE as second field
+- **JSON output:** Envelope `{"totalCount": N, "discussions": [...], "next": "<cursor>"}` with `--jq` and `--template` support
+- **Web mode:** `--web` opens discussions in browser, populates search box when filters are present
+- **Preview annotations:** Top-level `discussion` and `list` commands marked as `(preview)`
+
+ succeeded in 0ms:
+pkg/cmd/discussion/client/client.go
+pkg/cmd/discussion/client/client_impl.go
+pkg/cmd/discussion/client/client_mock.go
+pkg/cmd/discussion/client/types.go
+pkg/cmd/discussion/discussion.go
+pkg/cmd/discussion/list/list.go
+pkg/cmd/discussion/shared/categories.go
+pkg/cmd/discussion/shared/fields.go
+ succeeded in 0ms:
+diff --git a/pkg/cmd/discussion/client/client.go b/pkg/cmd/discussion/client/client.go
+index b698dc896..a794d13e1 100644
+--- a/pkg/cmd/discussion/client/client.go
++++ b/pkg/cmd/discussion/client/client.go
+@@ -9,8 +9,8 @@ import "github.com/cli/cli/v2/internal/ghrepo"
+ 
+ // DiscussionClient defines operations for interacting with the GitHub Discussions API.
+ type DiscussionClient interface {
+-	List(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error)
+-	Search(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error)
++	List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
++	Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+ 	GetByNumber(repo ghrepo.Interface, number int) (*Discussion, error)
+ 	GetWithComments(repo ghrepo.Interface, number int, commentLimit int, order string) (*Discussion, error)
+ 	ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error)
+diff --git a/pkg/cmd/discussion/client/client_impl.go b/pkg/cmd/discussion/client/client_impl.go
+index e5db32dd5..9d22454d7 100644
+--- a/pkg/cmd/discussion/client/client_impl.go
++++ b/pkg/cmd/discussion/client/client_impl.go
+@@ -3,9 +3,12 @@ package client
+codex
+The first patch chunk shows the core implementation is in the discussion client and list command. I’m going to inspect the rest of the patch plus the current files so the claims point at actual line numbers in C_test.
+exec
+/bin/zsh -lc "sed -n '261,620p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
++		if perPage > 100 {
++			perPage = 100
++		}
++		variables["first"] = perPage
++
++		var data response
++		if err := c.gql.GraphQL(repo.RepoHost(), query, variables, &data); err != nil {
++			return nil, err
++		}
++
++		if firstPage && !data.Repository.HasDiscussionsEnabled {
++			return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
++		}
++		firstPage = false
++
++		totalCount = data.Repository.Discussions.TotalCount
++		for _, n := range data.Repository.Discussions.Nodes {
++			discussions = append(discussions, mapDiscussion(n))
++		}
++
+exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/list/list.go | sed -n '1,520p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/client/client_impl.go | sed -n '1,520p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+     1	package list
+     2	
+     3	import (
+     4		"fmt"
+     5		"net/url"
+     6		"strings"
+     7		"time"
+     8	
+     9		"github.com/MakeNowJust/heredoc"
+    10		"github.com/cli/cli/v2/internal/browser"
+    11		"github.com/cli/cli/v2/internal/ghrepo"
+    12		"github.com/cli/cli/v2/internal/tableprinter"
+    13		"github.com/cli/cli/v2/internal/text"
+    14		"github.com/cli/cli/v2/pkg/cmd/discussion/client"
+    15		"github.com/cli/cli/v2/pkg/cmd/discussion/shared"
+    16		"github.com/cli/cli/v2/pkg/cmdutil"
+    17		"github.com/cli/cli/v2/pkg/iostreams"
+    18		"github.com/spf13/cobra"
+    19	)
+    20	
+ succeeded in 0ms:
+     1	package client
+     2	
+     3	import (
+     4		"fmt"
+     5		"net/http"
+     6		"strings"
+     7		"time"
+     8	
+     9		"github.com/cli/cli/v2/api"
+    10		"github.com/cli/cli/v2/internal/ghrepo"
+    11		"github.com/shurcooL/githubv4"
+    12	)
+    13	
+    14	type discussionClient struct {
+    15		gql *api.Client
+    16	}
+    17	
+    18	// NewDiscussionClient creates a DiscussionClient backed by the given HTTP client.
+    19	func NewDiscussionClient(httpClient *http.Client) DiscussionClient {
+    20		return &discussionClient{
+exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/client/types.go | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/shared/categories.go pkg/cmd/discussion/shared/fields.go pkg/cmd/discussion/discussion.go | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "sed -n '621,1220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+usage: nl [-p] [-b type] [-d delim] [-f type] [-h type] [-i incr] [-l num]
+          [-n format] [-s sep] [-v startnum] [-w width] [file]
+ succeeded in 0ms:
+@@ -10,14 +10,14 @@ type Discussion struct {
+ 	Title          string
+ 	Body           string
+ 	URL            string
+-	State          string
++	Closed         bool
+ 	StateReason    string
+-	Author         DiscussionAuthor
++	Author         DiscussionActor
+ 	Category       DiscussionCategory
+ 	Labels         []DiscussionLabel
+ 	Answered       bool
+ 	AnswerChosenAt time.Time
+-	AnswerChosenBy *DiscussionAuthor
++	AnswerChosenBy *DiscussionActor
+ 	Comments       DiscussionCommentList
+ 	ReactionGroups []ReactionGroup
+ 	CreatedAt      time.Time
+@@ -43,8 +43,8 @@ func (d Discussion) ExportData(fields []string) map[string]interface{} {
+ 			data[f] = d.Body
+ succeeded in 0ms:
+     1	package client
+     2	
+     3	import "time"
+     4	
+     5	// Discussion represents a GitHub Discussion as a domain object.
+     6	// Fields carry no JSON tags; serialization is handled by ExportData.
+     7	type Discussion struct {
+     8		ID             string
+     9		Number         int
+    10		Title          string
+    11		Body           string
+    12		URL            string
+    13		Closed         bool
+    14		StateReason    string
+    15		Author         DiscussionActor
+    16		Category       DiscussionCategory
+    17		Labels         []DiscussionLabel
+    18		Answered       bool
+    19		AnswerChosenAt time.Time
+    20		AnswerChosenBy *DiscussionActor
+exec
+/bin/zsh -lc "rg -n \"DiscussionListResult|discussionListFields|NewCmdList|openInBrowser|MatchCategory|discussionFields|ListCategories\\(\" pkg/cmd/discussion pkg/cmd/issue pkg/cmd/pr" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+pkg/cmd/discussion/discussion.go:36:		cmdList.NewCmdList(f, nil),
+pkg/cmd/issue/issue.go:46:		cmdList.NewCmdList(f, nil),
+pkg/cmd/discussion/client/client.go:12:	List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
+pkg/cmd/discussion/client/client.go:13:	Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+pkg/cmd/discussion/client/client.go:16:	ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error)
+pkg/cmd/discussion/client/client_impl.go:122:// discussionFields is the GraphQL fragment selecting fields for discussion queries.
+pkg/cmd/discussion/client/client_impl.go:124:const discussionFields = `
+pkg/cmd/discussion/client/client_impl.go:134:func (c *discussionClient) List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
+pkg/cmd/discussion/client/client_impl.go:229:	}`, discussionFields)
+pkg/cmd/discussion/client/client_impl.go:275:	return &DiscussionListResult{
+pkg/cmd/discussion/client/client_impl.go:282:func (c *discussionClient) Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
+pkg/cmd/discussion/client/client_impl.go:359:	}`, discussionFields)
+pkg/cmd/discussion/client/client_impl.go:401:	return &DiscussionListResult{
+pkg/cmd/discussion/client/client_impl.go:416:func (c *discussionClient) ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error) {
+pkg/cmd/discussion/client/client_mock.go:36://			ListFunc: func(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
+pkg/cmd/discussion/client/client_mock.go:51://			SearchFunc: func(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
+pkg/cmd/discussion/client/client_mock.go:86:	ListFunc func(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
+pkg/cmd/discussion/client/client_mock.go:101:	SearchFunc func(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+pkg/cmd/discussion/client/client_mock.go:448:func (mock *DiscussionClientMock) List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
+pkg/cmd/discussion/client/client_mock.go:492:func (mock *DiscussionClientMock) ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error) {
+codex
+I’ve got enough to see several possible cleanups, but I’m checking nearby command idioms before accepting them. In particular I’m comparing the new list command with existing issue/PR list patterns so I don’t recommend stylistic churn.
+exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/shared/fields.go | sed -n '1,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "sed -n '1,260p' pkg/cmd/issue/list/list.go && sed -n '1,260p' pkg/cmd/pr/list/list.go" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/discussion.go | sed -n '1,90p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084exec
+/bin/zsh -lc "nl -ba pkg/cmd/discussion/shared/categories.go | sed -n '1,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+     1	package shared
+     2	
+     3	// DiscussionFields lists the field names available for --json output on
+     4	// discussion commands.
+     5	var DiscussionFields = []string{
+     6		"id",
+     7		"number",
+     8		"title",
+     9		"body",
+    10		"url",
+    11		"closed",
+    12		"stateReason",
+    13		"author",
+    14		"category",
+    15		"labels",
+    16		"answered",
+    17		"answerChosenAt",
+    18		"answerChosenBy",
+    19		"comments",
+    20		"reactionGroups",
+ succeeded in 0ms:
+     1	package discussion
+     2	
+     3	import (
+     4		"github.com/MakeNowJust/heredoc"
+     5		cmdList "github.com/cli/cli/v2/pkg/cmd/discussion/list"
+     6		"github.com/cli/cli/v2/pkg/cmdutil"
+     7		"github.com/spf13/cobra"
+     8	)
+     9	
+    10	// NewCmdDiscussion returns the top-level "discussion" command.
+    11	func NewCmdDiscussion(f *cmdutil.Factory) *cobra.Command {
+    12		cmd := &cobra.Command{
+    13			Use:   "discussion <command>",
+    14			Short: "Work with GitHub Discussions (preview)",
+    15			Long: heredoc.Doc(`
+    16				Working with discussions in the GitHub CLI is in preview and subject to change without notice.
+    17			`),
+    18			Example: heredoc.Doc(`
+    19				$ gh discussion list
+    20				$ gh discussion create --category "General" --title "Hello"
+ succeeded in 0ms:
+     1	package shared
+     2	
+     3	import (
+     4		"fmt"
+     5		"slices"
+     6		"strings"
+     7	
+     8		"github.com/cli/cli/v2/pkg/cmd/discussion/client"
+     9	)
+    10	
+    11	// MatchCategory finds a category by name or slug (case-insensitive).
+    12	// It prefers an exact slug match over a name match, so users are
+    13	// encouraged to use slugs for unambiguous lookups.
+    14	func MatchCategory(input string, categories []client.DiscussionCategory) (*client.DiscussionCategory, error) {
+    15		for i := range categories {
+    16			if strings.EqualFold(categories[i].Slug, input) {
+    17				return &categories[i], nil
+    18			}
+    19		}
+    20		for i := range categories {
+ succeeded in 0ms:
+package list
+
+import (
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/browser"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/text"
+	issueShared "github.com/cli/cli/v2/pkg/cmd/issue/shared"
+	prShared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+codex
+The accepted set is small: one unnecessary state variable, one local string-building simplification, and one duplicated display helper. I’m rejecting a few tempting changes where they would either alter JSON behavior or introduce a broader abstraction than the goal needs.
+exec
+/bin/zsh -lc 'ls -la /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley' in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+total 40
+drwxr-xr-x@  3 junekim  staff     96 Apr 17 02:43 .
+drwxr-xr-x@ 19 junekim  staff    608 Apr 17 02:43 ..
+-rw-r--r--@  1 junekim  staff  17756 Apr 17 02:44 round-1-codex-stdout.log
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md && sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/13084 succeeded in 0ms:
+
+codex
+I’m writing the claims document now. It will only touch the requested volley output file, not the repo source.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md
+## Accepted Claims
+
+### C1 — Remove first-page state from discussions-enabled check
+**File**: pkg/cmd/discussion/client/client_impl.go:240
+**Change**: In `discussionClient.List`, remove the `firstPage` local variable and check `!data.Repository.HasDiscussionsEnabled` directly after each GraphQL response before reading `data.Repository.Discussions`.
+**Goal link**: This clarifies the client requirement that repositories with discussions disabled return a clear error.
+**Justification**: `hasDiscussionsEnabled` is repository-level data returned by the same query on every page, so the extra loop state does not serve pagination or filtering and can be removed without changing the command's intended behavior.
+
+### C2 — Build search keywords through the qualifier slice
+**File**: pkg/cmd/discussion/client/client_impl.go:348
+**Change**: In `discussionClient.Search`, append `filters.Keywords` to `qualifiers` when non-empty and then compute `searchQuery` once with `strings.Join(qualifiers, " ")`, replacing the separate `searchQuery += " " + filters.Keywords` branch.
+**Goal link**: This clarifies the search-query construction described by the goal as qualifiers plus keywords.
+**Justification**: Treating keywords as the final query component removes a special-case string concatenation while preserving the exact search query produced for all existing inputs.
+
+### C3 — Share state qualifier formatting for list output messages
+**File**: pkg/cmd/discussion/list/list.go:276
+**Change**: Add a small unexported helper in `list.go`, for example `stateQualifier(state string) string`, and use it from both `noResults` and `listHeader` instead of duplicating the same `switch state` block.
+**Goal link**: This clarifies the list command's user-facing state filtering in empty-result and header output.
+**Justification**: The two functions currently encode identical open/closed/all display rules, so one helper reduces accidental duplication without touching command behavior or output text.
+
+## Rejected
+
+- Replace `discussionListFields` with `shared.DiscussionFields` in `pkg/cmd/discussion/list/list.go`: `shared.DiscussionFields` includes `comments`, while the list command intentionally excludes fields only populated by view, so this would change `--json` validation and the command's public surface.
+- Add `Body` to `discussionNode` and map it in `mapDiscussion`: the query already requests `body`, but populating `Discussion.Body` would change observable `--json body` output rather than being a behavior-preserving refactor.
+- Extract one generic pagination helper for both `discussionClient.List` and `discussionClient.Search`: although both loops are similar, the response shapes and disabled-discussions check differ enough that a callback-based helper would add indirection for only two call sites.
+- Move browser query qualifier construction from `openInBrowser` into the client search-query code: the browser URL intentionally omits repository and sort qualifiers while `Search` requires them, so sharing the whole builder would either change the generated URL or require a broader abstraction than this goal needs.
+- Manually simplify `pkg/cmd/discussion/client/client_mock.go`: this file is generated mock-style plumbing for the interface shape, and edits there would not make the user-facing discussion list implementation express the goal more directly.
+apply_patch(auto_approved=true) exited 0 in 13ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md
+file update:
+diff --git a/samples/v2/cli-13084/volley/round-1-claims.md b/samples/v2/cli-13084/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..11dd6bc7aa7b0514c646b038d7feda0dfeba019e
+--- /dev/null
++++ b/samples/v2/cli-13084/volley/round-1-claims.md
+@@ -0,0 +1,27 @@
++## Accepted Claims
++
++### C1 — Remove first-page state from discussions-enabled check
++**File**: pkg/cmd/discussion/client/client_impl.go:240
++**Change**: In `discussionClient.List`, remove the `firstPage` local variable and check `!data.Repository.HasDiscussionsEnabled` directly after each GraphQL response before reading `data.Repository.Discussions`.
++**Goal link**: This clarifies the client requirement that repositories with discussions disabled return a clear error.
++**Justification**: `hasDiscussionsEnabled` is repository-level data returned by the same query on every page, so the extra loop state does not serve pagination or filtering and can be removed without changing the command's intended behavior.
++
++### C2 — Build search keywords through the qualifier slice
++**File**: pkg/cmd/discussion/client/client_impl.go:348
++**Change**: In `discussionClient.Search`, append `filters.Keywords` to `qualifiers` when non-empty and then compute `searchQuery` once with `strings.Join(qualifiers, " ")`, replacing the separate `searchQuery += " " + filters.Keywords` branch.
++**Goal link**: This clarifies the search-query construction described by the goal as qualifiers plus keywords.
++**Justification**: Treating keywords as the final query component removes a special-case string concatenation while preserving the exact search query produced for all existing inputs.
++
++### C3 — Share state qualifier formatting for list output messages
++**File**: pkg/cmd/discussion/list/list.go:276
++**Change**: Add a small unexported helper in `list.go`, for example `stateQualifier(state string) string`, and use it from both `noResults` and `listHeader` instead of duplicating the same `switch state` block.
++**Goal link**: This clarifies the list command's user-facing state filtering in empty-result and header output.
++**Justification**: The two functions currently encode identical open/closed/all display rules, so one helper reduces accidental duplication without touching command behavior or output text.
++
++## Rejected
++
++- Replace `discussionListFields` with `shared.DiscussionFields` in `pkg/cmd/discussion/list/list.go`: `shared.DiscussionFields` includes `comments`, while the list command intentionally excludes fields only populated by view, so this would change `--json` validation and the command's public surface.
++- Add `Body` to `discussionNode` and map it in `mapDiscussion`: the query already requests `body`, but populating `Discussion.Body` would change observable `--json body` output rather than being a behavior-preserving refactor.
++- Extract one generic pagination helper for both `discussionClient.List` and `discussionClient.Search`: although both loops are similar, the response shapes and disabled-discussions check differ enough that a callback-based helper would add indirection for only two call sites.
++- Move browser query qualifier construction from `openInBrowser` into the client search-query code: the browser URL intentionally omits repository and sort qualifiers while `Search` requires them, so sharing the whole builder would either change the generated URL or require a broader abstraction than this goal needs.
++- Manually simplify `pkg/cmd/discussion/client/client_mock.go`: this file is generated mock-style plumbing for the interface shape, and edits there would not make the user-facing discussion list implementation express the goal more directly.
+
+file update:
+diff --git a/samples/v2/cli-13084/volley/round-1-claims.md b/samples/v2/cli-13084/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..11dd6bc7aa7b0514c646b038d7feda0dfeba019e
+--- /dev/null
++++ b/samples/v2/cli-13084/volley/round-1-claims.md
+@@ -0,0 +1,27 @@
++## Accepted Claims
++
++### C1 — Remove first-page state from discussions-enabled check
++**File**: pkg/cmd/discussion/client/client_impl.go:240
++**Change**: In `discussionClient.List`, remove the `firstPage` local variable and check `!data.Repository.HasDiscussionsEnabled` directly after each GraphQL response before reading `data.Repository.Discussions`.
++**Goal link**: This clarifies the client requirement that repositories with discussions disabled return a clear error.
++**Justification**: `hasDiscussionsEnabled` is repository-level data returned by the same query on every page, so the extra loop state does not serve pagination or filtering and can be removed without changing the command's intended behavior.
++
++### C2 — Build search keywords through the qualifier slice
++**File**: pkg/cmd/discussion/client/client_impl.go:348
++**Change**: In `discussionClient.Search`, append `filters.Keywords` to `qualifiers` when non-empty and then compute `searchQuery` once with `strings.Join(qualifiers, " ")`, replacing the separate `searchQuery += " " + filters.Keywords` branch.
++**Goal link**: This clarifies the search-query construction described by the goal as qualifiers plus keywords.
++**Justification**: Treating keywords as the final query component removes a special-case string concatenation while preserving the exact search query produced for all existing inputs.
++
++### C3 — Share state qualifier formatting for list output messages
++**File**: pkg/cmd/discussion/list/list.go:276
++**Change**: Add a small unexported helper in `list.go`, for example `stateQualifier(state string) string`, and use it from both `noResults` and `listHeader` instead of duplicating the same `switch state` block.
++**Goal link**: This clarifies the list command's user-facing state filtering in empty-result and header output.
++**Justification**: The two functions currently encode identical open/closed/all display rules, so one helper reduces accidental duplication without touching command behavior or output text.
++
++## Rejected
++
++- Replace `discussionListFields` with `shared.DiscussionFields` in `pkg/cmd/discussion/list/list.go`: `shared.DiscussionFields` includes `comments`, while the list command intentionally excludes fields only populated by view, so this would change `--json` validation and the command's public surface.
++- Add `Body` to `discussionNode` and map it in `mapDiscussion`: the query already requests `body`, but populating `Discussion.Body` would change observable `--json body` output rather than being a behavior-preserving refactor.
++- Extract one generic pagination helper for both `discussionClient.List` and `discussionClient.Search`: although both loops are similar, the response shapes and disabled-discussions check differ enough that a callback-based helper would add indirection for only two call sites.
++- Move browser query qualifier construction from `openInBrowser` into the client search-query code: the browser URL intentionally omits repository and sort qualifiers while `Search` requires them, so sharing the whole builder would either change the generated URL or require a broader abstraction than this goal needs.
++- Manually simplify `pkg/cmd/discussion/client/client_mock.go`: this file is generated mock-style plumbing for the interface shape, and edits there would not make the user-facing discussion list implementation express the goal more directly.
+
+codex
+Done. Wrote the claims document to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md)
+file update:
+diff --git a/samples/v2/cli-13084/volley/round-1-claims.md b/samples/v2/cli-13084/volley/round-1-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..11dd6bc7aa7b0514c646b038d7feda0dfeba019e
+--- /dev/null
++++ b/samples/v2/cli-13084/volley/round-1-claims.md
+@@ -0,0 +1,27 @@
++## Accepted Claims
++
++### C1 — Remove first-page state from discussions-enabled check
++**File**: pkg/cmd/discussion/client/client_impl.go:240
++**Change**: In `discussionClient.List`, remove the `firstPage` local variable and check `!data.Repository.HasDiscussionsEnabled` directly after each GraphQL response before reading `data.Repository.Discussions`.
++**Goal link**: This clarifies the client requirement that repositories with discussions disabled return a clear error.
++**Justification**: `hasDiscussionsEnabled` is repository-level data returned by the same query on every page, so the extra loop state does not serve pagination or filtering and can be removed without changing the command's intended behavior.
++
++### C2 — Build search keywords through the qualifier slice
++**File**: pkg/cmd/discussion/client/client_impl.go:348
++**Change**: In `discussionClient.Search`, append `filters.Keywords` to `qualifiers` when non-empty and then compute `searchQuery` once with `strings.Join(qualifiers, " ")`, replacing the separate `searchQuery += " " + filters.Keywords` branch.
++**Goal link**: This clarifies the search-query construction described by the goal as qualifiers plus keywords.
++**Justification**: Treating keywords as the final query component removes a special-case string concatenation while preserving the exact search query produced for all existing inputs.
++
++### C3 — Share state qualifier formatting for list output messages
++**File**: pkg/cmd/discussion/list/list.go:276
++**Change**: Add a small unexported helper in `list.go`, for example `stateQualifier(state string) string`, and use it from both `noResults` and `listHeader` instead of duplicating the same `switch state` block.
++**Goal link**: This clarifies the list command's user-facing state filtering in empty-result and header output.
++**Justification**: The two functions currently encode identical open/closed/all display rules, so one helper reduces accidental duplication without touching command behavior or output text.
++
++## Rejected
++
++- Replace `discussionListFields` with `shared.DiscussionFields` in `pkg/cmd/discussion/list/list.go`: `shared.DiscussionFields` includes `comments`, while the list command intentionally excludes fields only populated by view, so this would change `--json` validation and the command's public surface.
++- Add `Body` to `discussionNode` and map it in `mapDiscussion`: the query already requests `body`, but populating `Discussion.Body` would change observable `--json body` output rather than being a behavior-preserving refactor.
++- Extract one generic pagination helper for both `discussionClient.List` and `discussionClient.Search`: although both loops are similar, the response shapes and disabled-discussions check differ enough that a callback-based helper would add indirection for only two call sites.
++- Move browser query qualifier construction from `openInBrowser` into the client search-query code: the browser URL intentionally omits repository and sort qualifiers while `Search` requires them, so sharing the whole builder would either change the generated URL or require a broader abstraction than this goal needs.
++- Manually simplify `pkg/cmd/discussion/client/client_mock.go`: this file is generated mock-style plumbing for the interface shape, and edits there would not make the user-facing discussion list implementation express the goal more directly.
+
+tokens used
+44,387
+Done. Wrote the claims document to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/cli-13084/volley/round-1-claims.md)

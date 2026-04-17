@@ -1,0 +1,704 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1286
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c2e-2d52-71d3-92b0-3d6ac897bb8d
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/1286/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/1286/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll compare the goal, claims, patch, allowed file list, and the cleanroom tests/source, then write only the requested hunt report file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+# PR #1286
+Support for JSON or proto-based field name accesses when the `JSONFieldNames(true)` feature is enabled.
+exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+cel/env.go
+cel/options.go
+cel/program.go
+common/ast/ast.go
+common/types/provider.go
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Centralize context proto field-name selection
+**File**: cel/options.go:783
+**Change**: Add a small unexported helper near `fieldToVariable`, for example `protoFieldName(field protoreflect.FieldDescriptor, jsonFieldNames bool) string`, and use it in both `fieldToVariable` and `ContextProtoVars` instead of repeating the `field.TextName()` / `field.JSONName()` conditional.
+**Goal link**: This clarifies the goal aspect that context proto declarations and context proto activations must choose the same JSON-vs-proto field-name mode.
+**Justification**: Keeping the name-selection rule in one local helper removes duplicated conditional logic while preserving the existing proto-name default and JSON-name behavior under `JSONFieldNames(true)`.
+
+### C2 — Make registry JSONFieldNames option a direct delegation
+**File**: common/types/provider.go:106
+**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
+**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
+**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
+
+### C3 — Use idiomatic inline error handling for registry reconfiguration
+**File**: cel/env.go:857
+**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
+**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
+**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
+
+exec
+/bin/zsh -lc 'rg --files' in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+conformance/conformance_test.sh
+conformance/BUILD.bazel
+conformance/conformance_test.bzl
+conformance/conformance_test.go
+conformance/go.sum
+conformance/go.mod
+cel/prompt.go
+cel/io_test.go
+cel/macro.go
+cel/decls_test.go
+cel/decls.go
+cel/templates/authoring.tmpl
+cel/BUILD.bazel
+cel/cel_test.go
+cel/folding.go
+cel/validator_test.go
+cel/program.go
+cel/optimizer.go
+cel/inlining.go
+cel/macro_test.go
+codex
+The claims are all within the allowed file list and avoid test files. I’m checking each referenced symbol and the exact nearby code now, especially the JSON field-name plumbing and any asserted strings around it.
+exec
+/bin/zsh -lc "sed -n '215,240p' cel/program.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '95,118p' common/types/provider.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '740,830p' cel/options.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '420,455p' cel/options.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '840,870p' cel/env.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+	}
+
+	// Set the attribute factory after the options have been set.
+	var attrFactory interpreter.AttributeFactory
+	attrFactorOpts := []interpreter.AttrFactoryOption{
+		interpreter.EnableErrorOnBadPresenceTest(p.HasFeature(featureEnableErrorOnBadPresenceTest)),
+	}
+	if a.SourceInfo().HasExtension("json_name", ast.NewExtensionVersion(1, 1)) {
+		if !e.HasFeature(featureJSONFieldNames) {
+			return nil, errors.New("the AST extension 'json_name' requires the option cel.JSONFieldNames(true)")
+		}
+	}
+	// Configure the type provider, considering whether the AST indicates whether it supports JSON field names
+	if p.evalOpts&OptPartialEval == OptPartialEval {
+		attrFactory = interpreter.NewPartialAttributeFactory(e.Container, e.adapter, e.provider, attrFactorOpts...)
+	} else {
+		attrFactory = interpreter.NewAttributeFactory(e.Container, e.adapter, e.provider, attrFactorOpts...)
+	}
+	interp := interpreter.NewInterpreter(disp, e.Container, e.provider, e.adapter, attrFactory)
+	p.interpreter = interp
+ succeeded in 0ms:
+// NewRegistry accepts a list of proto message instances and returns a type
+// provider which can create new instances of the provided message or any
+// message that proto depends upon in its FileDescriptor.
+func NewRegistry(types ...proto.Message) (*Registry, error) {
+	return NewProtoRegistry(ProtoTypeDefs(types...))
+}
+
+// RegistryOption configures the behavior of the registry.
+type RegistryOption func(r *Registry) (*Registry, error)
+
+// JSONFieldNames configures JSON field name support within the protobuf types in the registry.
+func JSONFieldNames(enabled bool) RegistryOption {
+	return func(r *Registry) (*Registry, error) {
+		err := r.WithJSONFieldNames(enabled)
+		return r, err
+	}
+}
+
+// ProtoTypeDefs creates a RegistryOption which registers the individual proto messages with the registry.
+func ProtoTypeDefs(types ...proto.Message) RegistryOption {
+ succeeded in 0ms:
+// Note, CostTrackerOptions is a no-op unless CostTracking is also enabled.
+func CostTrackerOptions(costOpts ...interpreter.CostTrackerOption) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.costOptions = append(p.costOptions, costOpts...)
+		return p, nil
+	}
+}
+
+// CostTracking enables cost tracking and registers a ActualCostEstimator that can optionally provide a runtime cost estimate for any function calls.
+func CostTracking(costEstimator interpreter.ActualCostEstimator) ProgramOption {
+	return func(p *prog) (*prog, error) {
+		p.callCostEstimator = costEstimator
+		p.evalOpts |= OptTrackCost
+		return p, nil
+	}
+}
+
+// CostLimit enables cost tracking and sets configures program evaluation to exit early with a
+// "runtime cost limit exceeded" error if the runtime cost exceeds the costLimit.
+// The CostLimit is a metric that corresponds to the number and estimated expense of operations
+ succeeded in 0ms:
+func registerFileSet(reg protoTypeRegistry, fileSet *descpb.FileDescriptorSet) error {
+	files, err := protodesc.NewFiles(fileSet)
+	if err != nil {
+		return fmt.Errorf("protodesc.NewFiles(%v) failed: %v", fileSet, err)
+	}
+	return registerFiles(reg, files)
+}
+
+func registerFiles(reg protoTypeRegistry, files *protoregistry.Files) error {
+	var err error
+	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		err = reg.RegisterDescriptor(fd)
+		return err == nil
+	})
+	return err
+}
+
+// JSONFieldNames supports accessing protocol buffer fields by json-name.
+//
+// Enabling JSON field name support will create a copy of the types.Registry with fields indexed
+ succeeded in 0ms:
+	if l := e.limits[limitCodePointSize]; l != 0 {
+		prsrOpts = append(prsrOpts, parser.ExpressionSizeCodePointLimit(l))
+	}
+	if l := e.limits[limitParseRecursionDepth]; l != 0 {
+		prsrOpts = append(prsrOpts, parser.MaxRecursionDepth(l))
+	}
+	e.prsr, err = parser.NewParser(prsrOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enable JSON field names is using a proto-based *types.Registry
+	if e.HasFeature(featureJSONFieldNames) {
+		reg, isReg := e.provider.(*types.Registry)
+		if !isReg {
+			return nil, fmt.Errorf("JSONFieldNames() option is only compatible with *types.Registry providers")
+		}
+		err := reg.WithJSONFieldNames(true)
+		if err != nil {
+			return nil, err
+exec
+/bin/zsh -lc "sed -n '830,875p' cel/options.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+		for i := 0; i < fields.Len(); i++ {
+			field := fields.Get(i)
+			variable, err := fieldToVariable(field, jsonFieldNames)
+			if err != nil {
+				return nil, err
+			}
+			vars = append(vars, variable)
+		}
+		var err error
+		e, err = VariableDecls(vars...)(e)
+		if err != nil {
+			return nil, err
+		}
+		return Types(dynamicpb.NewMessage(descriptor))(e)
+	}
+}
+
+// ContextProtoVars uses the fields of the input proto.Messages as top-level variables within an Activation.
+//
+// Consider using with `DeclareContextProto` to simplify variable type declarations and publishing when using
+exec
+/bin/zsh -lc "sed -n '875,925p' cel/options.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+			return nil, fmt.Errorf("no such field: %s", fieldName)
+		}
+		fieldVal, err := sft.GetFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		vars[fieldName] = fieldVal
+	}
+	return NewActivation(vars)
+}
+
+// EnableMacroCallTracking ensures that call expressions which are replaced by macros
+// are tracked in the `SourceInfo` of parsed and checked expressions.
+func EnableMacroCallTracking() EnvOption {
+	return features(featureEnableMacroCallTracking, true)
+}
+
+// EnableIdentifierEscapeSyntax enables identifier escaping (`) syntax for
+// fields.
+func EnableIdentifierEscapeSyntax() EnvOption {
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+diff --git a/cel/env.go b/cel/env.go
+index d3295b6a..e2de2ff6 100644
+--- a/cel/env.go
++++ b/cel/env.go
+@@ -184,6 +184,16 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
+ 		conf.AddImports(env.NewImport(typeName))
+ 	}
+ 
++	// Serialize features
++	for featID, enabled := range e.features {
++		featName, found := featureNameByID(featID)
++		if !found {
++			// If the feature isn't named, it isn't intended to be publicly exposed
++			continue
++		}
++		conf.AddFeatures(env.NewFeature(featName, enabled))
++	}
++
+ 	libOverloads := map[string][]string{}
+ 	for libName, lib := range e.libraries {
+exec
+/bin/zsh -lc "rg \"TextName\\(|JSONName\\(|fieldToVariable|ContextProtoVars|JSONFieldNames\" cel common -n" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+cel/cel_test.go:2224:	vars, err := ContextProtoVars(in)
+cel/cel_test.go:2226:		t.Fatalf("ContextProtoVars(%v) failed: %v", in, err)
+cel/cel_test.go:2237:func TestContextProtoJSONFieldNames(t *testing.T) {
+cel/cel_test.go:2239:	env := testEnv(t, JSONFieldNames(true), DeclareContextProto(descriptor))
+cel/cel_test.go:2280:	vars, err := ContextProtoVars(in, types.JSONFieldNames(true))
+cel/cel_test.go:2282:		t.Fatalf("ContextProtoVars(%v) failed: %v", in, err)
+cel/cel_test.go:3666:func TestJSONFieldNames(t *testing.T) {
+cel/cel_test.go:3716:				JSONFieldNames(tc.jsonFieldNames),
+cel/cel_test.go:3741:				noJSONEnv, err := env.Extend(JSONFieldNames(false))
+cel/cel_test.go:3750:				jsonEnv, err := env.Extend(JSONFieldNames(true))
+cel/cel_test.go:3770:func TestJSONFieldNamesInvalidProvider(t *testing.T) {
+cel/cel_test.go:3774:	reg, err := types.NewProtoRegistry(types.JSONFieldNames(true))
+cel/cel_test.go:3779:	_, err = NewEnv(CustomTypeProvider(wrapped), CustomTypeAdapter(reg), JSONFieldNames(true))
+cel/program.go:223:		if !e.HasFeature(featureJSONFieldNames) {
+cel/program.go:224:			return nil, errors.New("the AST extension 'json_name' requires the option cel.JSONFieldNames(true)")
+cel/env_test.go:405:				JSONFieldNames(true),
+cel/env_test.go:541:					in:   mustContextProto(t, &proto3pb.TestAllTypes{SingleInt64: 10}, types.JSONFieldNames(true)),
+cel/env_test.go:1183:	ctx, err := ContextProtoVars(pb, opts...)
+cel/env_test.go:1185:		t.Fatalf("ContextProtoVars() failed: %v", err)
+cel/options.go:76:	featureJSONFieldNames
+exec
+/bin/zsh -lc "rg \"TestJSONFieldNames|JSONFieldNames|json_name|ContextProtoVars|DeclareContextProto\" -n --glob '*_test.go'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+cel/cel_test.go:2182:	option := DeclareContextProto(descriptor)
+cel/cel_test.go:2224:	vars, err := ContextProtoVars(in)
+cel/cel_test.go:2226:		t.Fatalf("ContextProtoVars(%v) failed: %v", in, err)
+cel/cel_test.go:2237:func TestContextProtoJSONFieldNames(t *testing.T) {
+cel/cel_test.go:2239:	env := testEnv(t, JSONFieldNames(true), DeclareContextProto(descriptor))
+cel/cel_test.go:2280:	vars, err := ContextProtoVars(in, types.JSONFieldNames(true))
+cel/cel_test.go:2282:		t.Fatalf("ContextProtoVars(%v) failed: %v", in, err)
+cel/cel_test.go:3666:func TestJSONFieldNames(t *testing.T) {
+cel/cel_test.go:3716:				JSONFieldNames(tc.jsonFieldNames),
+cel/cel_test.go:3741:				noJSONEnv, err := env.Extend(JSONFieldNames(false))
+cel/cel_test.go:3750:				jsonEnv, err := env.Extend(JSONFieldNames(true))
+cel/cel_test.go:3770:func TestJSONFieldNamesInvalidProvider(t *testing.T) {
+cel/cel_test.go:3774:	reg, err := types.NewProtoRegistry(types.JSONFieldNames(true))
+cel/cel_test.go:3779:	_, err = NewEnv(CustomTypeProvider(wrapped), CustomTypeAdapter(reg), JSONFieldNames(true))
+cel/env_test.go:405:				JSONFieldNames(true),
+cel/env_test.go:413:				DeclareContextProto((&proto3pb.TestAllTypes{}).ProtoReflect().Descriptor()),
+cel/env_test.go:423:				DeclareContextProto((&proto3pb.TestAllTypes{}).ProtoReflect().Descriptor()),
+cel/env_test.go:541:					in:   mustContextProto(t, &proto3pb.TestAllTypes{SingleInt64: 10}, types.JSONFieldNames(true)),
+cel/env_test.go:1183:	ctx, err := ContextProtoVars(pb, opts...)
+cel/env_test.go:1185:		t.Fatalf("ContextProtoVars() failed: %v", err)
+exec
+/bin/zsh -lc "sed -n '260,560p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
++	regOpts := []types.RegistryOption{types.ProtoTypeDefs(ctx)}
++	regOpts = append(regOpts, opts...)
++	reg, err := types.NewProtoRegistry(regOpts...)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -843,15 +866,19 @@ func ContextProtoVars(ctx proto.Message) (Activation, error) {
+ 	vars := make(map[string]any, fields.Len())
+ 	for i := 0; i < fields.Len(); i++ {
+ 		field := fields.Get(i)
+-		sft, found := reg.FindStructFieldType(typeName, field.TextName())
++		fieldName := field.TextName()
++		if reg.JSONFieldNames() {
++			fieldName = field.JSONName()
++		}
++		sft, found := reg.FindStructFieldType(typeName, fieldName)
+ 		if !found {
+-			return nil, fmt.Errorf("no such field: %s", field.TextName())
++			return nil, fmt.Errorf("no such field: %s", fieldName)
+ 		}
+exec
+/bin/zsh -lc "sed -n '2210,2295p' cel/cel_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+		SingleBool:   true,
+		NestedType: &proto3pb.TestAllTypes_SingleNestedMessage{
+			SingleNestedMessage: &proto3pb.TestAllTypes_NestedMessage{},
+		},
+		StandaloneEnum: proto3pb.TestAllTypes_FOO,
+		SingleDuration: &durationpb.Duration{Seconds: 5},
+		SingleTimestamp: &timestamppb.Timestamp{
+			Seconds: 63154820,
+		},
+		SingleUint64Wrapper: wrapperspb.UInt64(0),
+		RepeatedInt32:       []int32{1, 2},
+		MapStringString:     map[string]string{"": ""},
+		MapInt64NestedType:  map[int64]*proto3pb.NestedTestAllTypes{0: {}},
+	}
+	vars, err := ContextProtoVars(in)
+	if err != nil {
+		t.Fatalf("ContextProtoVars(%v) failed: %v", in, err)
+	}
+	out, _, err := prg.Eval(vars)
+	if err != nil {
+exec
+/bin/zsh -lc 'rg "TextName" vendor/google.golang.org/protobuf/reflect/protoreflect -n' in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305:	// TextName reports the name used for text serialization.
+vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:309:	TextName() string
+vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:399:	// ByTextName returns the FieldDescriptor for a field with s as the text name.
+vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:401:	ByTextName(s string) FieldDescriptor
+exec
+/bin/zsh -lc "sed -n '3658,3790p' cel/cel_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '1160,1195p' cel/env_test.go && sed -n '380,430p' cel/env_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+	if err != nil {
+		b.Fatalf("NewEnv() failed: %v", err)
+	}
+	for i := 0; i < b.N; i++ {
+		ext, err := env.Extend(
+			Variable("test_var", StringType),
+			Function(
+				operators.In,
+				Overload("string_in_string", []*Type{StringType, StringType}, BoolType),
+			),
+		)
+		if err != nil {
+			b.Fatalf("env.Extend() failed: %v", err)
+		}
+		_, iss := ext.Compile("123")
+		if iss.Err() != nil {
+			b.Fatalf("env.Compile(123) failed: %v", iss.Err())
+		}
+	}
+}
+ succeeded in 0ms:
+	var ast *Ast = nil
+	env := testEnv(t)
+	prg, err := env.Program(ast)
+	if err == nil || !strings.Contains(err.Error(), "unsupported expr") {
+		t.Errorf("env.Program() got (%v,%v) wanted unsupported expr error", prg, err)
+	}
+}
+
+func TestJSONFieldNames(t *testing.T) {
+	tests := []struct {
+		name           string
+		expr           string
+		jsonFieldNames bool
+	}{
+		{
+			name: "proto simple field",
+			expr: `msg.single_int32 == 1`,
+		},
+		{
+			name: "proto map field",
+exec
+/bin/zsh -lc "sed -n '292,314p' vendor/google.golang.org/protobuf/reflect/protoreflect/type.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+	// Cardinality reports the cardinality for this field.
+	Cardinality() Cardinality
+	// Kind reports the basic kind for this field.
+	Kind() Kind
+
+	// HasJSONName reports whether this field has an explicitly set JSON name.
+	HasJSONName() bool
+
+	// JSONName reports the name used for JSON serialization.
+	// It is usually the camel-cased form of the field name.
+	// Extension fields are represented by the full name surrounded by brackets.
+	JSONName() string
+
+	// TextName reports the name used for text serialization.
+	// It is usually the name of the field, except that groups use the name
+	// of the inlined message, and extension fields are represented by the
+	// full name surrounded by brackets.
+	TextName() string
+
+	// HasPresence reports whether the field distinguishes between unpopulated
+exec
+/bin/zsh -lc "rg \"group |Group|optional group|repeated group\" -n test cel common policy --glob '*.{proto,go}'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+policy/test_tag_handler_k8s.go:97:	APIGroups   []string `yaml:"apiGroups"`
+test/proto2pb/test_all_types.pb.go:167:	Nestedgroup         *TestAllTypes_NestedGroup `protobuf:"group,23,opt,name=NestedGroup,json=nestedgroup" json:"nestedgroup,omitempty"`
+test/proto2pb/test_all_types.pb.go:373:func (x *TestAllTypes) GetNestedgroup() *TestAllTypes_NestedGroup {
+test/proto2pb/test_all_types.pb.go:865:type TestAllTypes_NestedGroup struct {
+test/proto2pb/test_all_types.pb.go:874:func (x *TestAllTypes_NestedGroup) Reset() {
+test/proto2pb/test_all_types.pb.go:875:	*x = TestAllTypes_NestedGroup{}
+test/proto2pb/test_all_types.pb.go:883:func (x *TestAllTypes_NestedGroup) String() string {
+test/proto2pb/test_all_types.pb.go:887:func (*TestAllTypes_NestedGroup) ProtoMessage() {}
+test/proto2pb/test_all_types.pb.go:889:func (x *TestAllTypes_NestedGroup) ProtoReflect() protoreflect.Message {
+test/proto2pb/test_all_types.pb.go:901:// Deprecated: Use TestAllTypes_NestedGroup.ProtoReflect.Descriptor instead.
+test/proto2pb/test_all_types.pb.go:902:func (*TestAllTypes_NestedGroup) Descriptor() ([]byte, []int) {
+test/proto2pb/test_all_types.pb.go:906:func (x *TestAllTypes_NestedGroup) GetNestedId() int32 {
+test/proto2pb/test_all_types.pb.go:913:func (x *TestAllTypes_NestedGroup) GetNestedName() string {
+test/proto2pb/test_all_types.pb.go:1247:	(*TestAllTypes_NestedGroup)(nil),   // 7: google.expr.proto2.test.TestAllTypes.NestedGroup
+test/proto2pb/test_all_types.pb.go:1267:	7,  // 1: google.expr.proto2.test.TestAllTypes.nestedgroup:type_name -> google.expr.proto2.test.TestAllTypes.NestedGroup
+test/proto2pb/test_all_types.pb.go:1371:			switch v := v.(*TestAllTypes_NestedGroup); i {
+test/proto2pb/test_all_types.proto:47:  optional group NestedGroup = 23 {
+cel/cel_test.go:1629:	wgDone := sync.WaitGroup{}
+cel/env_test.go:170:		wg := &sync.WaitGroup{}
+cel/options.go:770:	if field.Kind() == protoreflect.MessageKind || field.Kind() == protoreflect.GroupKind {
+exec
+/bin/zsh -lc "rg \"func \\(.*\\) TextName\" vendor/google.golang.org/protobuf/internal -n" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+vendor/google.golang.org/protobuf/internal/filedesc/desc.go:367:func (fd *Field) TextName() string  { return fd.L1.StringName.getText(fd) }
+vendor/google.golang.org/protobuf/internal/filedesc/desc.go:483:func (xd *Extension) TextName() string                      { return xd.lazyInit().StringName.getText(xd) }
+vendor/google.golang.org/protobuf/internal/impl/legacy_extension.go:158:func (x placeholderExtension) TextName() string                                   { return "[" + string(x.name) + "]" }
+exec
+/bin/zsh -lc "sed -n '45,70p' common/types/pb/type.go && sed -n '84,108p' common/types/pb/type_test.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+	msgZero := dynamicpb.NewMessage(desc)
+	fieldMap := map[string]*FieldDescription{}
+	jsonFieldMap := map[string]*FieldDescription{}
+	fields := desc.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		f := fields.Get(i)
+		fd := newFieldDescription(f, pbdb.jsonFieldNames)
+		fieldMap[fd.Name()] = fd
+		if pbdb.jsonFieldNames {
+			jsonFieldMap[fd.JSONName()] = fd
+		}
+	}
+	return &TypeDescription{
+		typeName:       typeName,
+		desc:           desc,
+		msgType:        msgType,
+		fieldMap:       fieldMap,
+		jsonFieldMap:   jsonFieldMap,
+		extensions:     pbdb.extensions,
+		reflectType:    reflectTypeOf(msgZero),
+exec
+/bin/zsh -lc "rg \"func \\(fd \\*FieldDescription\\) Name|TextName|Name\\(\\) string\" common/types/pb/type.go -n && sed -n '330,360p' common/types/pb/type.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+134:func (td *TypeDescription) Name() string {
+346:func (fd *FieldDescription) Name() string {
+351:func (fd *FieldDescription) JSONName() string {
+// This method will also return true for map values, so check whether the
+// field is also a map.
+func (fd *FieldDescription) IsList() bool {
+	return fd.desc.IsList()
+}
+
+// MaybeUnwrapDynamic takes the reflected protoreflect.Message and determines whether the
+// value can be unwrapped to a more primitive CEL type.
+//
+// This function returns the unwrapped value and 'true' on success, or the original value
+// and 'false' otherwise.
+func (fd *FieldDescription) MaybeUnwrapDynamic(msg protoreflect.Message) (any, bool, error) {
+	return unwrapDynamic(fd, msg)
+}
+
+// Name returns the snake_case name of the field within the proto-based struct.
+func (fd *FieldDescription) Name() string {
+codex
+One concrete issue is emerging around C1: the spec names `TextName()` as the proto-mode name, but this repo’s protobuf registry indexes field access by `FieldDescriptor.Name()`. That distinction matters for proto2 group fields and would make the centralized helper encode the wrong rule.
+exec
+/bin/zsh -lc "nl -ba cel/options.go | sed -n '780,875p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+   780		return nil, fmt.Errorf("field %s type %s not implemented", field.FullName(), field.Kind().String())
+   781	}
+   782	
+   783	func fieldToVariable(field protoreflect.FieldDescriptor, jsonFieldNames bool) (*decls.VariableDecl, error) {
+   784		name := string(field.Name())
+   785		if jsonFieldNames {
+   786			name = field.JSONName()
+   787		}
+   788		if field.IsMap() {
+   789			mapKey := field.MapKey()
+   790			mapValue := field.MapValue()
+   791			keyType, err := fieldToCELType(mapKey)
+   792			if err != nil {
+   793				return nil, err
+   794			}
+   795			valueType, err := fieldToCELType(mapValue)
+   796			if err != nil {
+   797				return nil, err
+   798			}
+   799			return decls.NewVariable(name, MapType(keyType, valueType)), nil
+exec
+/bin/zsh -lc "nl -ba vendor/google.golang.org/protobuf/reflect/protoreflect/type.go | sed -n '300,311p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "nl -ba common/types/pb/type.go | sed -n '45,58p;342,354p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "nl -ba common/types/pb/type_test.go | sed -n '88,104p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+    45		msgZero := dynamicpb.NewMessage(desc)
+    46		fieldMap := map[string]*FieldDescription{}
+    47		jsonFieldMap := map[string]*FieldDescription{}
+    48		fields := desc.Fields()
+    49		for i := 0; i < fields.Len(); i++ {
+    50			f := fields.Get(i)
+    51			fd := newFieldDescription(f, pbdb.jsonFieldNames)
+    52			fieldMap[fd.Name()] = fd
+    53			if pbdb.jsonFieldNames {
+    54				jsonFieldMap[fd.JSONName()] = fd
+    55			}
+    56		}
+    57		return &TypeDescription{
+    58			typeName:       typeName,
+   342		return unwrapDynamic(fd, msg)
+   343	}
+   344	
+   345	// Name returns the snake_case name of the field within the proto-based struct.
+   346	func (fd *FieldDescription) Name() string {
+   347		return string(fd.desc.Name())
+ succeeded in 0ms:
+   300		// JSONName reports the name used for JSON serialization.
+   301		// It is usually the camel-cased form of the field name.
+   302		// Extension fields are represented by the full name surrounded by brackets.
+   303		JSONName() string
+   304	
+   305		// TextName reports the name used for text serialization.
+   306		// It is usually the name of the field, except that groups use the name
+   307		// of the inlined message, and extension fields are represented by the
+   308		// full name surrounded by brackets.
+   309		TextName() string
+   310	
+   311		// HasPresence reports whether the field distinguishes between unpopulated
+ succeeded in 0ms:
+    88	
+    89	func TestTypeDescriptionGroupFields(t *testing.T) {
+    90		pbdb := NewDb()
+    91		msg := &proto2pb.TestAllTypes{}
+    92		pbdb.RegisterMessage(msg)
+    93		td, found := pbdb.DescribeType(string(msg.ProtoReflect().Descriptor().FullName()))
+    94		if !found {
+    95			t.Fatalf("pbdb.DescribeType(%v) not found", msg)
+    96		}
+    97		field, found := td.FieldByName("nestedgroup")
+    98		if !found {
+    99			t.Fatal("TypeDescription.FieldByName('nestedgroup') could not be found")
+   100		}
+   101		if !field.IsMessage() {
+   102			t.Errorf("Group field 'nestedgroup' is type %v, wanted message type", field.Descriptor())
+   103		}
+   104		if !proto.Equal(field.CheckedType(), decls.NewObjectType("google.expr.proto2.test.TestAllTypes.NestedGroup")) {
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md && sed -n '1,200p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+
+codex
+I found one blocker-level defect and no other claim-level problems worth reporting. I’m writing the hunt report now, without touching the cleanroom source.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+## Finding F1 — C1 centralizes the wrong proto field-name rule
+**Severity**: blocker
+**Claim**: C1
+**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
+**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
+**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+apply_patch(auto_approved=true) exited 0 in 23ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+file update:
+diff --git a/samples/v2/celgo-1286/volley/hunt-spec-round-1.md b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc4719dfb3ab2588ab8453582370afeb6f034600
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 centralizes the wrong proto field-name rule
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
++**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
++**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+
+file update:
+diff --git a/samples/v2/celgo-1286/volley/hunt-spec-round-1.md b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc4719dfb3ab2588ab8453582370afeb6f034600
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 centralizes the wrong proto field-name rule
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
++**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
++**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+
+exec
+/bin/zsh -lc "sed -n '1,200p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+## Finding F1 — C1 centralizes the wrong proto field-name rule
+**Severity**: blocker
+**Claim**: C1
+**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
+**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
+**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+file update:
+diff --git a/samples/v2/celgo-1286/volley/hunt-spec-round-1.md b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc4719dfb3ab2588ab8453582370afeb6f034600
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 centralizes the wrong proto field-name rule
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
++**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
++**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+
+codex
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md)
+
+It contains one blocker finding against C1: the spec centralizes `TextName()` as the proto-mode field name, but the repo’s registry/type model indexes proto fields by `Name()`, which matters for proto2 group fields. No source files were edited.
+file update:
+diff --git a/samples/v2/celgo-1286/volley/hunt-spec-round-1.md b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc4719dfb3ab2588ab8453582370afeb6f034600
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/hunt-spec-round-1.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 centralizes the wrong proto field-name rule
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
++**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
++**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+
+tokens used
+39,341
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md)
+
+It contains one blocker finding against C1: the spec centralizes `TextName()` as the proto-mode field name, but the repo’s registry/type model indexes proto fields by `Name()`, which matters for proto2 group fields. No source files were edited.

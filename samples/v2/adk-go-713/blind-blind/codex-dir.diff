@@ -1,0 +1,202 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/713/cmd/launcher/web/triggers/eventarc/eventarc.go /tmp/refactor-eq-workdir/bb-codex-713/cmd/launcher/web/triggers/eventarc/eventarc.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/713/cmd/launcher/web/triggers/eventarc/eventarc.go	2026-04-08 07:04:33
++++ /tmp/refactor-eq-workdir/bb-codex-713/cmd/launcher/web/triggers/eventarc/eventarc.go	2026-04-17 09:47:47
+@@ -30,6 +30,8 @@
+ 	"google.golang.org/adk/server/adkrest/controllers/triggers"
+ )
+ 
++const eventarcEndpoint = "/apps/{app_name}/trigger/eventarc"
++
+ type eventarcConfig struct {
+ 	pathPrefix        string
+ 	triggerMaxRetries int
+@@ -126,11 +128,11 @@
+ 		subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
+ 	}
+ 
+-	subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++	subrouter.HandleFunc(eventarcEndpoint, controller.EventarcTriggerHandler).Methods(http.MethodPost)
+ 	return nil
+ }
+ 
+ // UserMessage implements web.Sublauncher.
+ func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
+-	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s%s", webURL, e.config.pathPrefix, eventarcEndpoint))
+ }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/713/server/adkrest/controllers/triggers/eventarc.go /tmp/refactor-eq-workdir/bb-codex-713/server/adkrest/controllers/triggers/eventarc.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/713/server/adkrest/controllers/triggers/eventarc.go	2026-04-08 07:04:33
++++ /tmp/refactor-eq-workdir/bb-codex-713/server/adkrest/controllers/triggers/eventarc.go	2026-04-17 09:47:47
+@@ -16,6 +16,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -28,8 +29,17 @@
+ 	"google.golang.org/adk/session"
+ )
+ 
+-const eventArcDefaultUserID = "eventarc-caller"
++const (
++	eventarcDefaultUserID      = "eventarc-caller"
++	cloudEventsJSONContentType = "application/cloudevents+json"
++	pubSubMessagePublishedType = "google.cloud.pubsub.topic.v1.messagePublished"
++)
+ 
++var (
++	errStructuredCloudEventDecode = errors.New("failed to decode structured cloudevent")
++	errBinaryCloudEventBodyRead   = errors.New("failed to read binary cloudevent body")
++)
++
+ // EventarcController handles the Eventarc trigger endpoints.
+ type EventarcController struct {
+ 	runner    *RetriableRunner
+@@ -53,62 +63,23 @@
+ 
+ // EventarcTriggerHandler handles the Eventarc trigger endpoint.
+ func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
+-	var event models.EventarcTriggerRequest
+-	contentType := r.Header.Get("Content-Type")
+-	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
+-	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
+-	if contentType == "application/cloudevents+json" {
+-		// --- STRUCTURED MODE ---
+-		// The entire event is in the body. Decode it.
+-		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
+-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++	event, err := parseEventarcRequest(r)
++	if err != nil {
++		switch {
++		case errors.Is(err, errStructuredCloudEventDecode):
+ 			http.Error(w, "Bad Request", http.StatusBadRequest)
+-			return
+-		}
+-	} else {
+-		// --- BINARY MODE ---
+-		// Metadata is in the headers.
+-		event.ID = r.Header.Get("ce-id")
+-		event.Type = r.Header.Get("ce-type")
+-		event.Source = r.Header.Get("ce-source")
+-		event.SpecVersion = r.Header.Get("ce-specversion")
+-		event.Time = r.Header.Get("ce-time")
+-
+-		// The entire body is the payload.
+-		// We just read it as raw bytes into event.Data.
+-		bodyBytes, err := io.ReadAll(r.Body)
+-		if err != nil {
++		case errors.Is(err, errBinaryCloudEventBodyRead):
+ 			http.Error(w, "Failed to read body", http.StatusInternalServerError)
+-			return
++		default:
++			respondError(w, http.StatusInternalServerError, err.Error())
+ 		}
+-		event.Data = bodyBytes
++		return
+ 	}
+ 
+-	var messageContent string
+-
+-	// Handle Pub/Sub Specifically ---
+-	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+-		var pubsub models.PubSubTriggerRequest
+-		var err error
+-		// Unmarshal the raw bytes into our specific Pub/Sub struct
+-		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
+-			return
+-		}
+-		messageContent, err = messageContentFromPubSub(pubsub)
+-		if err != nil {
+-			respondError(w, http.StatusBadRequest, err.Error())
+-			return
+-		}
+-		// Otherwise just marshal the whole event as an input data.
+-		// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
+-	} else {
+-		messageBytes, err := json.Marshal(event)
+-		if err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
+-			return
+-		}
+-		messageContent = string(messageBytes)
++	messageContent, status, err := messageContentFromEventarc(event)
++	if err != nil {
++		respondError(w, status, err.Error())
++		return
+ 	}
+ 
+ 	appName, err := appName(r)
+@@ -119,7 +90,7 @@
+ 
+ 	userID := event.Source
+ 	if userID == "" {
+-		userID = eventArcDefaultUserID
++		userID = eventarcDefaultUserID
+ 	}
+ 
+ 	// Semaphore limits concurrent agent calls based on the TriggerConfig.
+@@ -134,4 +105,61 @@
+ 	}
+ 
+ 	respondSuccess(w)
++}
++
++func parseEventarcRequest(r *http.Request) (models.EventarcTriggerRequest, error) {
++	var event models.EventarcTriggerRequest
++	contentType := r.Header.Get("Content-Type")
++	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++	if contentType == cloudEventsJSONContentType {
++		// --- STRUCTURED MODE ---
++		// The entire event is in the body. Decode it.
++		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++			return event, fmt.Errorf("%w: %v", errStructuredCloudEventDecode, err)
++		}
++		return event, nil
++	}
++
++	// --- BINARY MODE ---
++	// Metadata is in the headers.
++	event.ID = r.Header.Get("ce-id")
++	event.Type = r.Header.Get("ce-type")
++	event.Source = r.Header.Get("ce-source")
++	event.SpecVersion = r.Header.Get("ce-specversion")
++	event.Time = r.Header.Get("ce-time")
++
++	// The entire body is the payload.
++	// We just read it as raw bytes into event.Data.
++	bodyBytes, err := io.ReadAll(r.Body)
++	if err != nil {
++		return event, fmt.Errorf("%w: %v", errBinaryCloudEventBodyRead, err)
++	}
++	event.Data = bodyBytes
++	return event, nil
++}
++
++func messageContentFromEventarc(event models.EventarcTriggerRequest) (string, int, error) {
++	// Handle Pub/Sub Specifically ---
++	if event.Type == pubSubMessagePublishedType {
++		var pubsub models.PubSubTriggerRequest
++		// Unmarshal the raw bytes into our specific Pub/Sub struct
++		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++			return "", http.StatusInternalServerError, fmt.Errorf("failed to unmarshal pubsub data: %v", err)
++		}
++		messageContent, err := messageContentFromPubSub(pubsub)
++		if err != nil {
++			return "", http.StatusBadRequest, err
++		}
++		return messageContent, http.StatusOK, nil
++	}
++
++	// Otherwise just marshal the whole event as an input data.
++	// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++	messageBytes, err := json.Marshal(event)
++	if err != nil {
++		return "", http.StatusInternalServerError, fmt.Errorf("failed to marshal agent message: %v", err)
++	}
++	return string(messageBytes), http.StatusOK, nil
+ }

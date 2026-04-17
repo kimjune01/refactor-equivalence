@@ -1,0 +1,6 @@
+## Finding F1 — Alias removal collides with local env variables
+**Severity**: blocker
+**Claim**: C2
+**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
+**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
+**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.

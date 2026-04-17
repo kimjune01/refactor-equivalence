@@ -1,0 +1,738 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-4147
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c2e-7fa2-7590-883e-87842490114a
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/4147/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/allowed-files.txt             # files the implementer may have changed
+go build ./...                                         # full build, not just typecheck
+go test ./... -count=1 -short                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run the required commands from the cleanroom, then inspect the goal/spec/artifacts and current files only enough to substantiate any real defects. I’ll write the final gate report without changing source.
+exec
+/bin/zsh -lc 'pwd && cat /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/4147
+.custom-gcl.yml
+.golangci.yml
+CONTRIBUTING.md
+example/commitpr/main.go
+github/actions.go
+github/actions_artifacts.go
+github/actions_cache.go
+github/actions_hosted_runners.go
+github/actions_oidc.go
+github/actions_permissions_enterprise.go
+github/actions_permissions_orgs.go
+github/actions_runner_groups.go
+github/actions_runners.go
+github/actions_secrets.go
+github/actions_variables.go
+github/actions_workflow_jobs.go
+github/actions_workflow_runs.go
+github/actions_workflows.go
+github/activity.go
+exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/4147exec
+/bin/zsh -lc 'go test ./... -count=1 -short' in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 1.18s:
+
+ succeeded in 7.54s:
+ok  	github.com/google/go-github/v84/github	2.547s
+?   	github.com/google/go-github/v84/test/fields	[no test files]
+?   	github.com/google/go-github/v84/test/integration	[no test files]
+codex
+The allowed set is broad and includes source plus specific tool/testdata files. Build and tests are still running, so I’m reading the PR goal, sharpened spec, and artifact next to identify the intended behavior and any specific claims to verify.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4147exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/4147exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+# PR #4147
+
+Since there are two API versions (see #4077), GitHub API links redirect to the latest version by default. However, this library currently supports version `2022-11-28`, so we need to add `?apiVersion=2022-11-28` to every link.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Version the OAuth scope docs link
+**File**: github/authorizations.go:15
+**Change**: In the `Scope` type comment, change `https://docs.github.com/rest/oauth/#scopes` to `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`.
+**Goal link**: The goal asks for GitHub REST API docs links in the draft's accepted source-comment scope to pin the library-supported API version.
+**Justification**: This versions the OAuth scope REST docs link in an allowed source file without changing runtime behavior.
+**Hunt note**: F1 is safe as narrowed because this claim no longer asserts that C1-C3 exhaust every unversioned `/rest` link in allowed source.
+
+### C2 — Version the SCIM list options docs link
+**File**: github/scim.go:84
+**Change**: In the `ListSCIMProvisionedIdentitiesOptions` comment, change the docs URL to `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`.
+**Goal link**: The goal asks for GitHub REST API docs links in the draft's accepted source-comment scope to avoid redirecting to the latest API version.
+**Justification**: This makes the SCIM list-options comment follow the same versioned docs-link convention as the rest of the refactor while preserving behavior.
+**Hunt note**: F1 is safe as narrowed because this claim is limited to this SCIM options comment and does not imply that other allowed-file `/rest` links are covered.
+
+### C3 — Version the SCIM update options docs link
+**File**: github/scim.go:187
+**Change**: In the `UpdateAttributeForSCIMUserOptions` comment, change the docs URL to `https://docs.github.com/rest/scim?apiVersion=2022-11-28#update-an-attribute-for-a-scim-user--parameters`.
+**Goal link**: The goal asks for GitHub REST API docs links in the draft's accepted source-comment scope to pin `2022-11-28`.
+ succeeded in 0ms:
+diff --git a/.custom-gcl.yml b/.custom-gcl.yml
+index 5e07e9c2..4c2c4aae 100644
+--- a/.custom-gcl.yml
++++ b/.custom-gcl.yml
+@@ -4,8 +4,6 @@ plugins:
+     path: ./tools/extraneousnew
+   - module: "github.com/google/go-github/v84/tools/fmtpercentv"
+     path: ./tools/fmtpercentv
+-  - module: "github.com/google/go-github/v84/tools/redundantptr"
+-    path: ./tools/redundantptr
+   - module: "github.com/google/go-github/v84/tools/sliceofpointers"
+     path: ./tools/sliceofpointers
+   - module: "github.com/google/go-github/v84/tools/structfield"
+diff --git a/.golangci.yml b/.golangci.yml
+index 91fb1514..9bc14152 100644
+--- a/.golangci.yml
++++ b/.golangci.yml
+@@ -27,7 +27,6 @@ linters:
+     - nolintlint
+     - paralleltest
+codex
+Build and tests both exited 0. I’m now checking the narrowed accepted claims directly in current files and scanning for any obvious generated or behavioral fallout from the refactor, with line quotes ready if something is actually reportable.
+exec
+/bin/zsh -lc "nl -ba github/authorizations.go | sed -n '1,28p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+     1	// Copyright 2015 The go-github AUTHORS. All rights reserved.
+     2	//
+     3	// Use of this source code is governed by a BSD-style
+     4	// license that can be found in the LICENSE file.
+     5	
+     6	package github
+     7	
+     8	import (
+     9		"context"
+    10		"fmt"
+    11	)
+    12	
+    13	// Scope models a GitHub authorization scope.
+    14	//
+    15	// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
+    16	type Scope string
+    17	
+    18	// This is the set of scopes for GitHub API V3.
+    19	const (
+    20		ScopeNone           Scope = "(no scope)" // REVISIT: is this actually returned, or just a documentation artifact?
+exec
+/bin/zsh -lc "nl -ba github/scim.go | sed -n '76,96p;178,198p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4147exec
+/bin/zsh -lc "nl -ba example/commitpr/main.go | sed -n '100,112p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+   100		entries := []*github.TreeEntry{}
+   101	
+   102		// Load each file into the tree.
+   103		for fileArg := range strings.SplitSeq(*sourceFiles, ",") {
+   104			file, content, err := getFileContent(fileArg)
+   105			if err != nil {
+   106				return nil, err
+   107			}
+   108			entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
+   109		}
+   110	
+   111		tree, _, err = client.Git.CreateTree(ctx, *sourceOwner, *sourceRepo, *ref.Object.SHA, entries)
+   112		return tree, err
+ succeeded in 0ms:
+    76		TotalResults *int                  `json:"totalResults,omitempty"`
+    77		ItemsPerPage *int                  `json:"itemsPerPage,omitempty"`
+    78		StartIndex   *int                  `json:"startIndex,omitempty"`
+    79		Resources    []*SCIMUserAttributes `json:"Resources,omitempty"`
+    80	}
+    81	
+    82	// ListSCIMProvisionedIdentitiesOptions represents options for ListSCIMProvisionedIdentities.
+    83	//
+    84	// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
+    85	type ListSCIMProvisionedIdentitiesOptions struct {
+    86		StartIndex *int `url:"startIndex,omitempty"` // Used for pagination: the index of the first result to return. (Optional.)
+    87		Count      *int `url:"count,omitempty"`      // Used for pagination: the number of results to return. (Optional.)
+    88		// Filter results using the equals query parameter operator (eq).
+    89		// You can filter results that are equal to id, userName, emails, and external_id.
+    90		// For example, to search for an identity with the userName Octocat, you would use this query: ?filter=userName%20eq%20\"Octocat\".
+    91		// To filter results for the identity with the email octocat@github.com, you would use this query: ?filter=emails%20eq%20\"octocat@github.com\".
+    92		// (Optional.)
+    93		Filter *string `url:"filter,omitempty"`
+    94	}
+    95	
+exec
+/bin/zsh -lc "nl -ba .golangci.yml | sed -n '20,34p;186,202p' && nl -ba .custom-gcl.yml | sed -n '1,14p' && ls -l tools/redundantptr && nl -ba tools/redundantptr/redundantptr.go | sed -n '1,80p'" in /tmp/refactor-eq-workdir/cleanroom-v2/4147 exited 1 in 0ms:
+    20	    - gosec
+    21	    - govet
+    22	    - ineffassign
+    23	    - misspell
+    24	    - modernize
+    25	    - musttag
+    26	    - nakedret
+    27	    - nolintlint
+    28	    - paralleltest
+    29	    - perfsprint
+    30	    - revive
+    31	    - sliceofpointers
+    32	    - staticcheck
+    33	    - structfield
+    34	    - tparallel
+   186	        description: Reports problematic usage of 'new' or '&SomeStruct{}' when a more idiomatic 'var' pointer would be more appropriate.
+   187	        original-url: github.com/google/go-github/v84/tools/extraneousnew
+   188	        settings:
+   189	          ignored-methods:
+   190	            - RateLimitService.Get
+codex
+The current tree fails several accepted reconciliation claims even though build/tests pass: the specifically named docs links are still unversioned, the example pointer rewrite remains, and the redundantptr linter restoration is absent. I’m writing those as warnings per the review rubric, with exact current-line evidence.
+exec
+/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates' in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+total 32
+-rw-r--r--@ 1 junekim  staff  13223 Apr 17 09:03 hunt-code-round-1-stdout.log
+-rw-r--r--@ 1 junekim  staff      0 Apr 17 09:03 merged-install.log
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+## Build: PASS
+Exit code: 0
+Tail 50 lines:
+
+```text
+(no output)
+```
+
+## Tests: PASS
+Exit code: 0
+Tail 50 lines:
+
+```text
+ok  	github.com/google/go-github/v84/github	2.547s
+?   	github.com/google/go-github/v84/test/fields	[no test files]
+?   	github.com/google/go-github/v84/test/integration	[no test files]
+```
+
+## Finding F1 — Accepted OAuth scope docs-link claim is not applied
+**Severity**: warning
+**File**: github/authorizations.go:15
+**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
+
+```go
+// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
+```
+
+**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
+
+## Finding F2 — Accepted SCIM options docs-link claims are not applied
+**Severity**: warning
+**File**: github/scim.go:84
+**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
+
+```go
+// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
+```
+
+The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
+
+```go
+// GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
+```
+
+**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
+
+## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
+**Severity**: warning
+**File**: example/commitpr/main.go:108
+**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
+
+```go
+entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
+```
+
+**Fix**: Change the `Path` field back to `Path: &file`.
+
+## Finding F4 — Accepted redundantptr linter restoration is not applied
+**Severity**: warning
+**File**: .golangci.yml:27
+**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
+
+```yaml
+    - perfsprint
+    - revive
+```
+
+The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
+
+```yaml
+      fmtpercentv:
+        type: module
+        description: Reports usage of %d or %s in format strings.
+        original-url: github.com/google/go-github/v84/tools/fmtpercentv
+      sliceofpointers:
+```
+
+`tools/redundantptr` is also absent from the current tree.
+
+**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+apply_patch(auto_approved=true) exited 0 in 25ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/go-github-4147/gates/hunt-code-round-1.md b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..99af912c4ae86813c2b1b24436dea1a424f64c8a
+--- /dev/null
++++ b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+@@ -0,0 +1,80 @@
++## Build: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++(no output)
++```
++
++## Tests: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++ok  	github.com/google/go-github/v84/github	2.547s
++?   	github.com/google/go-github/v84/test/fields	[no test files]
++?   	github.com/google/go-github/v84/test/integration	[no test files]
++```
++
++## Finding F1 — Accepted OAuth scope docs-link claim is not applied
++**Severity**: warning
++**File**: github/authorizations.go:15
++**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
++```
++
++**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
++
++## Finding F2 — Accepted SCIM options docs-link claims are not applied
++**Severity**: warning
++**File**: github/scim.go:84
++**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
++```
++
++The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
++```
++
++**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
++
++## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
++**Severity**: warning
++**File**: example/commitpr/main.go:108
++**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
++
++```go
++entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
++```
++
++**Fix**: Change the `Path` field back to `Path: &file`.
++
++## Finding F4 — Accepted redundantptr linter restoration is not applied
++**Severity**: warning
++**File**: .golangci.yml:27
++**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
++
++```yaml
++    - perfsprint
++    - revive
++```
++
++The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
++
++```yaml
++      fmtpercentv:
++        type: module
++        description: Reports usage of %d or %s in format strings.
++        original-url: github.com/google/go-github/v84/tools/fmtpercentv
++      sliceofpointers:
++```
++
++`tools/redundantptr` is also absent from the current tree.
++
++**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+
+file update:
+diff --git a/samples/v2/go-github-4147/gates/hunt-code-round-1.md b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..99af912c4ae86813c2b1b24436dea1a424f64c8a
+--- /dev/null
++++ b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+@@ -0,0 +1,80 @@
++## Build: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++(no output)
++```
++
++## Tests: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++ok  	github.com/google/go-github/v84/github	2.547s
++?   	github.com/google/go-github/v84/test/fields	[no test files]
++?   	github.com/google/go-github/v84/test/integration	[no test files]
++```
++
++## Finding F1 — Accepted OAuth scope docs-link claim is not applied
++**Severity**: warning
++**File**: github/authorizations.go:15
++**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
++```
++
++**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
++
++## Finding F2 — Accepted SCIM options docs-link claims are not applied
++**Severity**: warning
++**File**: github/scim.go:84
++**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
++```
++
++The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
++```
++
++**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
++
++## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
++**Severity**: warning
++**File**: example/commitpr/main.go:108
++**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
++
++```go
++entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
++```
++
++**Fix**: Change the `Path` field back to `Path: &file`.
++
++## Finding F4 — Accepted redundantptr linter restoration is not applied
++**Severity**: warning
++**File**: .golangci.yml:27
++**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
++
++```yaml
++    - perfsprint
++    - revive
++```
++
++The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
++
++```yaml
++      fmtpercentv:
++        type: module
++        description: Reports usage of %d or %s in format strings.
++        original-url: github.com/google/go-github/v84/tools/fmtpercentv
++      sliceofpointers:
++```
++
++`tools/redundantptr` is also absent from the current tree.
++
++**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/4147 succeeded in 0ms:
+## Build: PASS
+Exit code: 0
+Tail 50 lines:
+
+```text
+(no output)
+```
+
+## Tests: PASS
+Exit code: 0
+Tail 50 lines:
+
+```text
+ok  	github.com/google/go-github/v84/github	2.547s
+?   	github.com/google/go-github/v84/test/fields	[no test files]
+?   	github.com/google/go-github/v84/test/integration	[no test files]
+```
+
+## Finding F1 — Accepted OAuth scope docs-link claim is not applied
+**Severity**: warning
+file update:
+diff --git a/samples/v2/go-github-4147/gates/hunt-code-round-1.md b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..99af912c4ae86813c2b1b24436dea1a424f64c8a
+--- /dev/null
++++ b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+@@ -0,0 +1,80 @@
++## Build: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++(no output)
++```
++
++## Tests: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++ok  	github.com/google/go-github/v84/github	2.547s
++?   	github.com/google/go-github/v84/test/fields	[no test files]
++?   	github.com/google/go-github/v84/test/integration	[no test files]
++```
++
++## Finding F1 — Accepted OAuth scope docs-link claim is not applied
++**Severity**: warning
++**File**: github/authorizations.go:15
++**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
++```
++
++**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
++
++## Finding F2 — Accepted SCIM options docs-link claims are not applied
++**Severity**: warning
++**File**: github/scim.go:84
++**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
++```
++
++The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
++```
++
++**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
++
++## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
++**Severity**: warning
++**File**: example/commitpr/main.go:108
++**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
++
++```go
++entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
++```
++
++**Fix**: Change the `Path` field back to `Path: &file`.
++
++## Finding F4 — Accepted redundantptr linter restoration is not applied
++**Severity**: warning
++**File**: .golangci.yml:27
++**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
++
++```yaml
++    - perfsprint
++    - revive
++```
++
++The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
++
++```yaml
++      fmtpercentv:
++        type: module
++        description: Reports usage of %d or %s in format strings.
++        original-url: github.com/google/go-github/v84/tools/fmtpercentv
++      sliceofpointers:
++```
++
++`tools/redundantptr` is also absent from the current tree.
++
++**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+
+codex
+Wrote the adversarial review report to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md).
+
+Required commands run from `/tmp/refactor-eq-workdir/cleanroom-v2/4147`:
+
+- `cat .../allowed-files.txt`: exit 0
+- `go build ./...`: exit 0, no output
+- `go test ./... -count=1 -short`: exit 0
+
+Findings recorded:
+
+- Build: PASS
+- Tests: PASS
+- F1-F4: warnings for accepted claims not applied, covering the unversioned OAuth and SCIM docs links, the unreverted `TreeEntry` pointer rewrite, and missing `redundantptr` restoration.
+file update:
+diff --git a/samples/v2/go-github-4147/gates/hunt-code-round-1.md b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..99af912c4ae86813c2b1b24436dea1a424f64c8a
+--- /dev/null
++++ b/samples/v2/go-github-4147/gates/hunt-code-round-1.md
+@@ -0,0 +1,80 @@
++## Build: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++(no output)
++```
++
++## Tests: PASS
++Exit code: 0
++Tail 50 lines:
++
++```text
++ok  	github.com/google/go-github/v84/github	2.547s
++?   	github.com/google/go-github/v84/test/fields	[no test files]
++?   	github.com/google/go-github/v84/test/integration	[no test files]
++```
++
++## Finding F1 — Accepted OAuth scope docs-link claim is not applied
++**Severity**: warning
++**File**: github/authorizations.go:15
++**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/oauth/#scopes
++```
++
++**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
++
++## Finding F2 — Accepted SCIM options docs-link claims are not applied
++**Severity**: warning
++**File**: github/scim.go:84
++**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
++```
++
++The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
++
++```go
++// GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
++```
++
++**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
++
++## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
++**Severity**: warning
++**File**: example/commitpr/main.go:108
++**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
++
++```go
++entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
++```
++
++**Fix**: Change the `Path` field back to `Path: &file`.
++
++## Finding F4 — Accepted redundantptr linter restoration is not applied
++**Severity**: warning
++**File**: .golangci.yml:27
++**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
++
++```yaml
++    - perfsprint
++    - revive
++```
++
++The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
++
++```yaml
++      fmtpercentv:
++        type: module
++        description: Reports usage of %d or %s in format strings.
++        original-url: github.com/google/go-github/v84/tools/fmtpercentv
++      sliceofpointers:
++```
++
++`tools/redundantptr` is also absent from the current tree.
++
++**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+
+tokens used
+29,909
+Wrote the adversarial review report to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/gates/hunt-code-round-1.md).
+
+Required commands run from `/tmp/refactor-eq-workdir/cleanroom-v2/4147`:
+
+- `cat .../allowed-files.txt`: exit 0
+- `go build ./...`: exit 0, no output
+- `go test ./... -count=1 -short`: exit 0
+
+Findings recorded:
+
+- Build: PASS
+- Tests: PASS
+- F1-F4: warnings for accepted claims not applied, covering the unversioned OAuth and SCIM docs links, the unreverted `TreeEntry` pointer rewrite, and missing `redundantptr` restoration.

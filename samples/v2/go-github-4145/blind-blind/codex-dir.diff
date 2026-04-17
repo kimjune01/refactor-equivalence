@@ -1,0 +1,61 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/4145/tools/redundantptr/redundantptr.go /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/4145/tools/redundantptr/redundantptr.go	2026-04-09 14:46:49
++++ /tmp/refactor-eq-workdir/bb-codex-4145/tools/redundantptr/redundantptr.go	2026-04-17 11:30:38
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -51,6 +50,9 @@
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+ 				if fn.Body != nil {
++					if shouldIgnoreDeprecatedPtrWrapper(fn) {
++						return true
++					}
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +66,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +98,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +218,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}

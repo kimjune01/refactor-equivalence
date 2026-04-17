@@ -1,0 +1,3117 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-12526
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ac4-fc30-7641-9aa9-c81bb94377ca
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and artifact first, then apply only the accepted claims in the specified files. I’ll avoid tests entirely and finish by writing `IMPLEMENT_SUMMARY.md`.
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-codex-12526
+third-party-licenses.linux.md
+pkg/findsh/find_windows.go
+pkg/findsh/find.go
+pkg/set/string_set_test.go
+pkg/set/string_set.go
+pkg/jsonfieldstest/jsonfieldstest.go
+pkg/cmdutil/errors.go
+pkg/cmdutil/factory_test.go
+pkg/cmdutil/auth_check.go
+pkg/cmdutil/repo_override.go
+pkg/cmdutil/file_input.go
+pkg/cmdutil/args.go
+pkg/cmdutil/args_test.go
+pkg/cmdutil/flags.go
+pkg/cmdutil/json_flags_test.go
+pkg/cmdutil/factory.go
+pkg/cmdutil/json_flags.go
+pkg/cmdutil/auth_check_test.go
+pkg/cmdutil/cmdgroup.go
+exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+# PR #12526 — `gh pr edit`: new interactive prompt for assignee selection, performance and accessibility improvements
+
+## PR body
+
+## Description
+
+Implements multiselect with search for `gh pr edit` assignees, addressing performance and accessibility issues in large organizations. Part of larger work to improve the reviewer and assignee experience in `gh`.
+
+## Key changes
+
+- **New `MultiSelectWithSearch` prompter**: Adds a search sentinel option to multiselect lists, allowing dynamic fetching of assignees via API search rather than loading all org members upfront
+- **`SuggestedAssignableActors` API**: New GraphQL query to fetch suggested actors for an assignable (Issue/PR) node with optional search filtering
+- **`gh pr edit` assignee flow**: Wires up the new prompter for interactive assignee selection when `ActorIsAssignable` feature is detected
+- **Prompter interface expansion**: Both `surveyPrompter` and `accessiblePrompter` implement the new method, with full test coverage
+- **Preview command**: Adds `multi-select-with-search` to `gh preview prompter` for testing
+
+## Notes for reviewers
+
+- This PR only covers assignees for `gh pr edit`; reviewers will follow in a subsequent PR
+
+ succeeded in 0ms:
+api/queries_pr.go
+internal/prompter/prompter.go
+internal/prompter/prompter_mock.go
+internal/prompter/test.go
+pkg/cmd/pr/edit/edit.go
+pkg/cmd/pr/shared/editable.go
+pkg/cmd/pr/shared/survey.go
+pkg/cmd/preview/prompter/prompter.go
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove unused reviewer search field
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go:18
+**Change**: Delete the `ReviewerSearchFunc func(string) ([]string, []string, error)` field from `Editable`.
+**Goal link**: The goal explicitly scopes this PR to searchable assignee selection for `gh pr edit`, with reviewers deferred to a later PR.
+**Justification**: Removing unused reviewer search state avoids carrying speculative reviewer plumbing in the assignee-focused implementation without changing any call path.
+
+### C2 — Drop unused search method from metadata survey interface
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go:38
+**Change**: Remove `MultiSelectWithSearch` from the `Prompt` interface in `survey.go` and remove the now-unused `internal/prompter` import from that file.
+**Goal link**: The new searchable prompt is wired for `gh pr edit` assignees, not the issue/PR creation metadata survey handled by this interface.
+**Justification**: Keeping the wider method out of an interface that never calls it preserves the local interface pattern and avoids forcing unrelated prompt implementations to satisfy unused behavior.
+
+### C3 — Collapse duplicated GraphQL actor node shapes
+**File**: /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go:708
+**Change**: Inside `SuggestedAssignableActors`, introduce one local `suggestedActorNode` struct type and one local suggested-actors connection type, then use them for both `Issue.SuggestedActors.Nodes`, `PullRequest.SuggestedActors.Nodes`, and the local `nodes` variable.
+**Goal link**: The goal adds one suggested-assignable-actors query that supports both Issue and PullRequest assignables.
+**Justification**: Naming and reusing the shared node shape makes the dual Issue/PullRequest GraphQL fragments express the same API result instead of maintaining three structurally identical anonymous declarations.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+diff --git a/api/queries_pr.go b/api/queries_pr.go
+index de98c661f..962999f09 100644
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -701,6 +701,111 @@ func RemovePullRequestReviews(client *Client, repo ghrepo.Interface, prNumber in
+ 	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+ }
+ 
++// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
++// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
++// If query is empty, the query variable is passed as null to omit filtering.
++func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type responseData struct {
++		Viewer struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"viewer"`
++		Node struct {
++			Issue struct {
+codex
+The accepted claims are all refactor-only source edits in five source files plus the required summary. I’m checking the current code around those locations now, because the artifact may already be partly applied and I need to preserve the exact current state.
+exec
+/bin/zsh -lc "sed -n '1,120p' pkg/cmd/pr/shared/editable.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+package shared
+
+import (
+	"fmt"
+
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
+	"github.com/cli/cli/v2/pkg/set"
+)
+
+type Editable struct {
+	Title              EditableString
+	Body               EditableString
+	Base               EditableString
+	Reviewers          EditableSlice
+	ReviewerSearchFunc func(string) ([]string, []string, error)
+	Assignees          EditableAssignees
+	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+exec
+/bin/zsh -lc "sed -n '340,500p' internal/prompter/prompter.go" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '300,380p' pkg/cmd/pr/edit/edit.go" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '680,790p' api/queries_pr.go" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '1,120p' pkg/cmd/pr/shared/survey.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+	stderr    ghPrompter.FileWriter
+	editorCmd string
+}
+
+func (p *surveyPrompter) Select(prompt, defaultValue string, options []string) (int, error) {
+	return p.prompter.Select(prompt, defaultValue, options)
+}
+
+func (p *surveyPrompter) MultiSelect(prompt string, defaultValues, options []string) ([]int, error) {
+	return p.prompter.MultiSelect(prompt, defaultValues, options)
+}
+
+func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+	return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
+}
+
+type MultiSelectSearchResult struct {
+	Keys        []string
+	Labels      []string
+	MoreResults int
+ succeeded in 0ms:
+	}
+
+	opts.IO.StartProgressIndicator()
+	err = opts.Fetcher.EditableOptionsFetch(apiClient, repo, &editable, opts.Detector.ProjectsV1())
+	opts.IO.StopProgressIndicator()
+	if err != nil {
+		return err
+	}
+
+	if opts.Interactive {
+		// Remove PR author from reviewer options;
+		// REST API errors if author is included (GraphQL silently ignores).
+		if editable.Reviewers.Edited {
+			s := set.NewStringSet()
+			s.AddValues(editable.Reviewers.Options)
+			s.Remove(pr.Author.Login)
+			editable.Reviewers.Options = s.ToSlice()
+		}
+
+		editorCommand, err := opts.EditorRetriever.Retrieve()
+exec
+/bin/zsh -lc "sed -n '130,210p' pkg/cmd/preview/prompter/prompter.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+		teams = []string{}
+	}
+
+	path := fmt.Sprintf(
+		"repos/%s/%s/pulls/%d/requested_reviewers",
+		url.PathEscape(repo.RepoOwner()),
+		url.PathEscape(repo.RepoName()),
+		prNumber,
+	)
+	body := struct {
+		Reviewers     []string `json:"reviewers"`
+		TeamReviewers []string `json:"team_reviewers"`
+	}{
+		Reviewers:     users,
+		TeamReviewers: teams,
+	}
+	buf := &bytes.Buffer{}
+	if err := json.NewEncoder(buf).Encode(body); err != nil {
+		return err
+	}
+ succeeded in 0ms:
+package shared
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/surveyext"
+)
+
+type Action int
+
+const (
+ succeeded in 0ms:
+	return nil
+}
+
+func runSelect(p prompter.Prompter, io *iostreams.IOStreams) error {
+	fmt.Fprintln(io.Out, "Demonstrating Single Select")
+	cuisines := []string{"Italian", "Greek", "Indian", "Japanese", "American"}
+	favorite, err := p.Select("Favorite cuisine?", "Italian", cuisines)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(io.Out, "Favorite cuisine: %s\n", cuisines[favorite])
+	return nil
+}
+
+func runMultiSelect(p prompter.Prompter, io *iostreams.IOStreams) error {
+	fmt.Fprintln(io.Out, "Demonstrating Multi Select")
+	cuisines := []string{"Italian", "Greek", "Indian", "Japanese", "American"}
+	favorites, err := p.MultiSelect("Favorite cuisines?", []string{}, cuisines)
+	if err != nil {
+		return err
+exec
+/bin/zsh -lc "sed -n '500,560p' internal/prompter/prompter.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+		}
+
+		return selectedOptions, nil
+	}
+}
+
+func (p *surveyPrompter) Input(prompt, defaultValue string) (string, error) {
+	return p.prompter.Input(prompt, defaultValue)
+}
+
+func (p *surveyPrompter) Password(prompt string) (string, error) {
+	return p.prompter.Password(prompt)
+}
+
+func (p *surveyPrompter) Confirm(prompt string, defaultValue bool) (bool, error) {
+	return p.prompter.Confirm(prompt, defaultValue)
+}
+
+func (p *surveyPrompter) AuthToken() (string, error) {
+	var result string
+exec
+/bin/zsh -lc "sed -n '380,430p' pkg/cmd/pr/edit/edit.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+			MoreResults: 0,
+			Err:         nil,
+		}
+	}
+	return searchFunc
+}
+
+func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+	var wg errgroup.Group
+	wg.Go(func() error {
+		return shared.UpdateIssue(httpClient, repo, id, true, editable)
+	})
+	if editable.Reviewers.Edited {
+		wg.Go(func() error {
+			return updatePullRequestReviews(httpClient, repo, number, editable)
+		})
+	}
+	return wg.Wait()
+}
+
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc 'rg "ReviewerSearchFunc|MultiSelectWithSearch" pkg/cmd/pr/shared api internal/prompter pkg/cmd/pr/edit pkg/cmd/preview/prompter -n' in /tmp/refactor-eq-workdir/bb-codex-12526 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ succeeded in 0ms:
+pkg/cmd/preview/prompter/prompter.go:44:		multiSelectWithSearchPrompt: runMultiSelectWithSearch,
+pkg/cmd/preview/prompter/prompter.go:157:func runMultiSelectWithSearch(p prompter.Prompter, io *iostreams.IOStreams) error {
+pkg/cmd/preview/prompter/prompter.go:189:	selections, err := p.MultiSelectWithSearch("Select an option", "Search for an option", []string{}, persistentOptions, searchFunc)
+internal/prompter/prompter.go:24:	// MultiSelectWithSearch is MultiSelect with an added search option to the list,
+internal/prompter/prompter.go:31:	// Where the selected keys are eventually returned by MultiSelectWithSearch and the labels are what is shown to the user in the prompt.
+internal/prompter/prompter.go:32:	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+internal/prompter/prompter.go:332:func (p *accessiblePrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+internal/prompter/prompter.go:352:func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+internal/prompter/prompter_mock.go:41://			MultiSelectWithSearchFunc: func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+internal/prompter/prompter_mock.go:42://				panic("mock out the MultiSelectWithSearch method")
+internal/prompter/prompter_mock.go:78:	// MultiSelectWithSearchFunc mocks the MultiSelectWithSearch method.
+internal/prompter/prompter_mock.go:79:	MultiSelectWithSearchFunc func(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+internal/prompter/prompter_mock.go:132:		// MultiSelectWithSearch holds details about calls to the MultiSelectWithSearch method.
+internal/prompter/prompter_mock.go:133:		MultiSelectWithSearch []struct {
+internal/prompter/prompter_mock.go:167:	lockMultiSelectWithSearch sync.RWMutex
+internal/prompter/prompter_mock.go:410:// MultiSelectWithSearch calls MultiSelectWithSearchFunc.
+internal/prompter/prompter_mock.go:411:func (mock *PrompterMock) MultiSelectWithSearch(prompt string, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+internal/prompter/prompter_mock.go:412:	if mock.MultiSelectWithSearchFunc == nil {
+internal/prompter/prompter_mock.go:413:		panic("PrompterMock.MultiSelectWithSearchFunc: method is nil but Prompter.MultiSelectWithSearch was just called")
+internal/prompter/prompter_mock.go:428:	mock.lockMultiSelectWithSearch.Lock()
+codex
+I found the artifact changes are already present, and the accepted claims are cleanup refactors on top of that. I’m going to patch only the claimed source files and then run `gofmt` on those same Go files; no tests will be run.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -11,3 +11,2 @@
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+@@ -43,3 +42,2 @@
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+M /tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -707,2 +707,17 @@
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+@@ -715,32 +730,6 @@
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+@@ -763,14 +752,3 @@
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+M /tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -372,2 +372,21 @@
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+@@ -376,9 +395,3 @@
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+@@ -399,10 +412,4 @@
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+@@ -416,8 +423,4 @@
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+@@ -428,7 +431,2 @@
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+@@ -436,3 +434,3 @@
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+@@ -441,7 +439,3 @@
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+@@ -490,9 +484,3 @@
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+M /tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -160,13 +160,7 @@
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+@@ -177,9 +171,6 @@
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+M /tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -17,3 +17,2 @@
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+M /tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -341,3 +341,3 @@
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+@@ -383,3 +383,2 @@
+ 	}
+-	return searchFunc
+ }
+apply_patch(auto_approved=true) exited 0 in 11ms:
+Success. Updated the following files:
+M pkg/cmd/pr/shared/editable.go
+M pkg/cmd/pr/shared/survey.go
+M api/queries_pr.go
+M internal/prompter/prompter.go
+M pkg/cmd/pr/edit/edit.go
+M pkg/cmd/preview/prompter/prompter.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+codex
+The source patches are in place. I’m formatting the touched Go files and doing static checks with `rg`/`go test` avoidance only, to confirm the removed interface members and fields are gone without executing tests.
+exec
+/bin/zsh -lc 'gofmt -w api/queries_pr.go internal/prompter/prompter.go pkg/cmd/pr/edit/edit.go pkg/cmd/pr/shared/editable.go pkg/cmd/pr/shared/survey.go pkg/cmd/preview/prompter/prompter.go' in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+
+exec
+/bin/zsh -lc 'rg "ReviewerSearchFunc" pkg/cmd/pr/shared/editable.go pkg/cmd/pr pkg || true' in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+exec
+/bin/zsh -lc "sed -n '360,485p' internal/prompter/prompter.go" in /tmp/refactor-eq-workdir/bb-codex-12526exec
+/bin/zsh -lc "sed -n '700,770p' api/queries_pr.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+	Err         error
+}
+
+func multiSelectWithSearch(p Prompter, prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+	selectedOptions := defaultValues
+
+	// The optionKeyLabels map is used to uniquely identify optionKeyLabels
+	// and provide optional display labels.
+	optionKeyLabels := make(map[string]string)
+	for _, k := range selectedOptions {
+		optionKeyLabels[k] = k
+	}
+
+	labelFor := func(key string) string {
+		label := optionKeyLabels[key]
+		if label == "" {
+			return key
+		}
+		return label
+	}
+ succeeded in 0ms:
+	// The endpoint responds with the updated pull request object; we don't need it here.
+	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+}
+
+// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
+// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+// If query is empty, the query variable is passed as null to omit filtering.
+func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
+	type suggestedActorNode struct {
+		TypeName string `graphql:"__typename"`
+		User     struct {
+			ID    string
+			Login string
+			Name  string
+		} `graphql:"... on User"`
+		Bot struct {
+			ID    string
+			Login string
+		} `graphql:"... on Bot"`
+	}
+exec
+/bin/zsh -lc 'rg "MultiSelectWithSearch" pkg/cmd/pr/shared/survey.go || true' in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+	// TODO: KW21 This will need to change to use MultiSelectWithSearch once it's implemented.
+	// MultiSelectWithSearch will return the selected strings directly instead of indices,
+exec
+/bin/zsh -lc "sed -n '1,60p' pkg/cmd/pr/shared/survey.go && sed -n '336,402p' pkg/cmd/pr/edit/edit.go && sed -n '157,188p' pkg/cmd/preview/prompter/prompter.go" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+package shared
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/gh"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/surveyext"
+)
+
+type Action int
+
+const (
+	SubmitAction Action = iota
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+codex
+The checks show the claimed symbols were removed where required and the searchable prompt comments in `survey.go` were intentionally left alone per the rejected-cleanup note. I’m writing the required implementation summary now.
+file update
+A /tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+Applied claims: C1, C2, C3, C4, C5, C6, C7.
+
+Modified files:
+- api/queries_pr.go
+- internal/prompter/prompter.go
+- pkg/cmd/pr/edit/edit.go
+- pkg/cmd/pr/shared/editable.go
+- pkg/cmd/pr/shared/survey.go
+- pkg/cmd/preview/prompter/prompter.go
+apply_patch(auto_approved=true) exited 0 in 8ms:
+Success. Updated the following files:
+A IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8648ea481b9ca11f869c8381dd27e7a1b58c4d7e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2, C3, C4, C5, C6, C7.
++
++Modified files:
++- api/queries_pr.go
++- internal/prompter/prompter.go
++- pkg/cmd/pr/edit/edit.go
++- pkg/cmd/pr/shared/editable.go
++- pkg/cmd/pr/shared/survey.go
++- pkg/cmd/preview/prompter/prompter.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8648ea481b9ca11f869c8381dd27e7a1b58c4d7e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2, C3, C4, C5, C6, C7.
++
++Modified files:
++- api/queries_pr.go
++- internal/prompter/prompter.go
++- pkg/cmd/pr/edit/edit.go
++- pkg/cmd/pr/shared/editable.go
++- pkg/cmd/pr/shared/survey.go
++- pkg/cmd/preview/prompter/prompter.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+exec
+/bin/zsh -lc "sed -n '1,80p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+Applied claims: C1, C2, C3, C4, C5, C6, C7.
+
+Modified files:
+- api/queries_pr.go
+- internal/prompter/prompter.go
+- pkg/cmd/pr/edit/edit.go
+- pkg/cmd/pr/shared/editable.go
+- pkg/cmd/pr/shared/survey.go
+- pkg/cmd/preview/prompter/prompter.go
+exec
+/bin/zsh -lc "rg \"searchResultLabels|ReviewerSearchFunc|MultiSelectWithSearch\\(prompt, searchPrompt\" api/queries_pr.go internal/prompter/prompter.go pkg/cmd/pr/edit/edit.go pkg/cmd/pr/shared/editable.go pkg/cmd/pr/shared/survey.go pkg/cmd/preview/prompter/prompter.go || true" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+internal/prompter/prompter.go:	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+internal/prompter/prompter.go:func (p *accessiblePrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
+pkg/cmd/pr/shared/editable.go:	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+exec
+/bin/zsh -lc "find api internal pkg -type f \\( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*_test.go' -o -name 'test_*.py' -o -name '*_test.py' \\) -newer SHARPENED_SPEC.md -print" in /tmp/refactor-eq-workdir/bb-codex-12526 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8648ea481b9ca11f869c8381dd27e7a1b58c4d7e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2, C3, C4, C5, C6, C7.
++
++Modified files:
++- api/queries_pr.go
++- internal/prompter/prompter.go
++- pkg/cmd/pr/edit/edit.go
++- pkg/cmd/pr/shared/editable.go
++- pkg/cmd/pr/shared/survey.go
++- pkg/cmd/preview/prompter/prompter.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+codex
+Implemented all accepted claims C1-C7 and wrote the required summary at [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md).
+
+Changed only the claimed source files:
+[api/queries_pr.go](/tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go), [internal/prompter/prompter.go](/tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go), [pkg/cmd/pr/edit/edit.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go), [pkg/cmd/pr/shared/editable.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go), [pkg/cmd/pr/shared/survey.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go), and [pkg/cmd/preview/prompter/prompter.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go).
+
+Ran `gofmt` on the touched Go files. Tests were not run, per instruction.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..8648ea481b9ca11f869c8381dd27e7a1b58c4d7e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,9 @@
++Applied claims: C1, C2, C3, C4, C5, C6, C7.
++
++Modified files:
++- api/queries_pr.go
++- internal/prompter/prompter.go
++- pkg/cmd/pr/edit/edit.go
++- pkg/cmd/pr/shared/editable.go
++- pkg/cmd/pr/shared/survey.go
++- pkg/cmd/preview/prompter/prompter.go
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+index 962999f09c799f48de1e856d993e66788e719adf..d11e9381bdcb0cbf765007115a998554cb21ff05
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+index 5fef325d57792068442c93b2116a0f0cb717d56a..3df1c56d570750dcac0377178c004216322d42b0
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go
+@@ -370,17 +370,30 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
+-
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
++	applySearchResult(searchResult)
+ 
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,36 +421,23 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+ 		for _, k := range persistentValues {
+ 			if slices.Contains(selectedOptions, k) {
+ 				continue
+-			}
+-
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+ 			}
+ 
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+index 0ced8b58cb59f8e7cca83bb2102cc719829f7e0e..bd08c958a9531d7affd18237a07e7cbdc482fb58
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+index 7e6e772198c1e1f7f7335f3b83f784a3c19b3285..2f24576673ed1c15e515e631a70e720cecf6e2e3
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+index 9ba600ae4ba77c6cab6aea786a68582e1b8c1ca5..30c46756626e1236ec2b2739aa4b9cdf744d8a43
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff --git a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+index 93dbbe61160ba73a34a56d4545d675166e2fc108..535d6b4860db08c8492286cfb030f83c42cd4de5
+--- a//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
++++ b//tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+
+tokens used
+43,061
+Implemented all accepted claims C1-C7 and wrote the required summary at [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-12526/IMPLEMENT_SUMMARY.md).
+
+Changed only the claimed source files:
+[api/queries_pr.go](/tmp/refactor-eq-workdir/bb-codex-12526/api/queries_pr.go), [internal/prompter/prompter.go](/tmp/refactor-eq-workdir/bb-codex-12526/internal/prompter/prompter.go), [pkg/cmd/pr/edit/edit.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/edit/edit.go), [pkg/cmd/pr/shared/editable.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/editable.go), [pkg/cmd/pr/shared/survey.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/pr/shared/survey.go), and [pkg/cmd/preview/prompter/prompter.go](/tmp/refactor-eq-workdir/bb-codex-12526/pkg/cmd/preview/prompter/prompter.go).
+
+Ran `gofmt` on the touched Go files. Tests were not run, per instruction.

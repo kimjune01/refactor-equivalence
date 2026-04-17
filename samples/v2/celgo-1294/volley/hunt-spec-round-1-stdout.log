@@ -1,0 +1,632 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1294
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9bf4-5667-7d53-b9ee-c8e0d0c442c8
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-1-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/1294/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/1294/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll inspect the goal, claims, allowed file list, patch, and relevant tests/source, then write only the requested hunt report.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+# PR #1294 — REPL -- cel-spec pb2 and json name support
+
+## PR body
+
+- Include proto2 extensions in the REPL cel-spec types for prototyping conformance tests.
+- Add flag for enabling JSON field names in REPL
+- Fix bug for JSON field names when extensions are present.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+common/types/object.go
+common/types/pb/type.go
+repl/evaluator.go
+repl/main/main.go
+test/proto2pb/test_all_types.proto
+test/proto3pb/test_all_types.proto
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Correct JSON option serialization
+**File**: repl/evaluator.go:1025
+**Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
+**Goal link**: This clarifies the new REPL flag for JSON field-name support.
+**Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
+
+### C2 — Format extension object fields without `fmt.Fprintf`
+**File**: common/types/object.go:190
+**Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, using one local descriptor name for both the displayed label and the `o.Get(String(...))` lookup.
+**Goal link**: This clarifies the extension-field formatting path added for proto2 extension support.
+**Justification**: Direct builder writes express the two cases, normal field name versus backtick-escaped full extension name, without formatting machinery or a mutable `types.String` value that obscures which protobuf name is used for lookup.
+
+## Rejected
+
+- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
+- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names.
+- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly.
+- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
+ succeeded in 0ms:
+diff --git a/common/types/object.go b/common/types/object.go
+index c44eaa94..bb2a09e8 100644
+--- a/common/types/object.go
++++ b/common/types/object.go
+@@ -187,8 +187,14 @@ func (o *protoObj) format(sb *strings.Builder) {
+ 		if i > 0 {
+ 			sb.WriteString(", ")
+ 		}
+-		sb.WriteString(fmt.Sprintf("%s: ", field.Name()))
+-		formatTo(sb, o.Get(String(field.Name())))
++		name := String(field.Name())
++		if field.IsExtension() {
++			name = String(field.FullName())
++			fmt.Fprintf(sb, "`%s`: ", name)
++		} else {
++			fmt.Fprintf(sb, "%s: ", name)
++		}
++		formatTo(sb, o.Get(name))
+ 	}
+ 	sb.WriteString("}")
+codex
+The patch shows the accepted claims are only a subset of the artifact: one JSON option string fix and one formatting cleanup. I’m checking the actual source/test shape now so findings are grounded in current cleanroom code, not just the patch.
+exec
+/bin/zsh -lc "nl -ba repl/evaluator.go | sed -n '980,1045p;1070,1110p;1180,1225p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "nl -ba common/types/object.go | sed -n '165,210p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+   165	
+   166	func (o *protoObj) Value() any {
+   167		return o.value
+   168	}
+   169	
+   170	type protoObjField struct {
+   171		fd protoreflect.FieldDescriptor
+   172		v  protoreflect.Value
+   173	}
+   174	
+   175	func (o *protoObj) format(sb *strings.Builder) {
+   176		var fields []protoreflect.FieldDescriptor
+   177		o.value.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+   178			fields = append(fields, fd)
+   179			return true
+   180		})
+   181		sort.SliceStable(fields, func(i, j int) bool {
+   182			return fields[i].Number() < fields[j].Number()
+   183		})
+   184		sb.WriteString(o.Type().TypeName())
+ succeeded in 0ms:
+   980	}
+   981	
+   982	// typeOption implements optioner for loading a set of types defined by a protobuf file descriptor set.
+   983	type typeOption struct {
+   984		path  string
+   985		fds   *descpb.FileDescriptorSet
+   986		isPkg bool
+   987	}
+   988	
+   989	func (o *typeOption) String() string {
+   990		flags := ""
+   991		if o.isPkg {
+   992			flags = "--pkg"
+   993		}
+   994		return fmt.Sprintf("%%load_descriptors %s '%s'", flags, o.path)
+   995	}
+   996	
+   997	func (o *typeOption) Option() cel.EnvOption {
+   998		return cel.TypeDescs(o.fds)
+   999	}
+exec
+/bin/zsh -lc "nl -ba common/types/pb/type.go | sed -n '90,135p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+    90			msgType:        td.msgType,
+    91			fieldMap:       td.fieldMap,
+    92			jsonFieldMap:   td.jsonFieldMap,
+    93			extensions:     pbdb.extensions,
+    94			reflectType:    td.reflectType,
+    95			zeroMsg:        td.zeroMsg,
+    96			jsonFieldNames: td.jsonFieldNames,
+    97		}
+    98	}
+    99	
+   100	// FieldMap returns a string field name to FieldDescription map.
+   101	func (td *TypeDescription) FieldMap() map[string]*FieldDescription {
+   102		if td.jsonFieldNames {
+   103			return td.jsonFieldMap
+   104		}
+   105		return td.fieldMap
+   106	}
+   107	
+   108	// FieldByName returns (FieldDescription, true) if the field name is declared within the type.
+   109	func (td *TypeDescription) FieldByName(name string) (*FieldDescription, bool) {
+exec
+/bin/zsh -lc "rg -n \"enable_json_field_names|enable_escaped_fields|jsonOpt|%status|String\\(\\)|Proto2Extension|FieldByName|format\\(\" -S ." in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+./conformance/conformance_test.bzl:42:    args.append("--skip_tests={}".format(",".join(_expand_tests_to_skip(skip_tests))))
+./conformance/conformance_test.bzl:43:    args.append("--tests={}".format(",".join(["$(rlocationpath " + test + ")" for test in data])))
+./conformance/conformance_test.go:34:func (t *testsFlag) String() string {
+./conformance/conformance_test.go:52:func (t *skipTestsFlag) String() string {
+./conformance/conformance_test.go:88:		cel.Types(&test2pb.TestAllTypes{}, &test2pb.Proto2ExtensionScopedMessage{}, &test3pb.TestAllTypes{}),
+./cel/prompt.go:183:	return buffer.String()
+./cel/io_test.go:193:		t.Error("ExprToString() succeeded, wanted error")
+./cel/io_test.go:252:		t.Errorf("env.AstToString() got (%v, %v) wanted unsupported expr error", expr, err)
+./cel/decls_test.go:134:	if ast.OutputType().String() != "list(bool)" {
+./cel/decls_test.go:135:		t.Errorf("ast.OutputType().String() produced %s, wanted list(bool)", ast.OutputType())
+./cel/decls_test.go:775:		t.Run(tc.in.String(), func(t *testing.T) {
+./cel/cel_test.go:1415:				t.Fatalf("AstToString() failed: %v", err)
+./cel/cel_test.go:3712:			expr: "jsonOptMsg.int32_snake_case_json_name == 1 && " +
+./cel/cel_test.go:3713:				"jsonOptMsg.int64CamelCaseJsonName == 2 && " +
+./cel/cel_test.go:3714:				"jsonOptMsg.uint32DefaultJsonName == 3u && " +
+./cel/cel_test.go:3715:				"jsonOptMsg.`uint64-custom-json-name` == 4u && " +
+./cel/cel_test.go:3716:				"jsonOptMsg.single_string == 'shadows' && " +
+./cel/cel_test.go:3717:				"jsonOptMsg.singleString == 'shadowed'",
+./cel/cel_test.go:3722:			expr: "dyn(jsonOptMsg).int32_snake_case_json_name == 1 && " +
+./cel/cel_test.go:3723:				"dyn(jsonOptMsg).`uint64-custom-json-name` == 4u && " +
+exec
+/bin/zsh -lc "nl -ba repl/evaluator_test.go | sed -n '760,950p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "nl -ba cel/cel_test.go | sed -n '3680,3785p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+  3680			{
+  3681				name:           "json simple field",
+  3682				expr:           `msg.singleInt32 == 1`,
+  3683				jsonFieldNames: true,
+  3684			},
+  3685			{
+  3686				name:           "json repeated field",
+  3687				expr:           `msg.mapStringString['key'] == 'value'`,
+  3688				jsonFieldNames: true,
+  3689			},
+  3690			{
+  3691				name:           "message with json field",
+  3692				expr:           `TestAllTypes{singleInt32: 1} != msg`,
+  3693				jsonFieldNames: true,
+  3694			},
+  3695			{
+  3696				name:           "message with json field and proto fallback",
+  3697				expr:           `dyn(TestAllTypes{singleInt32: 2}).single_int32 == 2`,
+  3698				jsonFieldNames: true,
+  3699			},
+ succeeded in 0ms:
+   760					&letVarCmd{
+   761						identifier: "y",
+   762						typeHint:   mustParseType(t, "int"),
+   763						src:        "10",
+   764					},
+   765					&evalCmd{
+   766						expr: "x + y > 10 || y > 10",
+   767					},
+   768				},
+   769				wantText:  "Unknown x (1)",
+   770				wantExit:  false,
+   771				wantError: false,
+   772			},
+   773			{
+   774				name: "PartialEvalDisabled",
+   775				commands: []Cmder{
+   776					&letVarCmd{
+   777						identifier: "x",
+   778						typeHint:   mustParseType(t, "int"),
+   779						src:        "",
+exec
+/bin/zsh -lc 'git diff -- common/types/object.go repl/evaluator.go common/types/pb/type.go repl/main/main.go test/proto2pb/test_all_types.proto test/proto3pb/test_all_types.proto' in /tmp/refactor-eq-workdir/cleanroom-v2/1294 exited 129 in 0ms:
+warning: Limiting comparison with pathspecs is only supported if both paths are directories.
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+exec
+/bin/zsh -lc "rg -n \"protoObj|ExternalMessageType|ExampleType|extension|String\\(\\) got|"'`.*`:" common cel interpreter repl test -S' in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+zsh:1: command not found: .bazelrc
+test/proto2pb/test_extensions.proto:10:// Package scoped extensions.
+test/proto2pb/test_extensions.proto:11:extend ExampleType {
+test/proto2pb/test_extensions.proto:12:  optional ExampleType nested_example = 100;
+test/proto2pb/test_extensions.proto:17:// Message scoped extensions.
+test/proto2pb/test_extensions.proto:18:message ExternalMessageType {
+test/proto2pb/test_extensions.proto:19:  extend ExampleType {
+repl/typefmt_test.go:7://      https://www.apache.org/licenses/LICENSE-2.0
+repl/typefmt_test.go:31:			exprType: &exprpb.Type{},
+repl/typefmt_test.go:32:			wantFmt:  "<unknown type>",
+repl/typefmt_test.go:35:			exprType: &exprpb.Type{TypeKind: &exprpb.Type_Dyn{}},
+repl/typefmt_test.go:36:			wantFmt:  "dyn",
+repl/typefmt_test.go:39:			exprType: &exprpb.Type{TypeKind: &exprpb.Type_Null{}},
+repl/typefmt_test.go:40:			wantFmt:  "null",
+repl/typefmt_test.go:43:			exprType: &exprpb.Type{TypeKind: &exprpb.Type_Primitive{Primitive: exprpb.Type_BOOL}},
+repl/typefmt_test.go:44:			wantFmt:  "bool",
+repl/typefmt_test.go:47:			exprType: &exprpb.Type{TypeKind: &exprpb.Type_Primitive{Primitive: exprpb.Type_INT64}},
+repl/typefmt_test.go:48:			wantFmt:  "int",
+repl/typefmt_test.go:51:			exprType: &exprpb.Type{TypeKind: &exprpb.Type_Primitive{Primitive: exprpb.Type_UINT64}},
+repl/typefmt_test.go:52:			wantFmt:  "uint",
+codex
+So far I don’t see a direct test-breaking problem in the two accepted changes themselves. I’m checking whether the spec omits or misclassifies necessary goal work, because this review also asks for “missing rejections” and goal misrepresentation.
+exec
+/bin/zsh -lc "nl -ba repl/evaluator.go | sed -n '40,80p;1208,1238p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+    40	
+    41		test2pb "cel.dev/expr/conformance/proto2"
+    42		test3pb "cel.dev/expr/conformance/proto3"
+    43		exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+    44		attrpb "google.golang.org/genproto/googleapis/rpc/context/attribute_context"
+    45		descpb "google.golang.org/protobuf/types/descriptorpb"
+    46	)
+    47	
+    48	var (
+    49		extensionMap = map[string]cel.EnvOption{
+    50			"optional":               cel.OptionalTypes(),
+    51			"bindings":               ext.Bindings(),
+    52			"strings":                ext.Strings(),
+    53			"protos":                 ext.Protos(),
+    54			"math":                   ext.Math(),
+    55			"encoders":               ext.Encoders(),
+    56			"sets":                   ext.Sets(),
+    57			"lists":                  ext.Lists(),
+    58			"two_var_comprehensions": ext.TwoVarComprehensions(),
+    59		}
+exec
+/bin/zsh -lc 'rg -n "test_extensions|proto2_ext|int32_ext|foo_bar|TestJsonNames|json_name" test/proto2pb test/proto3pb -S' in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+test/proto2pb/test_extensions.proto:13:  optional int32 int32_ext = 101;
+test/proto2pb/test_extensions.pb.go:5:// source: test/proto2pb/test_extensions.proto
+test/proto2pb/test_extensions.pb.go:34:		mi := &file_test_proto2pb_test_extensions_proto_msgTypes[0]
+test/proto2pb/test_extensions.pb.go:47:	mi := &file_test_proto2pb_test_extensions_proto_msgTypes[0]
+test/proto2pb/test_extensions.pb.go:60:	return file_test_proto2pb_test_extensions_proto_rawDescGZIP(), []int{0}
+test/proto2pb/test_extensions.pb.go:63:var file_test_proto2pb_test_extensions_proto_extTypes = []protoimpl.ExtensionInfo{
+test/proto2pb/test_extensions.pb.go:70:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:76:		Name:          "google.expr.proto2.test.int32_ext",
+test/proto2pb/test_extensions.pb.go:77:		Tag:           "varint,101,opt,name=int32_ext",
+test/proto2pb/test_extensions.pb.go:78:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:86:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:94:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:101:	E_NestedExample = &file_test_proto2pb_test_extensions_proto_extTypes[0]
+test/proto2pb/test_extensions.pb.go:102:	// optional int32 int32_ext = 101;
+test/proto2pb/test_extensions.pb.go:103:	E_Int32Ext = &file_test_proto2pb_test_extensions_proto_extTypes[1]
+test/proto2pb/test_extensions.pb.go:105:	E_Int32WrapperExt = &file_test_proto2pb_test_extensions_proto_extTypes[2]
+test/proto2pb/test_extensions.pb.go:107:	E_ExternalMessageType_Int64Ext = &file_test_proto2pb_test_extensions_proto_extTypes[3]
+test/proto2pb/test_extensions.pb.go:110:var File_test_proto2pb_test_extensions_proto protoreflect.FileDescriptor
+test/proto2pb/test_extensions.pb.go:112:var file_test_proto2pb_test_extensions_proto_rawDesc = []byte{
+test/proto2pb/test_extensions.pb.go:151:	file_test_proto2pb_test_extensions_proto_rawDescOnce sync.Once
+exec
+/bin/zsh -lc "rg -n \"JSONFieldNames|jsonFieldNames|extensions\\[|FieldByName\\(\" common/types/pb cel common/types repl -S" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+common/types/object_test.go:72:			opts: []RegistryOption{ProtoTypeDefs(&exprpb.Expr{}), JSONFieldNames(true)},
+common/types/object_test.go:96:			opts: []RegistryOption{ProtoTypeDefs(&exprpb.Expr{}), JSONFieldNames(false)},
+common/types/pb/type_test.go:57:func TestTypeDescriptionJSONFieldNames(t *testing.T) {
+common/types/pb/type_test.go:58:	pbdb := NewDb(JSONFieldNames(true))
+common/types/pb/type_test.go:69:	fd, found := td.FieldByName("singleBoolWrapper")
+common/types/pb/type_test.go:71:		t.Fatal("td.FieldByName(singleBoolWrapper) failed")
+common/types/pb/type_test.go:97:	field, found := td.FieldByName("nestedgroup")
+common/types/pb/type_test.go:99:		t.Fatal("TypeDescription.FieldByName('nestedgroup') could not be found")
+common/types/pb/type_test.go:134:	pbdb := NewDb(JSONFieldNames(true))
+common/types/pb/type_test.go:164:	fd, found := td.FieldByName("payload")
+common/types/pb/type_test.go:244:		f, found := td.FieldByName(field)
+common/types/pb/type_test.go:246:			t.Fatalf("td.FieldByName(%q) not found", field)
+common/types/pb/type_test.go:315:		f, found := td.FieldByName(tc.field)
+common/types/pb/type_test.go:317:			t.Fatalf("td.FieldByName(%q) not found", tc.field)
+common/types/pb/type_test.go:577:	field, found := td.FieldByName("map_string_string")
+common/types/pb/type_test.go:579:		t.Fatal("td.FieldByName('map_string_string') not found")
+common/types/pb/type_test.go:585:	field, found = td.FieldByName("repeated_nested_message")
+common/types/pb/type_test.go:587:		t.Fatal("td.FieldByName('repeated_nested_message') not found")
+repl/evaluator.go:1022:	return cel.JSONFieldNames(o.enabled)
+common/types/pb/file.go:45:			messageExtMap[string(ext.FullName())] = newFieldDescription(extDesc, pbdb.jsonFieldNames)
+exec
+/bin/zsh -lc 'rg -n "cel-spec-test-types|Proto2ExtensionScopedMessage|cel.dev/expr/conformance|test2pb|test3pb|proto2pb|proto3pb" repl/evaluator.go go.mod test -S' in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+repl/evaluator.go:41:	test2pb "cel.dev/expr/conformance/proto2"
+repl/evaluator.go:42:	test3pb "cel.dev/expr/conformance/proto3"
+repl/evaluator.go:1210:	case "cel-spec-test-types":
+repl/evaluator.go:1211:		fdp2 := (&test2pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+repl/evaluator.go:1212:		fdp2ext := (&test2pb.Proto2ExtensionScopedMessage{}).ProtoReflect().Type().Descriptor().ParentFile()
+repl/evaluator.go:1213:		fdp3 := (&test3pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+test/proto2pb/test_extensions.proto:5:option go_package = "github.com/google/cel-go/test/proto2pb";
+test/proto2pb/test_extensions.proto:8:import "test/proto2pb/test_all_types.proto";
+test/proto2pb/test_extensions.pb.go:5:// source: test/proto2pb/test_extensions.proto
+test/proto2pb/test_extensions.pb.go:7:package proto2pb
+test/proto2pb/test_extensions.pb.go:34:		mi := &file_test_proto2pb_test_extensions_proto_msgTypes[0]
+test/proto2pb/test_extensions.pb.go:47:	mi := &file_test_proto2pb_test_extensions_proto_msgTypes[0]
+test/proto2pb/test_extensions.pb.go:60:	return file_test_proto2pb_test_extensions_proto_rawDescGZIP(), []int{0}
+test/proto2pb/test_extensions.pb.go:63:var file_test_proto2pb_test_extensions_proto_extTypes = []protoimpl.ExtensionInfo{
+test/proto2pb/test_extensions.pb.go:70:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:78:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:86:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:94:		Filename:      "test/proto2pb/test_extensions.proto",
+test/proto2pb/test_extensions.pb.go:101:	E_NestedExample = &file_test_proto2pb_test_extensions_proto_extTypes[0]
+test/proto2pb/test_extensions.pb.go:103:	E_Int32Ext = &file_test_proto2pb_test_extensions_proto_extTypes[1]
+exec
+/bin/zsh -lc "nl -ba common/types/pb/type_test.go | sed -n '50,110p;130,180p;230,330p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "nl -ba common/types/object.go | sed -n '1,35p;210,360p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "rg -n \"fmt\\.\" common/types/object.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+    50		for _, typeName := range types {
+    51			if _, found := pbdb.DescribeType(typeName); !found {
+    52				t.Errorf("pbdb.DescribeType(%v) not found", typeName)
+    53			}
+    54		}
+    55	}
+    56	
+    57	func TestTypeDescriptionJSONFieldNames(t *testing.T) {
+    58		pbdb := NewDb(JSONFieldNames(true))
+    59		msg := &proto2pb.TestAllTypes{}
+    60		msgType := string(msg.ProtoReflect().Descriptor().FullName())
+    61		_, err := pbdb.RegisterMessage(msg)
+    62		if err != nil {
+    63			t.Fatalf("pbdb.RegisterMessage() failed: %v", err)
+    64		}
+    65		td, found := pbdb.DescribeType(msgType)
+    66		if !found {
+    67			t.Fatalf("pbdb.DescribeType(%s) not found", msgType)
+    68		}
+    69		fd, found := td.FieldByName("singleBoolWrapper")
+ succeeded in 0ms:
+97:					return nil, fmt.Errorf("type conversion error: %v", err)
+103:	return nil, fmt.Errorf("type conversion error from '%T' to '%v'", o.value, typeDesc)
+193:			fmt.Fprintf(sb, "`%s`: ", name)
+195:			fmt.Fprintf(sb, "%s: ", name)
+ succeeded in 0ms:
+     1	// Copyright 2018 Google LLC
+     2	//
+     3	// Licensed under the Apache License, Version 2.0 (the "License");
+     4	// you may not use this file except in compliance with the License.
+     5	// You may obtain a copy of the License at
+     6	//
+     7	//      http://www.apache.org/licenses/LICENSE-2.0
+     8	//
+     9	// Unless required by applicable law or agreed to in writing, software
+    10	// distributed under the License is distributed on an "AS IS" BASIS,
+    11	// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    12	// See the License for the specific language governing permissions and
+    13	// limitations under the License.
+    14	
+    15	package types
+    16	
+    17	import (
+    18		"fmt"
+    19		"reflect"
+    20		"sort"
+exec
+/bin/zsh -lc "nl -ba common/types/pb/file_test.go | sed -n '55,95p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+    55			},
+    56			{
+    57				field:     "google.expr.proto2.test.ExtendedExampleType.enum_ext",
+    58				fieldType: decls.Int,
+    59			},
+    60			{
+    61				field:     "google.expr.proto2.test.ExternalMessageType.int64_ext",
+    62				fieldType: decls.Int,
+    63			},
+    64		}
+    65		for _, tst := range tests {
+    66			tc := tst
+    67			t.Run(tc.field, func(t *testing.T) {
+    68				field, found := ex.FieldByName(tc.field)
+    69				if !found {
+    70					t.Fatalf("%s extension not found", tc.field)
+    71				}
+    72				if !proto.Equal(field.CheckedType(), tc.fieldType) {
+    73					t.Errorf("Got %v, wanted %v", field.CheckedType(), tc.fieldType)
+    74				}
+exec
+/bin/zsh -lc 'nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md' in /tmp/refactor-eq-workdir/cleanroom-v2/1294exec
+/bin/zsh -lc "nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/round-1-claims.md | sed -n '1,80p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+     1	# PR #1294 — REPL -- cel-spec pb2 and json name support
+     2	
+     3	## PR body
+     4	
+     5	- Include proto2 extensions in the REPL cel-spec types for prototyping conformance tests.
+     6	- Add flag for enabling JSON field names in REPL
+     7	- Fix bug for JSON field names when extensions are present.
+ succeeded in 0ms:
+     1	## Accepted Claims
+     2	
+     3	### C1 — Correct JSON option serialization
+     4	**File**: repl/evaluator.go:1025
+     5	**Change**: Change `(*jsonOpt).String()` to return `%option --enable_json_field_names` instead of `%option --enable_escaped_fields`.
+     6	**Goal link**: This clarifies the new REPL flag for JSON field-name support.
+     7	**Justification**: The JSON option currently serializes as the escaped-field option, so `%status` and YAML comments describe the wrong REPL command and obscure the intended JSON-name behavior.
+     8	
+     9	### C2 — Format extension object fields without `fmt.Fprintf`
+    10	**File**: common/types/object.go:190
+    11	**Change**: In `(*protoObj).format`, replace the two `fmt.Fprintf` calls for field labels with direct `strings.Builder` writes, using one local descriptor name for both the displayed label and the `o.Get(String(...))` lookup.
+    12	**Goal link**: This clarifies the extension-field formatting path added for proto2 extension support.
+    13	**Justification**: Direct builder writes express the two cases, normal field name versus backtick-escaped full extension name, without formatting machinery or a mutable `types.String` value that obscures which protobuf name is used for lookup.
+    14	
+    15	## Rejected
+    16	
+    17	- Remove `c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")` from `repl/main/main.go`: this change is unrelated to the stated proto2-extension and JSON-name goal, but removing it would alter observable CLI history behavior rather than preserve behavior.
+    18	- Change `TypeDescription.FieldByName` to prefer proto field names before JSON names when `JSONFieldNames(true)` is enabled: this would change the collision semantics covered by JSON-name cases such as `single_string` shadowing and would work against the goal of honoring JSON field names.
+    19	- Move extension lookup before JSON-name lookup in `TypeDescription.FieldByName`: this risks reintroducing the bug described by the goal where JSON field names and extensions interact incorrectly.
+    20	- Replace `cel-spec-test-types` descriptor loading with the repo-local `test/proto2pb` and `test/proto3pb` descriptors: this would change the public package/type names loaded by the REPL package shortcut and would no longer match the cel-spec conformance types named in the goal.
+codex
+I found no blocker in C1. I’m going to record two warnings: one accepted claim is essentially style cleanup rather than goal work, and the spec leaves the key JSON-name/extension lookup behavior implicit instead of spelling out the required order.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+## Finding F1 — Style cleanup is not goal work
+**Severity**: warning
+**Claim**: C2
+**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
+**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
+
+## Finding F2 — Required JSON-name and extension lookup order is implicit
+**Severity**: warning
+**Claim**: global
+**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
+**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+apply_patch(auto_approved=true) exited 0 in 25ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+file update:
+diff --git a/samples/v2/celgo-1294/volley/hunt-spec-round-1.md b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..25827e2c0b873dbc89ef0036d833820b8e6f925d
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Style cleanup is not goal work
++**Severity**: warning
++**Claim**: C2
++**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
++**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
++
++## Finding F2 — Required JSON-name and extension lookup order is implicit
++**Severity**: warning
++**Claim**: global
++**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
++**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+
+file update:
+diff --git a/samples/v2/celgo-1294/volley/hunt-spec-round-1.md b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..25827e2c0b873dbc89ef0036d833820b8e6f925d
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Style cleanup is not goal work
++**Severity**: warning
++**Claim**: C2
++**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
++**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
++
++## Finding F2 — Required JSON-name and extension lookup order is implicit
++**Severity**: warning
++**Claim**: global
++**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
++**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1294 succeeded in 0ms:
+## Finding F1 — Style cleanup is not goal work
+**Severity**: warning
+**Claim**: C2
+**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
+**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
+
+## Finding F2 — Required JSON-name and extension lookup order is implicit
+**Severity**: warning
+**Claim**: global
+**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
+**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
+**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+file update:
+diff --git a/samples/v2/celgo-1294/volley/hunt-spec-round-1.md b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..25827e2c0b873dbc89ef0036d833820b8e6f925d
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Style cleanup is not goal work
++**Severity**: warning
++**Claim**: C2
++**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
++**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
++
++## Finding F2 — Required JSON-name and extension lookup order is implicit
++**Severity**: warning
++**Claim**: global
++**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
++**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+
+codex
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md)
+
+It contains two warnings and no blockers. I did not edit any source files.
+file update:
+diff --git a/samples/v2/celgo-1294/volley/hunt-spec-round-1.md b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..25827e2c0b873dbc89ef0036d833820b8e6f925d
+--- /dev/null
++++ b/samples/v2/celgo-1294/volley/hunt-spec-round-1.md
+@@ -0,0 +1,13 @@
++## Finding F1 — Style cleanup is not goal work
++**Severity**: warning
++**Claim**: C2
++**What**: The claim is framed as serving proto2 extension support, but the requested change only replaces `fmt.Fprintf` with direct `strings.Builder` writes. That is a local cleanup of already-selected label strings, not a behavior needed by the stated proto2-extension or JSON-name goals.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:5` lists including proto2 extensions in REPL cel-spec types; `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:190` through `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/object.go:197` already selects normal field names versus backtick-escaped full extension names and uses the same `name` for lookup.
++**Fix**: Narrow C2 to an optional style cleanup, or remove it from accepted goal-linked claims.
++
++## Finding F2 — Required JSON-name and extension lookup order is implicit
++**Severity**: warning
++**Claim**: global
++**What**: The spec rejects two bad `FieldByName` orderings, but it never explicitly states the required preserved behavior: when `JSONFieldNames(true)` is enabled, JSON-name lookup must happen before proto-name fallback and extension lookup. An implementer has to infer the positive rule from rejected alternatives and tests.
++**Evidence**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/goal/GOAL.md:7` says the PR fixes JSON field names when extensions are present. The current required lookup order is in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/common/types/pb/type.go:109`, where JSON names are checked first, proto field names second, and extensions third. Tests exercise the edge cases in `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3706` and `/tmp/refactor-eq-workdir/cleanroom-v2/1294/cel/cel_test.go:3711`.
++**Fix**: Clarify the spec text so the required `FieldByName` order is explicit preserved behavior, not only implied by rejected alternatives.
+
+tokens used
+73,116
+Wrote the hunt report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1294/volley/hunt-spec-round-1.md)
+
+It contains two warnings and no blockers. I did not edit any source files.

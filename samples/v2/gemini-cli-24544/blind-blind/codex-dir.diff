@@ -1,0 +1,312 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24544/IMPLEMENT_SUMMARY.md /tmp/refactor-eq-workdir/bb-codex-24544/IMPLEMENT_SUMMARY.md
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24544/IMPLEMENT_SUMMARY.md	1969-12-31 16:00:00
++++ /tmp/refactor-eq-workdir/bb-codex-24544/IMPLEMENT_SUMMARY.md	2026-04-16 11:47:26
+@@ -0,0 +1,12 @@
++Applied claims: C1, C2, C3, C4
++
++Modified files:
++- packages/core/src/commands/memory.ts
++- packages/cli/src/ui/components/SkillInboxDialog.tsx
++- packages/cli/src/ui/commands/memoryCommand.ts
++
++Details:
++- C1: Centralized inbox source validation and existence checks in a shared helper used by moveInboxSkill and dismissInboxSkill.
++- C2: Reused a local FeedbackMessage component for the repeated feedback block in SkillInboxDialog.
++- C3: Reused a local DialogFrame component for the loading, empty, and main SkillInboxDialog frame markup.
++- C4: Removed the redundant OpenCustomDialogActionReturn import and simplified the /memory inbox action return annotation.
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24544/SHARPENED_SPEC.md /tmp/refactor-eq-workdir/bb-codex-24544/SHARPENED_SPEC.md
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24544/SHARPENED_SPEC.md	1969-12-31 16:00:00
++++ /tmp/refactor-eq-workdir/bb-codex-24544/SHARPENED_SPEC.md	2026-04-16 11:45:59
+@@ -0,0 +1,33 @@
++## Accepted Claims
++
++### C1 — Centralize inbox source validation
++**File**: packages/core/src/commands/memory.ts:195
++**Change**: Extract the duplicated `isValidInboxSkillDirName` check, inbox directory lookup, `sourcePath` construction, and `fs.access(sourcePath)` existence check used by `moveInboxSkill` and `dismissInboxSkill` into a private helper in the same file, and have both functions use that helper while preserving the existing failure messages.
++**Goal link**: This clarifies the accept/dismiss actions for extracted inbox skills by making "find the inbox skill or return the same error" one shared precondition instead of two hand-written blocks.
++**Justification**: The goal adds two operations over the same inbox item, and sharing their identical validation removes accidental duplication without changing move, dismiss, or error behavior covered by the existing memory command tests.
++
++### C2 — Reuse the feedback block in SkillInboxDialog
++**File**: packages/cli/src/ui/components/SkillInboxDialog.tsx:313
++**Change**: Add a small local helper component or render function for the repeated feedback `<Box><Text>` block, then replace both the list-phase and action-phase copies with that helper using the same `feedback` data, colors, symbols, and spacing.
++**Goal link**: This clarifies the interactive review flow by treating operation feedback as one UI concern shared by both dialog phases.
++**Justification**: The first-pass dialog duplicates the same JSX twice, and factoring it locally reduces noise around the actual list/action state machine while preserving the rendered output expected by the dialog tests.
++
++### C3 — Reuse the dialog frame markup
++**File**: packages/cli/src/ui/components/SkillInboxDialog.tsx:232
++**Change**: Extract the repeated bordered `Box` wrapper props (`flexDirection`, `borderStyle`, `borderColor`, `paddingX`, `paddingY`, and optional `width`) into a local `DialogFrame` helper component and use it for the loading, empty, and main dialog returns.
++**Goal link**: This keeps the `/memory inbox` dialog focused on loading, empty, list, and action states rather than repeated Ink frame styling.
++**Justification**: The three return branches use the same frame shape, so a local wrapper removes presentational duplication without changing interaction behavior or command semantics.
++
++### C4 — Remove the redundant custom dialog return type
++**File**: packages/cli/src/ui/commands/memoryCommand.ts:17
++**Change**: Drop the `OpenCustomDialogActionReturn` import and simplify the `/memory inbox` action annotation to `SlashCommandActionReturn | void`, since `SlashCommandActionReturn` already includes custom dialog returns.
++**Goal link**: This clarifies the command entry point for the inbox feature by relying on the existing slash-command return union instead of restating one member of it.
++**Justification**: The explicit union adds type-level indirection for a single command action and can be removed without affecting runtime behavior or the existing `/memory inbox` command tests.
++
++## Rejected
++
++- Move inbox core helpers from `packages/core/src/commands/memory.ts` into a new dedicated source file: rejected because the allowed edit set does not include a new file path, and the task restricts proposed edits to files already listed in `allowed-files.txt`.
++- Remove the `experimental.memoryManager` guard from `/memory inbox`: rejected because it would change observable command behavior and contradict tests that expect the disabled-manager informational message.
++- Enable project installation even when `config.isTrustedFolder()` is false: rejected because it would change the dialog's trust-gated behavior and weaken the destination constraint exercised by `SkillInboxDialog.test.tsx`.
++- Replace copy-then-remove in `moveInboxSkill` with `fs.rename`: rejected because it can change behavior across filesystems and does not preserve the current "copy to destination, then remove from inbox" semantics described in the goal.
++- Revert the unrelated context manager and dependency changes from the patch wholesale: rejected because those changes cross broader public API and dependency boundaries, are not a bounded behavior-preserving inbox refactor claim, and are not justified solely by the `/memory inbox` goal.
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/cli/src/ui/commands/memoryCommand.ts /tmp/refactor-eq-workdir/bb-codex-24544/packages/cli/src/ui/commands/memoryCommand.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/cli/src/ui/commands/memoryCommand.ts	2026-04-08 10:26:57
++++ /tmp/refactor-eq-workdir/bb-codex-24544/packages/cli/src/ui/commands/memoryCommand.ts	2026-04-16 11:46:56
+@@ -14,7 +14,6 @@
+ import { MessageType } from '../types.js';
+ import {
+   CommandKind,
+-  type OpenCustomDialogActionReturn,
+   type SlashCommand,
+   type SlashCommandActionReturn,
+ } from './types.js';
+@@ -133,9 +132,7 @@
+         'Review skills extracted from past sessions and move them to global or project skills',
+       kind: CommandKind.BUILT_IN,
+       autoExecute: true,
+-      action: (
+-        context,
+-      ): OpenCustomDialogActionReturn | SlashCommandActionReturn | void => {
++      action: (context): SlashCommandActionReturn | void => {
+         const config = context.services.agentContext?.config;
+         if (!config) {
+           return {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/cli/src/ui/components/SkillInboxDialog.tsx /tmp/refactor-eq-workdir/bb-codex-24544/packages/cli/src/ui/components/SkillInboxDialog.tsx
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/cli/src/ui/components/SkillInboxDialog.tsx	2026-04-08 10:26:57
++++ /tmp/refactor-eq-workdir/bb-codex-24544/packages/cli/src/ui/components/SkillInboxDialog.tsx	2026-04-16 11:46:51
+@@ -69,6 +69,41 @@
+   onReloadSkills: () => Promise<void>;
+ }
+ 
++const DialogFrame: React.FC<{
++  children: React.ReactNode;
++  width?: string;
++}> = ({ children, width }) => (
++  <Box
++    flexDirection="column"
++    borderStyle="round"
++    borderColor={theme.border.default}
++    paddingX={2}
++    paddingY={1}
++    width={width}
++  >
++    {children}
++  </Box>
++);
++
++const FeedbackMessage: React.FC<{
++  feedback: { text: string; isError: boolean } | null;
++}> = ({ feedback }) => {
++  if (!feedback) {
++    return null;
++  }
++
++  return (
++    <Box marginTop={1}>
++      <Text
++        color={feedback.isError ? theme.status.error : theme.status.success}
++      >
++        {feedback.isError ? '✗ ' : '✓ '}
++        {feedback.text}
++      </Text>
++    </Box>
++  );
++};
++
+ export const SkillInboxDialog: React.FC<SkillInboxDialogProps> = ({
+   config,
+   onClose,
+@@ -231,27 +266,15 @@
+ 
+   if (loading) {
+     return (
+-      <Box
+-        flexDirection="column"
+-        borderStyle="round"
+-        borderColor={theme.border.default}
+-        paddingX={2}
+-        paddingY={1}
+-      >
++      <DialogFrame>
+         <Text>Loading inbox…</Text>
+-      </Box>
++      </DialogFrame>
+     );
+   }
+ 
+   if (skills.length === 0 && !feedback) {
+     return (
+-      <Box
+-        flexDirection="column"
+-        borderStyle="round"
+-        borderColor={theme.border.default}
+-        paddingX={2}
+-        paddingY={1}
+-      >
++      <DialogFrame>
+         <Text bold>Skill Inbox</Text>
+         <Box marginTop={1}>
+           <Text color={theme.text.secondary}>
+@@ -259,19 +282,12 @@
+           </Text>
+         </Box>
+         <DialogFooter primaryAction="Esc to close" cancelAction="" />
+-      </Box>
++      </DialogFrame>
+     );
+   }
+ 
+   return (
+-    <Box
+-      flexDirection="column"
+-      borderStyle="round"
+-      borderColor={theme.border.default}
+-      paddingX={2}
+-      paddingY={1}
+-      width="100%"
+-    >
++    <DialogFrame width="100%">
+       {phase === 'list' ? (
+         <>
+           <Text bold>
+@@ -310,18 +326,7 @@
+             />
+           </Box>
+ 
+-          {feedback && (
+-            <Box marginTop={1}>
+-              <Text
+-                color={
+-                  feedback.isError ? theme.status.error : theme.status.success
+-                }
+-              >
+-                {feedback.isError ? '✗ ' : '✓ '}
+-                {feedback.text}
+-              </Text>
+-            </Box>
+-          )}
++          <FeedbackMessage feedback={feedback} />
+ 
+           <DialogFooter
+             primaryAction="Enter to select"
+@@ -354,18 +359,7 @@
+             />
+           </Box>
+ 
+-          {feedback && (
+-            <Box marginTop={1}>
+-              <Text
+-                color={
+-                  feedback.isError ? theme.status.error : theme.status.success
+-                }
+-              >
+-                {feedback.isError ? '✗ ' : '✓ '}
+-                {feedback.text}
+-              </Text>
+-            </Box>
+-          )}
++          <FeedbackMessage feedback={feedback} />
+ 
+           <DialogFooter
+             primaryAction="Enter to confirm"
+@@ -373,6 +367,6 @@
+           />
+         </>
+       )}
+-    </Box>
++    </DialogFrame>
+   );
+ };
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/core/src/commands/memory.ts /tmp/refactor-eq-workdir/bb-codex-24544/packages/core/src/commands/memory.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24544/packages/core/src/commands/memory.ts	2026-04-08 10:26:57
++++ /tmp/refactor-eq-workdir/bb-codex-24544/packages/core/src/commands/memory.ts	2026-04-16 11:47:22
+@@ -176,22 +176,12 @@
+   );
+ }
+ 
+-async function getSkillNameForConflictCheck(
+-  skillDir: string,
+-  fallbackName: string,
+-): Promise<string> {
+-  const skill = await loadSkillFromFile(path.join(skillDir, 'SKILL.md'));
+-  return skill?.name ?? fallbackName;
+-}
+-
+-/**
+- * Copies an inbox skill to the target skills directory.
+- */
+-export async function moveInboxSkill(
++async function getInboxSkillSourcePath(
+   config: Config,
+   dirName: string,
+-  destination: InboxSkillDestination,
+-): Promise<{ success: boolean; message: string }> {
++): Promise<
++  { success: true; sourcePath: string } | { success: false; message: string }
++> {
+   if (!isValidInboxSkillDirName(dirName)) {
+     return {
+       success: false,
+@@ -211,6 +201,31 @@
+     };
+   }
+ 
++  return { success: true, sourcePath };
++}
++
++async function getSkillNameForConflictCheck(
++  skillDir: string,
++  fallbackName: string,
++): Promise<string> {
++  const skill = await loadSkillFromFile(path.join(skillDir, 'SKILL.md'));
++  return skill?.name ?? fallbackName;
++}
++
++/**
++ * Copies an inbox skill to the target skills directory.
++ */
++export async function moveInboxSkill(
++  config: Config,
++  dirName: string,
++  destination: InboxSkillDestination,
++): Promise<{ success: boolean; message: string }> {
++  const sourceResult = await getInboxSkillSourcePath(config, dirName);
++  if (!sourceResult.success) {
++    return sourceResult;
++  }
++  const { sourcePath } = sourceResult;
++
+   const targetBase =
+     destination === 'global'
+       ? Storage.getUserSkillsDir()
+@@ -257,24 +272,11 @@
+   config: Config,
+   dirName: string,
+ ): Promise<{ success: boolean; message: string }> {
+-  if (!isValidInboxSkillDirName(dirName)) {
+-    return {
+-      success: false,
+-      message: 'Invalid skill name.',
+-    };
++  const sourceResult = await getInboxSkillSourcePath(config, dirName);
++  if (!sourceResult.success) {
++    return sourceResult;
+   }
+-
+-  const skillsDir = config.storage.getProjectSkillsMemoryDir();
+-  const sourcePath = path.join(skillsDir, dirName);
+-
+-  try {
+-    await fs.access(sourcePath);
+-  } catch {
+-    return {
+-      success: false,
+-      message: `Skill "${dirName}" not found in inbox.`,
+-    };
+-  }
++  const { sourcePath } = sourceResult;
+ 
+   await fs.rm(sourcePath, { recursive: true, force: true });
+ 

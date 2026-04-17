@@ -1,0 +1,186 @@
+diff --git a/common/types/object.go b/common/types/object.go
+index c44eaa94..bb2a09e8 100644
+--- a/common/types/object.go
++++ b/common/types/object.go
+@@ -187,8 +187,14 @@ func (o *protoObj) format(sb *strings.Builder) {
+ 		if i > 0 {
+ 			sb.WriteString(", ")
+ 		}
+-		sb.WriteString(fmt.Sprintf("%s: ", field.Name()))
+-		formatTo(sb, o.Get(String(field.Name())))
++		name := String(field.Name())
++		if field.IsExtension() {
++			name = String(field.FullName())
++			fmt.Fprintf(sb, "`%s`: ", name)
++		} else {
++			fmt.Fprintf(sb, "%s: ", name)
++		}
++		formatTo(sb, o.Get(name))
+ 	}
+ 	sb.WriteString("}")
+ }
+diff --git a/common/types/pb/type.go b/common/types/pb/type.go
+index b2363db0..8d7d1b29 100644
+--- a/common/types/pb/type.go
++++ b/common/types/pb/type.go
+@@ -107,19 +107,24 @@ func (td *TypeDescription) FieldMap() map[string]*FieldDescription {
+ 
+ // FieldByName returns (FieldDescription, true) if the field name is declared within the type.
+ func (td *TypeDescription) FieldByName(name string) (*FieldDescription, bool) {
++	if td.jsonFieldNames {
++		fd, found := td.jsonFieldMap[name]
++		if found {
++			return fd, true
++		}
++	}
++
+ 	fd, found := td.fieldMap[name]
+ 	if found {
+ 		return fd, true
+ 	}
++
+ 	extFieldMap, found := td.extensions[td.typeName]
+ 	if found {
+ 		fd, found = extFieldMap[name]
+ 		return fd, found
+ 	}
+-	if td.jsonFieldNames {
+-		fd, found = td.jsonFieldMap[name]
+-		return fd, found
+-	}
++
+ 	return nil, false
+ }
+ 
+diff --git a/repl/evaluator.go b/repl/evaluator.go
+index c02a3597..4e25670c 100644
+--- a/repl/evaluator.go
++++ b/repl/evaluator.go
+@@ -994,6 +994,10 @@ func (o *typeOption) String() string {
+ 	return fmt.Sprintf("%%load_descriptors %s '%s'", flags, o.path)
+ }
+ 
++func (o *typeOption) Option() cel.EnvOption {
++	return cel.TypeDescs(o.fds)
++}
++
+ type backtickOpt struct {
+ 	enabled bool
+ }
+@@ -1009,8 +1013,17 @@ func (o *backtickOpt) String() string {
+ 	return "%option --enable_escaped_fields"
+ }
+ 
+-func (o *typeOption) Option() cel.EnvOption {
+-	return cel.TypeDescs(o.fds)
++type jsonOpt struct {
++	enabled bool
++}
++
++func (o *jsonOpt) Option() cel.EnvOption {
++
++	return cel.JSONFieldNames(o.enabled)
++}
++
++func (o *jsonOpt) String() string {
++	return "%option --enable_escaped_fields"
+ }
+ 
+ type containerOption struct {
+@@ -1083,6 +1096,11 @@ func (e *Evaluator) setOption(args []string) error {
+ 			if err != nil {
+ 				issues = append(issues, fmt.Sprintf("enable_escaped_fields: %v", err))
+ 			}
++		case "--enable_json_field_names":
++			err := e.AddSerializableOption(&jsonOpt{enabled: true})
++			if err != nil {
++				issues = append(issues, fmt.Sprintf("enable_json_field_names: %v", err))
++			}
+ 		case "--enable_partial_eval":
+ 			err := e.EnablePartialEval()
+ 			if err != nil {
+@@ -1190,14 +1208,17 @@ func deps(d protoreflect.FileDescriptor) []*descpb.FileDescriptorProto {
+ func (e *Evaluator) loadDescriptorFromPackage(pkg string) error {
+ 	switch pkg {
+ 	case "cel-spec-test-types":
+-		fdp := (&test2pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+-		fdp2 := (&test3pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
++		fdp2 := (&test2pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
++		fdp2ext := (&test2pb.Proto2ExtensionScopedMessage{}).ProtoReflect().Type().Descriptor().ParentFile()
++		fdp3 := (&test3pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+ 
+-		descriptorProtos := deps(fdp)
++		// We only depend on WKTs.
++		descriptorProtos := deps(fdp2)
+ 
+ 		descriptorProtos = append(descriptorProtos,
+-			protodesc.ToFileDescriptorProto(fdp),
+-			protodesc.ToFileDescriptorProto(fdp2))
++			protodesc.ToFileDescriptorProto(fdp2),
++			protodesc.ToFileDescriptorProto(fdp2ext),
++			protodesc.ToFileDescriptorProto(fdp3))
+ 
+ 		fds := descpb.FileDescriptorSet{
+ 			File: descriptorProtos,
+diff --git a/repl/main/main.go b/repl/main/main.go
+index f10802b2..bfc00242 100644
+--- a/repl/main/main.go
++++ b/repl/main/main.go
+@@ -43,6 +43,7 @@ package main
+ import (
+ 	"fmt"
+ 	"os"
++	"path/filepath"
+ 
+ 	"github.com/google/cel-go/repl"
+ 
+@@ -52,6 +53,7 @@ import (
+ func main() {
+ 	var c readline.Config
+ 	c.Prompt = "cel-repl> "
++	c.HistoryFile = filepath.Join(os.Getenv("HOME"), ".cel-repl.history")
+ 
+ 	err := c.Init()
+ 	if err != nil {
+diff --git a/test/proto2pb/test_all_types.proto b/test/proto2pb/test_all_types.proto
+index 41dcee1a..a77cc6d8 100644
+--- a/test/proto2pb/test_all_types.proto
++++ b/test/proto2pb/test_all_types.proto
+@@ -112,7 +112,8 @@ message NestedTestAllTypes {
+ // with fully qualified names.
+ message ExampleType {
+   optional string name = 1;
+-  optional int64 in = 2;
++  optional string foo_bar = 2;
++  optional int64 in = 3;
+   extensions 100 to max;
+ }
+ 
+diff --git a/test/proto3pb/test_all_types.proto b/test/proto3pb/test_all_types.proto
+index 086f38c9..f6e8f2c1 100644
+--- a/test/proto3pb/test_all_types.proto
++++ b/test/proto3pb/test_all_types.proto
+@@ -115,3 +115,22 @@ enum GlobalEnum {
+   GAR = 1;
+   GAZ = 2;
+ }
++
++// This proto tests json_name options
++message TestJsonNames {
++  int32 int32_snake_case_json_name = 1
++      [json_name = "int32_snake_case_json_name"];
++  int64 int64_camel_case_json_name = 2 [json_name = "int64CamelCaseJsonName"];
++  uint32 uint32_default_json_name = 3;
++  uint64 uint64_custom_json_name = 4 [json_name = "uint64-custom-json-name"];
++
++  // Collides with normal field name.
++  string string_json_name_shadows = 5 [json_name = "single_string"];
++  string single_string = 6;
++
++  // protoc should fail on cases like these
++  // double double_json_shadow_default = 7 [json_name = "doubleJsonDefault"]
++  // double double_json_default = 8;
++  // double double_json_swapped_a = 7 [json_name = "double_json_swapped_b"];
++  // double double_json_swapped_b = 8 [json_name = "double_json_swapped_a"];
++}
+\ No newline at end of file

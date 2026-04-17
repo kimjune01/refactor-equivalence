@@ -1,0 +1,239 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9781-8c1c-7ab1-be76-53865a654860
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll reconcile the two markdown specs directly. I’m going to read the current claims and hunt findings first, then write only the next-round markdown file the task asks for.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Centralize Agent Input Key Selection
+**File**: packages/core/src/agents/agent-tool.ts:106
+**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior.
+**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
+**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
+
+### C2 — Reuse Hinted Child Invocation Construction
+**File**: packages/core/src/agents/agent-tool.ts:180
+**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
+**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
+**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
+- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
+- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
+- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
+ succeeded in 0ms:
+## Finding F1 — Empty `properties` fallback is not specified
+**Severity**: warning
+**Claim**: C1
+**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
+**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
+**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+## Accepted Claims
+
+### C1 — Centralize Agent Input Key Selection
+**File**: packages/core/src/agents/agent-tool.ts:106
+**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
+**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
+**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
+**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
+
+### C2 — Reuse Hinted Child Invocation Construction
+**File**: packages/core/src/agents/agent-tool.ts:180
+**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
+**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
+**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
+- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
+- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
+- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
+- Refactor `PolicyEngine.check` virtual alias matching into a separate helper: the current alias block is short and local to one call site, so extracting it would add an abstraction without reducing meaningful complexity.
+apply_patch(auto_approved=true) exited 0 in 18ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-2-claims.md b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cba10fe7ef7fb21ac26679bf10043a7fd3d52247
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Centralize Agent Input Key Selection
++**File**: packages/core/src/agents/agent-tool.ts:106
++**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
++**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
++**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
++**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
++
++### C2 — Reuse Hinted Child Invocation Construction
++**File**: packages/core/src/agents/agent-tool.ts:180
++**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
++**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
++**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
++
++## Rejected
++
++- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
++- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
++- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
++- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
++- Refactor `PolicyEngine.check` virtual alias matching into a separate helper: the current alias block is short and local to one call site, so extracting it would add an abstraction without reducing meaningful complexity.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-2-claims.md b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cba10fe7ef7fb21ac26679bf10043a7fd3d52247
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Centralize Agent Input Key Selection
++**File**: packages/core/src/agents/agent-tool.ts:106
++**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
++**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
++**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
++**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
++
++### C2 — Reuse Hinted Child Invocation Construction
++**File**: packages/core/src/agents/agent-tool.ts:180
++**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
++**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
++**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
++
++## Rejected
++
++- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
++- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
++- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
++- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
++- Refactor `PolicyEngine.check` virtual alias matching into a separate helper: the current alias block is short and local to one call site, so extracting it would add an abstraction without reducing meaningful complexity.
+
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Centralize Agent Input Key Selection
+**File**: packages/core/src/agents/agent-tool.ts:106
+**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
+**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
+**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
+**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
+
+### C2 — Reuse Hinted Child Invocation Construction
+**File**: packages/core/src/agents/agent-tool.ts:180
+**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
+**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
+**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
+- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
+- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-2-claims.md b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cba10fe7ef7fb21ac26679bf10043a7fd3d52247
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Centralize Agent Input Key Selection
++**File**: packages/core/src/agents/agent-tool.ts:106
++**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
++**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
++**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
++**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
++
++### C2 — Reuse Hinted Child Invocation Construction
++**File**: packages/core/src/agents/agent-tool.ts:180
++**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
++**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
++**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
++
++## Rejected
++
++- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
++- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
++- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
++- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
++- Refactor `PolicyEngine.check` virtual alias matching into a separate helper: the current alias block is short and local to one call site, so extracting it would add an abstraction without reducing meaningful complexity.
+
+codex
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md`.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-2-claims.md b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cba10fe7ef7fb21ac26679bf10043a7fd3d52247
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Centralize Agent Input Key Selection
++**File**: packages/core/src/agents/agent-tool.ts:106
++**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
++**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
++**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
++**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
++
++### C2 — Reuse Hinted Child Invocation Construction
++**File**: packages/core/src/agents/agent-tool.ts:180
++**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
++**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
++**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
++
++## Rejected
++
++- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
++- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
++- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
++- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
++- Refactor `PolicyEngine.check` virtual alias matching into a separate helper: the current alias block is short and local to one call site, so extracting it would add an abstraction without reducing meaningful complexity.
+
+tokens used
+6,282
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md`.

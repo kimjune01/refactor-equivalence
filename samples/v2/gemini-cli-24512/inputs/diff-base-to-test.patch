@@ -1,0 +1,1366 @@
+diff --git a/packages/cli/src/config/config.ts b/packages/cli/src/config/config.ts
+index 37f1291475..c1ac3e57dd 100755
+--- a/packages/cli/src/config/config.ts
++++ b/packages/cli/src/config/config.ts
+@@ -1001,6 +1001,8 @@ export async function loadCliConfig(
+     trustedFolder,
+     useBackgroundColor: settings.ui?.useBackgroundColor,
+     useAlternateBuffer: settings.ui?.useAlternateBuffer,
++    useTerminalBuffer: settings.ui?.terminalBuffer,
++    useRenderProcess: settings.ui?.renderProcess,
+     useRipgrep: settings.tools?.useRipgrep,
+     enableInteractiveShell: settings.tools?.shell?.enableInteractiveShell,
+     shellBackgroundCompletionBehavior: settings.tools?.shell
+diff --git a/packages/cli/src/config/settingsSchema.ts b/packages/cli/src/config/settingsSchema.ts
+index 9b62c9d93f..01e248e797 100644
+--- a/packages/cli/src/config/settingsSchema.ts
++++ b/packages/cli/src/config/settingsSchema.ts
+@@ -743,6 +743,24 @@ const SETTINGS_SCHEMA = {
+           'Use an alternate screen buffer for the UI, preserving shell history.',
+         showInDialog: true,
+       },
++      renderProcess: {
++        type: 'boolean',
++        label: 'Render Process',
++        category: 'UI',
++        requiresRestart: true,
++        default: true,
++        description: 'Enable Ink render process for the UI.',
++        showInDialog: true,
++      },
++      terminalBuffer: {
++        type: 'boolean',
++        label: 'Terminal Buffer',
++        category: 'UI',
++        requiresRestart: true,
++        default: true,
++        description: 'Use the new terminal buffer architecture for rendering.',
++        showInDialog: true,
++      },
+       useBackgroundColor: {
+         type: 'boolean',
+         label: 'Use Background Color',
+diff --git a/packages/cli/src/interactiveCli.tsx b/packages/cli/src/interactiveCli.tsx
+index 2e0cd25619..418f58b193 100644
+--- a/packages/cli/src/interactiveCli.tsx
++++ b/packages/cli/src/interactiveCli.tsx
+@@ -43,7 +43,6 @@ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+ import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+-import { isAlternateBufferEnabled } from './ui/hooks/useAlternateBuffer.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+ import { initializeConsoleStore } from './ui/hooks/useConsoleMessages.js';
+@@ -64,7 +63,7 @@ export async function startInteractiveUI(
+   // and the Ink alternate buffer mode requires line wrapping harmful to
+   // screen readers.
+   const useAlternateBuffer = shouldEnterAlternateScreen(
+-    isAlternateBufferEnabled(config),
++    config.getUseAlternateBuffer(),
+     config.getScreenReader(),
+   );
+   const mouseEventsEnabled = useAlternateBuffer;
+@@ -133,7 +132,6 @@ export async function startInteractiveUI(
+     // Wait a moment for shpool to stabilize terminal size and state.
+     await new Promise((resolve) => setTimeout(resolve, 100));
+   }
+-
+   const instance = render(
+     process.env['DEBUG'] ? (
+       <React.StrictMode>
+@@ -154,8 +152,12 @@ export async function startInteractiveUI(
+         }
+         profiler.reportFrameRendered();
+       },
++      standardReactLayoutTiming:
++        useAlternateBuffer || config.getUseTerminalBuffer(),
+       patchConsole: false,
+       alternateBuffer: useAlternateBuffer,
++      renderProcess: config.getUseRenderProcess(),
++      terminalBuffer: config.getUseTerminalBuffer(),
+       incrementalRendering:
+         settings.merged.ui.incrementalRendering !== false &&
+         useAlternateBuffer &&
+diff --git a/packages/cli/src/test-utils/mockConfig.ts b/packages/cli/src/test-utils/mockConfig.ts
+index 57ddd83141..7be8463382 100644
+--- a/packages/cli/src/test-utils/mockConfig.ts
++++ b/packages/cli/src/test-utils/mockConfig.ts
+@@ -176,6 +176,8 @@ export const createMockConfig = (overrides: Partial<Config> = {}): Config =>
+     getHasAccessToPreviewModel: vi.fn().mockReturnValue(false),
+     validatePathAccess: vi.fn().mockReturnValue(null),
+     getUseAlternateBuffer: vi.fn().mockReturnValue(false),
++    getUseTerminalBuffer: vi.fn().mockReturnValue(false),
++    getUseRenderProcess: vi.fn().mockReturnValue(false),
+     ...overrides,
+   }) as unknown as Config;
+ 
+diff --git a/packages/cli/src/test-utils/render.tsx b/packages/cli/src/test-utils/render.tsx
+index 817921e83a..c9982103d3 100644
+--- a/packages/cli/src/test-utils/render.tsx
++++ b/packages/cli/src/test-utils/render.tsx
+@@ -223,7 +223,7 @@ class XtermStdout extends EventEmitter {
+             this.once('render', resolve),
+           );
+           const timeoutPromise = new Promise((resolve) =>
+-            setTimeout(resolve, 50),
++            setTimeout(resolve, 1000),
+           );
+           await Promise.race([renderPromise, timeoutPromise]);
+         }
+@@ -254,7 +254,12 @@ class XtermStdout extends EventEmitter {
+ 
+       const isMatch = () => {
+         if (expectedFrame === '...') {
+-          return currentFrame !== '';
++          // '...' is our fallback when output isn't in metrics, meaning Ink rendered *something*
++          // but we don't know what it is. If terminal has content, we consider it a match.
++          // However, if the component rendered null, both would be empty, but our fallback
++          // made expectedFrame '...'. In that case, we can't easily know if it's ready,
++          // but we can assume if there are no pending writes, it's ready.
++          return currentFrame !== '' || this.pendingWrites === 0;
+         }
+ 
+         // If Ink expects nothing (no new static content and no dynamic output),
+diff --git a/packages/cli/src/ui/AppContainer.tsx b/packages/cli/src/ui/AppContainer.tsx
+index a955dfae6c..f12d39ea9e 100644
+--- a/packages/cli/src/ui/AppContainer.tsx
++++ b/packages/cli/src/ui/AppContainer.tsx
+@@ -11,6 +11,7 @@ import {
+   useEffect,
+   useRef,
+   useLayoutEffect,
++  useContext,
+ } from 'react';
+ import {
+   type DOMElement,
+@@ -19,6 +20,7 @@ import {
+   useStdout,
+   useStdin,
+   type AppProps,
++  AppContext as InkAppContext,
+ } from 'ink';
+ import { App } from './App.js';
+ import { AppContext } from './contexts/AppContext.js';
+@@ -38,6 +40,8 @@ import {
+ import { checkPermissions } from './hooks/atCommandProcessor.js';
+ import { MessageType, StreamingState } from './types.js';
+ import { ToolActionsProvider } from './contexts/ToolActionsContext.js';
++import { MouseProvider } from './contexts/MouseContext.js';
++import { ScrollProvider } from './contexts/ScrollProvider.js';
+ import {
+   type StartupWarning,
+   type EditorType,
+@@ -210,12 +214,30 @@ export const AppContainer = (props: AppContainerProps) => {
+   const { reset } = useOverflowActions()!;
+   const notificationsEnabled = isNotificationsEnabled(settings);
+ 
++  const { setOptions, dumpCurrentFrame, startRecording, stopRecording } =
++    useContext(InkAppContext);
++  const recordingFilenameRef = useRef<string | null>(null);
+   const historyManager = useHistory({
+     chatRecordingService: config.getGeminiClient()?.getChatRecordingService(),
+   });
+ 
+   useMemoryMonitor(historyManager);
+   const isAlternateBuffer = config.getUseAlternateBuffer();
++  const [mouseMode, setMouseMode] = useState(() =>
++    config.getUseAlternateBuffer(),
++  );
++
++  useEffect(() => {
++    setOptions({
++      stickyHeadersInBackbuffer: mouseMode,
++    });
++    if (mouseMode) {
++      enableMouseEvents();
++    } else {
++      disableMouseEvents();
++    }
++  }, [mouseMode, setOptions]);
++
+   const [corgiMode, setCorgiMode] = useState(false);
+   const [forceRerenderKey, setForceRerenderKey] = useState(0);
+   const [debugMessage, setDebugMessage] = useState<string>('');
+@@ -621,11 +643,11 @@ export const AppContainer = (props: AppContainerProps) => {
+   });
+ 
+   const refreshStatic = useCallback(() => {
+-    if (!isAlternateBuffer) {
++    if (!isAlternateBuffer && !config.getUseTerminalBuffer()) {
+       stdout.write(ansiEscapes.clearTerminal);
++      setHistoryRemountKey((prev) => prev + 1);
+     }
+-    setHistoryRemountKey((prev) => prev + 1);
+-  }, [setHistoryRemountKey, isAlternateBuffer, stdout]);
++  }, [setHistoryRemountKey, isAlternateBuffer, stdout, config]);
+ 
+   const shouldUseAlternateScreen = shouldEnterAlternateScreen(
+     isAlternateBuffer,
+@@ -1433,6 +1455,14 @@ Logging in with Google... Restarting Gemini CLI to continue.
+     !proQuotaRequest;
+ 
+   const observerRef = useRef<ResizeObserver | null>(null);
++
++  useEffect(
++    () => () => {
++      observerRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const [controlsHeight, setControlsHeight] = useState(0);
+   const [lastNonCopyControlsHeight, setLastNonCopyControlsHeight] = useState(0);
+ 
+@@ -1731,6 +1761,14 @@ Logging in with Google... Restarting Gemini CLI to continue.
+         setShortcutsHelpVisible(false);
+       }
+ 
++      if (keyMatchers[Command.TOGGLE_MOUSE_MODE](key)) {
++        setMouseMode((prev) => !prev);
++        if (mouseMode && !isAlternateBuffer) {
++          appEvents.emit(AppEvent.ScrollToBottom);
++        }
++        return true;
++      }
++
+       if (isAlternateBuffer && keyMatchers[Command.TOGGLE_COPY_MODE](key)) {
+         setCopyModeEnabled(true);
+         disableMouseEvents();
+@@ -1753,6 +1791,32 @@ Logging in with Google... Restarting Gemini CLI to continue.
+         return true;
+       } else if (keyMatchers[Command.SUSPEND_APP](key)) {
+         handleSuspend();
++      } else if (keyMatchers[Command.DUMP_FRAME](key)) {
++        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
++        const filename = `snapshot-${timestamp}.json`;
++        if (dumpCurrentFrame) {
++          dumpCurrentFrame(filename);
++          debugLogger.log(`Dumped frame to: ${filename}`);
++        }
++        return true;
++      } else if (keyMatchers[Command.START_RECORDING](key)) {
++        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
++        const filename = `recording-${timestamp}.json`;
++        if (startRecording) {
++          startRecording(filename);
++          recordingFilenameRef.current = filename;
++          debugLogger.log(`Started recording to: ${filename}`);
++        }
++        return true;
++      } else if (keyMatchers[Command.STOP_RECORDING](key)) {
++        if (stopRecording) {
++          stopRecording();
++          debugLogger.log(
++            `Stopped recording, saved to: ${recordingFilenameRef.current ?? 'unknown'}`,
++          );
++          recordingFilenameRef.current = null;
++        }
++        return true;
+       } else if (
+         keyMatchers[Command.TOGGLE_COPY_MODE](key) &&
+         !isAlternateBuffer
+@@ -1939,6 +2003,10 @@ Logging in with Google... Restarting Gemini CLI to continue.
+       historyManager.history,
+       pendingHistoryItems,
+       toggleAllExpansion,
++      dumpCurrentFrame,
++      startRecording,
++      stopRecording,
++      mouseMode,
+     ],
+   );
+ 
+@@ -1958,7 +2026,9 @@ Logging in with Google... Restarting Gemini CLI to continue.
+       }
+ 
+       setCopyModeEnabled(false);
+-      enableMouseEvents();
++      if (mouseMode) {
++        enableMouseEvents();
++      }
+       return true;
+     },
+     {
+@@ -2275,6 +2345,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
+       editorError,
+       isEditorDialogOpen,
+       showPrivacyNotice,
++      mouseMode,
+       corgiMode,
+       debugMessage,
+       quittingMessages,
+@@ -2401,6 +2472,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
+       editorError,
+       isEditorDialogOpen,
+       showPrivacyNotice,
++      mouseMode,
+       corgiMode,
+       debugMessage,
+       quittingMessages,
+@@ -2701,7 +2773,11 @@ Logging in with Google... Restarting Gemini CLI to continue.
+               toggleAllExpansion={toggleAllExpansion}
+             >
+               <ShellFocusContext.Provider value={isFocused}>
+-                <App key={`app-${forceRerenderKey}`} />
++                <MouseProvider mouseEventsEnabled={mouseMode}>
++                  <ScrollProvider>
++                    <App key={`app-${forceRerenderKey}`} />
++                  </ScrollProvider>
++                </MouseProvider>
+               </ShellFocusContext.Provider>
+             </ToolActionsProvider>
+           </AppContext.Provider>
+diff --git a/packages/cli/src/ui/components/Composer.tsx b/packages/cli/src/ui/components/Composer.tsx
+index 66b54a70f3..4a1647d11b 100644
+--- a/packages/cli/src/ui/components/Composer.tsx
++++ b/packages/cli/src/ui/components/Composer.tsx
+@@ -26,6 +26,7 @@ import { OverflowProvider } from '../contexts/OverflowContext.js';
+ import { ConfigInitDisplay } from './ConfigInitDisplay.js';
+ import { TodoTray } from './messages/Todo.js';
+ import { useComposerStatus } from '../hooks/useComposerStatus.js';
++import { appEvents, AppEvent } from '../../utils/events.js';
+ 
+ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
+   const uiState = useUIState();
+@@ -55,6 +56,12 @@ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
+ 
+   const { setShortcutsHelpVisible } = uiActions;
+ 
++  useEffect(() => {
++    if (hasPendingActionRequired) {
++      appEvents.emit(AppEvent.ScrollToBottom);
++    }
++  }, [hasPendingActionRequired]);
++
+   useEffect(() => {
+     if (uiState.shortcutsHelpVisible && !isPassiveShortcutsHelpState) {
+       setShortcutsHelpVisible(false);
+diff --git a/packages/cli/src/ui/components/InputPrompt.tsx b/packages/cli/src/ui/components/InputPrompt.tsx
+index 45b04145fb..4547c19d8a 100644
+--- a/packages/cli/src/ui/components/InputPrompt.tsx
++++ b/packages/cli/src/ui/components/InputPrompt.tsx
+@@ -338,6 +338,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
+   const showCursor =
+     focus && isShellFocused && !isEmbeddedShellFocused && !copyModeEnabled;
+ 
++  useEffect(() => {
++    appEvents.emit(AppEvent.ScrollToBottom);
++  }, [buffer.text, buffer.cursor]);
++
+   // Notify parent component about escape prompt state changes
+   useEffect(() => {
+     if (onEscapePromptChange) {
+diff --git a/packages/cli/src/ui/components/MainContent.tsx b/packages/cli/src/ui/components/MainContent.tsx
+index 9ca5260988..9bfa4184af 100644
+--- a/packages/cli/src/ui/components/MainContent.tsx
++++ b/packages/cli/src/ui/components/MainContent.tsx
+@@ -12,6 +12,7 @@ import { useAppContext } from '../contexts/AppContext.js';
+ import { AppHeader } from './AppHeader.js';
+ 
+ import { useAlternateBuffer } from '../hooks/useAlternateBuffer.js';
++import { useConfig } from '../contexts/ConfigContext.js';
+ import {
+   SCROLL_TO_ITEM_END,
+   type VirtualizedListRef,
+@@ -22,6 +23,7 @@ import { MAX_GEMINI_MESSAGE_LINES } from '../constants.js';
+ import { useConfirmingTool } from '../hooks/useConfirmingTool.js';
+ import { ToolConfirmationQueue } from './ToolConfirmationQueue.js';
+ import { isTopicTool } from './messages/TopicMessage.js';
++import { appEvents, AppEvent } from '../../utils/events.js';
+ 
+ const MemoizedHistoryItemDisplay = memo(HistoryItemDisplay);
+ const MemoizedAppHeader = memo(AppHeader);
+@@ -33,7 +35,10 @@ const MemoizedAppHeader = memo(AppHeader);
+ export const MainContent = () => {
+   const { version } = useAppContext();
+   const uiState = useUIState();
+-  const isAlternateBuffer = useAlternateBuffer();
++  const isAlternateBufferOrTerminalBuffer = useAlternateBuffer();
++  const config = useConfig();
++  const useTerminalBuffer = config.getUseTerminalBuffer();
++  const isAlternateBuffer = config.getUseAlternateBuffer();
+ 
+   const confirmingTool = useConfirmingTool();
+   const showConfirmationQueue = confirmingTool !== null;
+@@ -47,12 +52,23 @@ export const MainContent = () => {
+     }
+   }, [showConfirmationQueue, confirmingToolCallId]);
+ 
++  useEffect(() => {
++    const handleScroll = () => {
++      scrollableListRef.current?.scrollToEnd();
++    };
++    appEvents.on(AppEvent.ScrollToBottom, handleScroll);
++    return () => {
++      appEvents.off(AppEvent.ScrollToBottom, handleScroll);
++    };
++  }, []);
++
+   const {
+     pendingHistoryItems,
+     mainAreaWidth,
+     staticAreaMaxItemHeight,
+     availableTerminalHeight,
+     cleanUiDetailsVisible,
++    mouseMode,
+   } = uiState;
+   const showHeaderDetails = cleanUiDetailsVisible;
+ 
+@@ -228,27 +244,14 @@ export const MainContent = () => {
+   const virtualizedData = useMemo(
+     () => [
+       { type: 'header' as const },
+-      ...augmentedHistory.map(
+-        ({
+-          item,
+-          isExpandable,
+-          isFirstThinking,
+-          isFirstAfterThinking,
+-          isToolGroupBoundary,
+-          suppressNarration,
+-        }) => ({
+-          type: 'history' as const,
+-          item,
+-          isExpandable,
+-          isFirstThinking,
+-          isFirstAfterThinking,
+-          isToolGroupBoundary,
+-          suppressNarration,
+-        }),
+-      ),
++      ...augmentedHistory.map((data, index) => ({
++        type: 'history' as const,
++        item: data.item,
++        element: historyItems[index],
++      })),
+       { type: 'pending' as const },
+     ],
+-    [augmentedHistory],
++    [augmentedHistory, historyItems],
+   );
+ 
+   const renderItem = useCallback(
+@@ -262,59 +265,79 @@ export const MainContent = () => {
+           />
+         );
+       } else if (item.type === 'history') {
+-        return (
+-          <MemoizedHistoryItemDisplay
+-            terminalWidth={mainAreaWidth}
+-            availableTerminalHeight={
+-              uiState.constrainHeight || !item.isExpandable
+-                ? staticAreaMaxItemHeight
+-                : undefined
+-            }
+-            availableTerminalHeightGemini={MAX_GEMINI_MESSAGE_LINES}
+-            key={item.item.id}
+-            item={item.item}
+-            isPending={false}
+-            commands={uiState.slashCommands}
+-            isExpandable={item.isExpandable}
+-            isFirstThinking={item.isFirstThinking}
+-            isFirstAfterThinking={item.isFirstAfterThinking}
+-            isToolGroupBoundary={item.isToolGroupBoundary}
+-            suppressNarration={item.suppressNarration}
+-          />
+-        );
++        return item.element;
+       } else {
+         return pendingItems;
+       }
+     },
+-    [
+-      showHeaderDetails,
+-      version,
+-      mainAreaWidth,
+-      uiState.slashCommands,
+-      pendingItems,
+-      uiState.constrainHeight,
+-      staticAreaMaxItemHeight,
+-    ],
++    [showHeaderDetails, version, pendingItems],
++  );
++
++  const estimatedItemHeight = useCallback(() => 100, []);
++
++  const keyExtractor = useCallback(
++    (item: (typeof virtualizedData)[number], _index: number) => {
++      if (item.type === 'header') return 'header';
++      if (item.type === 'history') return item.item.id.toString();
++      return 'pending';
++    },
++    [],
++  );
++
++  // TODO(jacobr): we should return true for all messages that are not
++  // interactive. Gemini messages and Tool results that are not scrollable,
++  // collapsible, or clickable should also be tagged as static in the future.
++  const isStaticItem = useCallback(
++    (item: (typeof virtualizedData)[number]) => item.type === 'header',
++    [],
+   );
+ 
+-  if (isAlternateBuffer) {
+-    return (
+-      <ScrollableList
+-        ref={scrollableListRef}
+-        hasFocus={!uiState.isEditorDialogOpen && !uiState.embeddedShellFocused}
+-        width={uiState.terminalWidth}
+-        data={virtualizedData}
+-        renderItem={renderItem}
+-        estimatedItemHeight={() => 100}
+-        keyExtractor={(item, _index) => {
+-          if (item.type === 'header') return 'header';
+-          if (item.type === 'history') return item.item.id.toString();
+-          return 'pending';
+-        }}
+-        initialScrollIndex={SCROLL_TO_ITEM_END}
+-        initialScrollOffsetInIndex={SCROLL_TO_ITEM_END}
+-      />
+-    );
++  const scrollableList = useMemo(() => {
++    if (isAlternateBufferOrTerminalBuffer) {
++      return (
++        <ScrollableList
++          ref={scrollableListRef}
++          hasFocus={
++            !uiState.isEditorDialogOpen && !uiState.embeddedShellFocused
++          }
++          width={uiState.terminalWidth}
++          data={virtualizedData}
++          renderItem={renderItem}
++          estimatedItemHeight={estimatedItemHeight}
++          keyExtractor={keyExtractor}
++          initialScrollIndex={SCROLL_TO_ITEM_END}
++          initialScrollOffsetInIndex={SCROLL_TO_ITEM_END}
++          renderStatic={useTerminalBuffer}
++          isStaticItem={useTerminalBuffer ? isStaticItem : undefined}
++          overflowToBackbuffer={useTerminalBuffer && !isAlternateBuffer}
++          scrollbar={mouseMode}
++        />
++        // TODO(jacobr): consider adding stableScrollback={!config.getUseAlternateBuffer()}
++        // as that will reduce the # of cases where we will have to clear the
++        // scrollback buffer due to the scrollback size changing but we need to
++        // work out ensuring we only attempt it within a smaller range of
++        // scrollback vals. Right now it sometimes triggers adding more white
++        // space than it should.
++      );
++    }
++    return null;
++  }, [
++    isAlternateBufferOrTerminalBuffer,
++    uiState.isEditorDialogOpen,
++    uiState.embeddedShellFocused,
++    uiState.terminalWidth,
++    virtualizedData,
++    renderItem,
++    estimatedItemHeight,
++    keyExtractor,
++    useTerminalBuffer,
++    isStaticItem,
++    mouseMode,
++    isAlternateBuffer,
++  ]);
++
++  if (isAlternateBufferOrTerminalBuffer) {
++    return scrollableList;
+   }
+ 
+   return (
+diff --git a/packages/cli/src/ui/components/StatusRow.tsx b/packages/cli/src/ui/components/StatusRow.tsx
+index adaa339a64..2f059086b0 100644
+--- a/packages/cli/src/ui/components/StatusRow.tsx
++++ b/packages/cli/src/ui/components/StatusRow.tsx
+@@ -5,7 +5,7 @@
+  */
+ 
+ import type React from 'react';
+-import { useCallback, useRef, useState } from 'react';
++import { useCallback, useRef, useState, useEffect } from 'react';
+ import { Box, Text, ResizeObserver, type DOMElement } from 'ink';
+ import {
+   isUserVisibleHook,
+@@ -77,6 +77,13 @@ export const StatusNode: React.FC<{
+ }) => {
+   const observerRef = useRef<ResizeObserver | null>(null);
+ 
++  useEffect(
++    () => () => {
++      observerRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const onRefChange = useCallback(
+     (node: DOMElement | null) => {
+       if (observerRef.current) {
+@@ -169,6 +176,13 @@ export const StatusRow: React.FC<StatusRowProps> = ({
+   const [tipWidth, setTipWidth] = useState(0);
+   const tipObserverRef = useRef<ResizeObserver | null>(null);
+ 
++  useEffect(
++    () => () => {
++      tipObserverRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const onTipRefChange = useCallback((node: DOMElement | null) => {
+     if (tipObserverRef.current) {
+       tipObserverRef.current.disconnect();
+diff --git a/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx b/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
+index 631bbf032d..fa565bc103 100644
+--- a/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
++++ b/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
+@@ -90,6 +90,13 @@ export const ToolConfirmationMessage: React.FC<
+     useState(0);
+   const observerRef = useRef<ResizeObserver | null>(null);
+ 
++  useEffect(
++    () => () => {
++      observerRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const deceptiveUrlWarnings = useMemo(() => {
+     const urls: string[] = [];
+     if (confirmationDetails.type === 'info' && confirmationDetails.urls) {
+diff --git a/packages/cli/src/ui/components/messages/ToolResultDisplay.tsx b/packages/cli/src/ui/components/messages/ToolResultDisplay.tsx
+index 4abe79345b..aaa30a74d7 100644
+--- a/packages/cli/src/ui/components/messages/ToolResultDisplay.tsx
++++ b/packages/cli/src/ui/components/messages/ToolResultDisplay.tsx
+@@ -229,6 +229,7 @@ export const ToolResultDisplay: React.FC<ToolResultDisplayProps> = ({
+           keyExtractor={keyExtractor}
+           initialScrollIndex={initialScrollIndex}
+           hasFocus={hasFocus}
++          fixedItemHeight={true}
+         />
+       </Box>
+     );
+diff --git a/packages/cli/src/ui/components/shared/MaxSizedBox.tsx b/packages/cli/src/ui/components/shared/MaxSizedBox.tsx
+index 0e3869a3f0..7aa40cfc62 100644
+--- a/packages/cli/src/ui/components/shared/MaxSizedBox.tsx
++++ b/packages/cli/src/ui/components/shared/MaxSizedBox.tsx
+@@ -42,6 +42,14 @@ export const MaxSizedBox: React.FC<MaxSizedBoxProps> = ({
+   const id = useId();
+   const { addOverflowingId, removeOverflowingId } = useOverflowActions() || {};
+   const observerRef = useRef<ResizeObserver | null>(null);
++
++  useEffect(
++    () => () => {
++      observerRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const [contentHeight, setContentHeight] = useState(0);
+ 
+   const onRefChange = useCallback(
+diff --git a/packages/cli/src/ui/components/shared/Scrollable.tsx b/packages/cli/src/ui/components/shared/Scrollable.tsx
+index a95d2ff112..d9c3fb8c7a 100644
+--- a/packages/cli/src/ui/components/shared/Scrollable.tsx
++++ b/packages/cli/src/ui/components/shared/Scrollable.tsx
+@@ -33,6 +33,9 @@ interface ScrollableProps {
+   scrollToBottom?: boolean;
+   flexGrow?: number;
+   reportOverflow?: boolean;
++  overflowToBackbuffer?: boolean;
++  scrollbar?: boolean;
++  stableScrollback?: boolean;
+ }
+ 
+ export const Scrollable: React.FC<ScrollableProps> = ({
+@@ -45,6 +48,9 @@ export const Scrollable: React.FC<ScrollableProps> = ({
+   scrollToBottom,
+   flexGrow,
+   reportOverflow = false,
++  overflowToBackbuffer,
++  scrollbar = true,
++  stableScrollback,
+ }) => {
+   const keyMatchers = useKeyMatchers();
+   const [scrollTop, setScrollTop] = useState(0);
+@@ -91,6 +97,14 @@ export const Scrollable: React.FC<ScrollableProps> = ({
+   const viewportObserverRef = useRef<ResizeObserver | null>(null);
+   const contentObserverRef = useRef<ResizeObserver | null>(null);
+ 
++  useEffect(
++    () => () => {
++      viewportObserverRef.current?.disconnect();
++      contentObserverRef.current?.disconnect();
++    },
++    [],
++  );
++
+   const viewportRefCallback = useCallback((node: DOMElement | null) => {
+     viewportObserverRef.current?.disconnect();
+     viewportRef.current = node;
+@@ -247,6 +261,9 @@ export const Scrollable: React.FC<ScrollableProps> = ({
+       scrollTop={scrollTop}
+       flexGrow={flexGrow}
+       scrollbarThumbColor={scrollbarColor}
++      overflowToBackbuffer={overflowToBackbuffer}
++      scrollbar={scrollbar}
++      stableScrollback={stableScrollback}
+     >
+       {/*
+         This inner box is necessary to prevent the parent from shrinking
+diff --git a/packages/cli/src/ui/components/shared/ScrollableList.tsx b/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index fd7eaeb8e3..326005726f 100644
+--- a/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -16,6 +16,7 @@ import type React from 'react';
+ import {
+   VirtualizedList,
+   type VirtualizedListRef,
++  type VirtualizedListProps,
+   SCROLL_TO_ITEM_END,
+ } from './VirtualizedList.js';
+ import { useScrollable } from '../../contexts/ScrollProvider.js';
+@@ -27,18 +28,14 @@ import { useKeyMatchers } from '../../hooks/useKeyMatchers.js';
+ 
+ const ANIMATION_FRAME_DURATION_MS = 33;
+ 
+-type VirtualizedListProps<T> = {
+-  data: T[];
+-  renderItem: (info: { item: T; index: number }) => React.ReactElement;
+-  estimatedItemHeight: (index: number) => number;
+-  keyExtractor: (item: T, index: number) => string;
+-  initialScrollIndex?: number;
+-  initialScrollOffsetInIndex?: number;
+-};
+-
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+   width?: string | number;
++  scrollbar?: boolean;
++  stableScrollback?: boolean;
++  copyModeEnabled?: boolean;
++  isStatic?: boolean;
++  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+@@ -48,7 +45,7 @@ function ScrollableList<T>(
+   ref: React.Ref<ScrollableListRef<T>>,
+ ) {
+   const keyMatchers = useKeyMatchers();
+-  const { hasFocus, width } = props;
++  const { hasFocus, width, scrollbar = true, stableScrollback } = props;
+   const virtualizedListRef = useRef<VirtualizedListRef<T>>(null);
+   const containerRef = useRef<DOMElement>(null);
+ 
+@@ -258,17 +255,13 @@ function ScrollableList<T>(
+   useScrollable(scrollableEntry, true);
+ 
+   return (
+-    <Box
+-      ref={containerRef}
+-      flexGrow={1}
+-      flexDirection="column"
+-      overflow="hidden"
+-      width={width}
+-    >
++    <Box ref={containerRef} flexGrow={1} flexDirection="column" width={width}>
+       <VirtualizedList
+         ref={virtualizedListRef}
+         {...props}
++        scrollbar={scrollbar}
+         scrollbarThumbColor={scrollbarColor}
++        stableScrollback={stableScrollback}
+       />
+     </Box>
+   );
+diff --git a/packages/cli/src/ui/components/shared/VirtualizedList.tsx b/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index 669b1bc035..e7b756b649 100644
+--- a/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -12,17 +12,17 @@ import {
+   useImperativeHandle,
+   useMemo,
+   useCallback,
++  memo,
+ } from 'react';
+ import type React from 'react';
+ import { theme } from '../../semantic-colors.js';
+ import { useBatchedScroll } from '../../hooks/useBatchedScroll.js';
+-import { useUIState } from '../../contexts/UIStateContext.js';
+ 
+-import { type DOMElement, Box, ResizeObserver } from 'ink';
++import { type DOMElement, Box, ResizeObserver, StaticRender } from 'ink';
+ 
+ export const SCROLL_TO_ITEM_END = Number.MAX_SAFE_INTEGER;
+ 
+-type VirtualizedListProps<T> = {
++export type VirtualizedListProps<T> = {
+   data: T[];
+   renderItem: (info: { item: T; index: number }) => React.ReactElement;
+   estimatedItemHeight: (index: number) => number;
+@@ -30,6 +30,15 @@ type VirtualizedListProps<T> = {
+   initialScrollIndex?: number;
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
++  renderStatic?: boolean;
++  isStatic?: boolean;
++  isStaticItem?: (item: T, index: number) => boolean;
++  width?: number | string;
++  overflowToBackbuffer?: boolean;
++  scrollbar?: boolean;
++  stableScrollback?: boolean;
++  copyModeEnabled?: boolean;
++  fixedItemHeight?: boolean;
+ };
+ 
+ export type VirtualizedListRef<T> = {
+@@ -66,6 +75,43 @@ function findLastIndex<T>(
+   return -1;
+ }
+ 
++const VirtualizedListItem = memo(
++  ({
++    content,
++    shouldBeStatic,
++    width,
++    containerWidth,
++    itemKey,
++    itemRef,
++  }: {
++    content: React.ReactElement;
++    shouldBeStatic: boolean;
++    width: number | string | undefined;
++    containerWidth: number;
++    itemKey: string;
++    itemRef: (el: DOMElement | null) => void;
++  }) => (
++    <Box width="100%" flexDirection="column" flexShrink={0} ref={itemRef}>
++      {shouldBeStatic ? (
++        <StaticRender
++          width={typeof width === 'number' ? width : containerWidth}
++          key={
++            itemKey +
++            '-static-' +
++            (typeof width === 'number' ? width : containerWidth)
++          }
++        >
++          {content}
++        </StaticRender>
++      ) : (
++        content
++      )}
++    </Box>
++  ),
++);
++
++VirtualizedListItem.displayName = 'VirtualizedListItem';
++
+ function VirtualizedList<T>(
+   props: VirtualizedListProps<T>,
+   ref: React.Ref<VirtualizedListRef<T>>,
+@@ -77,8 +123,16 @@ function VirtualizedList<T>(
+     keyExtractor,
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
++    renderStatic,
++    isStatic,
++    isStaticItem,
++    width,
++    overflowToBackbuffer,
++    scrollbar = true,
++    stableScrollback,
++    copyModeEnabled = false,
++    fixedItemHeight = false,
+   } = props;
+-  const { copyModeEnabled } = useUIState();
+   const dataRef = useRef(data);
+   useLayoutEffect(() => {
+     dataRef.current = data;
+@@ -119,6 +173,7 @@ function VirtualizedList<T>(
+ 
+   const containerRef = useRef<DOMElement | null>(null);
+   const [containerHeight, setContainerHeight] = useState(0);
++  const [containerWidth, setContainerWidth] = useState(0);
+   const itemRefs = useRef<Array<DOMElement | null>>([]);
+   const [heights, setHeights] = useState<Record<string, number>>({});
+   const isInitialScrollSet = useRef(false);
+@@ -133,7 +188,10 @@ function VirtualizedList<T>(
+       const observer = new ResizeObserver((entries) => {
+         const entry = entries[0];
+         if (entry) {
+-          setContainerHeight(Math.round(entry.contentRect.height));
++          const newHeight = Math.round(entry.contentRect.height);
++          const newWidth = Math.round(entry.contentRect.width);
++          setContainerHeight((prev) => (prev !== newHeight ? newHeight : prev));
++          setContainerWidth((prev) => (prev !== newWidth ? newWidth : prev));
+         }
+       });
+       observer.observe(node);
+@@ -242,7 +300,9 @@ function VirtualizedList<T>(
+     const wasAtBottom = contentPreviouslyFit || wasScrolledToBottomPixels;
+ 
+     if (wasAtBottom && actualScrollTop >= prevScrollTop.current) {
+-      setIsStickingToBottom(true);
++      if (!isStickingToBottom) {
++        setIsStickingToBottom(true);
++      }
+     }
+ 
+     const listGrew = data.length > prevDataLength.current;
+@@ -253,10 +313,16 @@ function VirtualizedList<T>(
+       (listGrew && (isStickingToBottom || wasAtBottom)) ||
+       (isStickingToBottom && containerChanged)
+     ) {
+-      setScrollAnchor({
+-        index: data.length > 0 ? data.length - 1 : 0,
+-        offset: SCROLL_TO_ITEM_END,
+-      });
++      const newIndex = data.length > 0 ? data.length - 1 : 0;
++      if (
++        scrollAnchor.index !== newIndex ||
++        scrollAnchor.offset !== SCROLL_TO_ITEM_END
++      ) {
++        setScrollAnchor({
++          index: newIndex,
++          offset: SCROLL_TO_ITEM_END,
++        });
++      }
+       if (!isStickingToBottom) {
+         setIsStickingToBottom(true);
+       }
+@@ -266,9 +332,17 @@ function VirtualizedList<T>(
+       data.length > 0
+     ) {
+       const newScrollTop = Math.max(0, totalHeight - scrollableContainerHeight);
+-      setScrollAnchor(getAnchorForScrollTop(newScrollTop, offsets));
++      const newAnchor = getAnchorForScrollTop(newScrollTop, offsets);
++      if (
++        scrollAnchor.index !== newAnchor.index ||
++        scrollAnchor.offset !== newAnchor.offset
++      ) {
++        setScrollAnchor(newAnchor);
++      }
+     } else if (data.length === 0) {
+-      setScrollAnchor({ index: 0, offset: 0 });
++      if (scrollAnchor.index !== 0 || scrollAnchor.offset !== 0) {
++        setScrollAnchor({ index: 0, offset: 0 });
++      }
+     }
+ 
+     prevDataLength.current = data.length;
+@@ -281,6 +355,7 @@ function VirtualizedList<T>(
+     actualScrollTop,
+     scrollableContainerHeight,
+     scrollAnchor.index,
++    scrollAnchor.offset,
+     getAnchorForScrollTop,
+     offsets,
+     isStickingToBottom,
+@@ -348,15 +423,22 @@ function VirtualizedList<T>(
+       ? data.length - 1
+       : Math.min(data.length - 1, endIndexOffset);
+ 
+-  const topSpacerHeight = offsets[startIndex] ?? 0;
+-  const bottomSpacerHeight =
+-    totalHeight - (offsets[endIndex + 1] ?? totalHeight);
++  const topSpacerHeight =
++    renderStatic === true || overflowToBackbuffer === true
++      ? 0
++      : (offsets[startIndex] ?? 0);
++  const bottomSpacerHeight = renderStatic
++    ? 0
++    : totalHeight - (offsets[endIndex + 1] ?? totalHeight);
+ 
+   // Maintain a stable set of observed nodes using useLayoutEffect
+   const observedNodes = useRef<Set<DOMElement>>(new Set());
+   useLayoutEffect(() => {
+     const currentNodes = new Set<DOMElement>();
+-    for (let i = startIndex; i <= endIndex; i++) {
++    const observeStart = renderStatic || overflowToBackbuffer ? 0 : startIndex;
++    const observeEnd = renderStatic ? data.length - 1 : endIndex;
++
++    for (let i = observeStart; i <= observeEnd; i++) {
+       const node = itemRefs.current[i];
+       const item = data[i];
+       if (node && item) {
+@@ -364,14 +446,16 @@ function VirtualizedList<T>(
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!observedNodes.current.has(node)) {
++        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        itemsObserver.unobserve(node);
++        if (!isStatic && !fixedItemHeight) {
++          itemsObserver.unobserve(node);
++        }
+         nodeToKeyRef.current.delete(node);
+       }
+     }
+@@ -379,22 +463,49 @@ function VirtualizedList<T>(
+   });
+ 
+   const renderedItems = [];
+-  for (let i = startIndex; i <= endIndex; i++) {
+-    const item = data[i];
+-    if (item) {
+-      renderedItems.push(
+-        <Box
+-          key={keyExtractor(item, i)}
+-          width="100%"
+-          flexDirection="column"
+-          flexShrink={0}
+-          ref={(el) => {
+-            itemRefs.current[i] = el;
+-          }}
+-        >
+-          {renderItem({ item, index: i })}
+-        </Box>,
+-      );
++  const renderRangeStart =
++    renderStatic || overflowToBackbuffer ? 0 : startIndex;
++  const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
++
++  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
++  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
++  // Wait, if it's not static and no width we need to wait for measure.
++  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
++  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
++  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  const isReady =
++    containerHeight > 0 ||
++    process.env['NODE_ENV'] === 'test' ||
++    (width !== undefined && typeof width === 'number');
++
++  if (isReady) {
++    for (let i = renderRangeStart; i <= renderRangeEnd; i++) {
++      const item = data[i];
++      if (item) {
++        const isOutsideViewport = i < startIndex || i > endIndex;
++        const shouldBeStatic =
++          (renderStatic === true && isOutsideViewport) ||
++          isStaticItem?.(item, i) === true;
++
++        const content = renderItem({ item, index: i });
++        const key = keyExtractor(item, i);
++
++        renderedItems.push(
++          <VirtualizedListItem
++            key={key}
++            itemKey={key}
++            content={content}
++            shouldBeStatic={shouldBeStatic}
++            width={width}
++            containerWidth={containerWidth}
++            itemRef={(el: DOMElement | null) => {
++              if (i >= renderRangeStart && i <= renderRangeEnd) {
++                itemRefs.current[i] = el;
++              }
++            }}
++          />,
++        );
++      }
+     }
+   }
+ 
+@@ -539,6 +650,9 @@ function VirtualizedList<T>(
+       height="100%"
+       flexDirection="column"
+       paddingRight={copyModeEnabled ? 0 : 1}
++      overflowToBackbuffer={overflowToBackbuffer}
++      scrollbar={scrollbar}
++      stableScrollback={stableScrollback}
+     >
+       <Box
+         flexShrink={0}
+diff --git a/packages/cli/src/ui/contexts/UIStateContext.tsx b/packages/cli/src/ui/contexts/UIStateContext.tsx
+index a5d10820b2..99d5874aba 100644
+--- a/packages/cli/src/ui/contexts/UIStateContext.tsx
++++ b/packages/cli/src/ui/contexts/UIStateContext.tsx
+@@ -117,6 +117,7 @@ export interface UIState {
+   editorError: string | null;
+   isEditorDialogOpen: boolean;
+   showPrivacyNotice: boolean;
++  mouseMode: boolean;
+   corgiMode: boolean;
+   debugMessage: string;
+   quittingMessages: HistoryItem[] | null;
+@@ -191,7 +192,7 @@ export interface UIState {
+   sessionStats: SessionStatsState;
+   terminalWidth: number;
+   terminalHeight: number;
+-  mainControlsRef: React.RefCallback<DOMElement | null>;
++  mainControlsRef: (node: DOMElement | null) => void;
+   // NOTE: This is for performance profiling only.
+   rootUiRef: React.MutableRefObject<DOMElement | null>;
+   currentIDE: IdeInfo | null;
+diff --git a/packages/cli/src/ui/hooks/useAlternateBuffer.ts b/packages/cli/src/ui/hooks/useAlternateBuffer.ts
+index 8300df70de..1cb6268d2a 100644
+--- a/packages/cli/src/ui/hooks/useAlternateBuffer.ts
++++ b/packages/cli/src/ui/hooks/useAlternateBuffer.ts
+@@ -7,8 +7,13 @@
+ import { useConfig } from '../contexts/ConfigContext.js';
+ import type { Config } from '@google/gemini-cli-core';
+ 
++// This method is intentionally misleading while we migrate.
++// Once getUseTerminalBuffer() is always enabled we will refactor to remove
++// all instances of this method making it the only path.
++// Right now this is convenient as it allows us to special case terminalBuffer
++// rendering like we special case alternateBuffer rendering.
+ export const isAlternateBufferEnabled = (config: Config): boolean =>
+-  config.getUseAlternateBuffer();
++  config.getUseAlternateBuffer() || config.getUseTerminalBuffer();
+ 
+ // This is read from Config so that the UI reads the same value per application session
+ export const useAlternateBuffer = (): boolean => {
+diff --git a/packages/cli/src/ui/hooks/useAnimatedScrollbar.ts b/packages/cli/src/ui/hooks/useAnimatedScrollbar.ts
+index 46f6bb5c68..f45a7054d7 100644
+--- a/packages/cli/src/ui/hooks/useAnimatedScrollbar.ts
++++ b/packages/cli/src/ui/hooks/useAnimatedScrollbar.ts
+@@ -4,7 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-import { useState, useEffect, useRef, useCallback } from 'react';
++import { useState, useLayoutEffect, useRef, useCallback } from 'react';
+ import { theme } from '../semantic-colors.js';
+ import { interpolateColor } from '../themes/color-utils.js';
+ import { debugState } from '../debug.js';
+@@ -107,7 +107,7 @@ export function useAnimatedScrollbar(
+   }, [cleanup]);
+ 
+   const wasFocused = useRef(isFocused);
+-  useEffect(() => {
++  useLayoutEffect(() => {
+     if (isFocused && !wasFocused.current) {
+       flashScrollbar();
+     } else if (!isFocused && wasFocused.current) {
+diff --git a/packages/cli/src/ui/hooks/useBatchedScroll.ts b/packages/cli/src/ui/hooks/useBatchedScroll.ts
+index 05b73a9068..c294fb0cca 100644
+--- a/packages/cli/src/ui/hooks/useBatchedScroll.ts
++++ b/packages/cli/src/ui/hooks/useBatchedScroll.ts
+@@ -4,7 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-import { useRef, useEffect, useCallback } from 'react';
++import { useRef, useLayoutEffect, useCallback } from 'react';
+ 
+ /**
+  * A hook to manage batched scroll state updates.
+@@ -17,7 +17,7 @@ export function useBatchedScroll(currentScrollTop: number) {
+   // and not depend on the currentScrollTop value directly in its dependency array.
+   const currentScrollTopRef = useRef(currentScrollTop);
+ 
+-  useEffect(() => {
++  useLayoutEffect(() => {
+     currentScrollTopRef.current = currentScrollTop;
+     pendingScrollTopRef.current = null;
+   });
+diff --git a/packages/cli/src/ui/key/keyBindings.ts b/packages/cli/src/ui/key/keyBindings.ts
+index bef10f8522..c23596dc0f 100644
+--- a/packages/cli/src/ui/key/keyBindings.ts
++++ b/packages/cli/src/ui/key/keyBindings.ts
+@@ -85,6 +85,7 @@ export enum Command {
+   SHOW_IDE_CONTEXT_DETAIL = 'app.showIdeContextDetail',
+   TOGGLE_MARKDOWN = 'app.toggleMarkdown',
+   TOGGLE_COPY_MODE = 'app.toggleCopyMode',
++  TOGGLE_MOUSE_MODE = 'app.toggleMouseMode',
+   TOGGLE_YOLO = 'app.toggleYolo',
+   CYCLE_APPROVAL_MODE = 'app.cycleApprovalMode',
+   SHOW_MORE_LINES = 'app.showMoreLines',
+@@ -109,6 +110,10 @@ export enum Command {
+   // Extension Controls
+   UPDATE_EXTENSION = 'extension.update',
+   LINK_EXTENSION = 'extension.link',
++
++  DUMP_FRAME = 'app.dumpFrame',
++  START_RECORDING = 'app.startRecording',
++  STOP_RECORDING = 'app.stopRecording',
+ }
+ 
+ /**
+@@ -385,7 +390,8 @@ export const defaultKeyBindingConfig: KeyBindingConfig = new Map([
+   [Command.SHOW_FULL_TODOS, [new KeyBinding('ctrl+t')]],
+   [Command.SHOW_IDE_CONTEXT_DETAIL, [new KeyBinding('ctrl+g')]],
+   [Command.TOGGLE_MARKDOWN, [new KeyBinding('alt+m')]],
+-  [Command.TOGGLE_COPY_MODE, [new KeyBinding('ctrl+s')]],
++  [Command.TOGGLE_COPY_MODE, [new KeyBinding('f9')]],
++  [Command.TOGGLE_MOUSE_MODE, [new KeyBinding('ctrl+s')]],
+   [Command.TOGGLE_YOLO, [new KeyBinding('ctrl+y')]],
+   [Command.CYCLE_APPROVAL_MODE, [new KeyBinding('shift+tab')]],
+   [Command.SHOW_MORE_LINES, [new KeyBinding('ctrl+o')]],
+@@ -396,6 +402,9 @@ export const defaultKeyBindingConfig: KeyBindingConfig = new Map([
+   [Command.RESTART_APP, [new KeyBinding('r'), new KeyBinding('shift+r')]],
+   [Command.SUSPEND_APP, [new KeyBinding('ctrl+z')]],
+   [Command.SHOW_SHELL_INPUT_UNFOCUS_WARNING, [new KeyBinding('tab')]],
++  [Command.DUMP_FRAME, [new KeyBinding('f8')]],
++  [Command.START_RECORDING, [new KeyBinding('f6')]],
++  [Command.STOP_RECORDING, [new KeyBinding('f7')]],
+ 
+   // Background Shell Controls
+   [Command.BACKGROUND_SHELL_ESCAPE, [new KeyBinding('escape')]],
+@@ -512,6 +521,7 @@ export const commandCategories: readonly CommandCategory[] = [
+       Command.SHOW_IDE_CONTEXT_DETAIL,
+       Command.TOGGLE_MARKDOWN,
+       Command.TOGGLE_COPY_MODE,
++      Command.TOGGLE_MOUSE_MODE,
+       Command.TOGGLE_YOLO,
+       Command.CYCLE_APPROVAL_MODE,
+       Command.SHOW_MORE_LINES,
+@@ -535,6 +545,9 @@ export const commandCategories: readonly CommandCategory[] = [
+       Command.UNFOCUS_BACKGROUND_SHELL,
+       Command.UNFOCUS_BACKGROUND_SHELL_LIST,
+       Command.SHOW_BACKGROUND_SHELL_UNFOCUS_WARNING,
++      Command.DUMP_FRAME,
++      Command.START_RECORDING,
++      Command.STOP_RECORDING,
+     ],
+   },
+   {
+@@ -621,6 +634,7 @@ export const commandDescriptions: Readonly<Record<Command, string>> = {
+   [Command.SHOW_IDE_CONTEXT_DETAIL]: 'Show IDE context details.',
+   [Command.TOGGLE_MARKDOWN]: 'Toggle Markdown rendering.',
+   [Command.TOGGLE_COPY_MODE]: 'Toggle copy mode when in alternate buffer mode.',
++  [Command.TOGGLE_MOUSE_MODE]: 'Toggle mouse mode (scrolling and clicking).',
+   [Command.TOGGLE_YOLO]: 'Toggle YOLO (auto-approval) mode for tool calls.',
+   [Command.CYCLE_APPROVAL_MODE]:
+     'Cycle through approval modes: default (prompt), auto_edit (auto-approve edits), and plan (read-only). Plan mode is skipped when the agent is busy.',
+@@ -654,6 +668,10 @@ export const commandDescriptions: Readonly<Record<Command, string>> = {
+   // Extension Controls
+   [Command.UPDATE_EXTENSION]: 'Update the current extension if available.',
+   [Command.LINK_EXTENSION]: 'Link the current extension to a local path.',
++
++  [Command.DUMP_FRAME]: 'Dump the current frame as a snapshot.',
++  [Command.START_RECORDING]: 'Start recording the session.',
++  [Command.STOP_RECORDING]: 'Stop recording the session.',
+ };
+ 
+ const keybindingsSchema = z.array(
+diff --git a/packages/cli/src/ui/layouts/DefaultAppLayout.tsx b/packages/cli/src/ui/layouts/DefaultAppLayout.tsx
+index aaa9e04632..964fb5ec55 100644
+--- a/packages/cli/src/ui/layouts/DefaultAppLayout.tsx
++++ b/packages/cli/src/ui/layouts/DefaultAppLayout.tsx
+@@ -34,7 +34,6 @@ export const DefaultAppLayout: React.FC = () => {
+       paddingBottom={isAlternateBuffer ? 1 : undefined}
+       flexShrink={0}
+       flexGrow={0}
+-      overflow="hidden"
+       ref={uiState.rootUiRef}
+     >
+       <MainContent />
+diff --git a/packages/cli/src/ui/utils/TableRenderer.tsx b/packages/cli/src/ui/utils/TableRenderer.tsx
+index b6a30792ca..fcd760ff16 100644
+--- a/packages/cli/src/ui/utils/TableRenderer.tsx
++++ b/packages/cli/src/ui/utils/TableRenderer.tsx
+@@ -14,7 +14,7 @@ import {
+   wrapStyledChars,
+   widestLineFromStyledChars,
+   styledCharsWidth,
+-  styledLineToString,
++  styledCharsToString,
+ } from 'ink';
+ import { theme } from '../semantic-colors.js';
+ import { parseMarkdownToANSI } from './markdownParsingUtils.js';
+@@ -196,7 +196,7 @@ export const TableRenderer: React.FC<TableRendererProps> = ({
+         );
+ 
+         const lines = wrappedStyledLines.map((line) => ({
+-          text: styledLineToString(line),
++          text: styledCharsToString(line),
+           width: styledCharsWidth(line),
+         }));
+         rowResult.push(lines);
+diff --git a/packages/cli/src/utils/events.ts b/packages/cli/src/utils/events.ts
+index 8291528ac1..9c3ec6a365 100644
+--- a/packages/cli/src/utils/events.ts
++++ b/packages/cli/src/utils/events.ts
+@@ -23,6 +23,7 @@ export enum AppEvent {
+   PasteTimeout = 'paste-timeout',
+   TerminalBackground = 'terminal-background',
+   TransientMessage = 'transient-message',
++  ScrollToBottom = 'scroll-to-bottom',
+ }
+ 
+ export interface AppEvents {
+@@ -32,6 +33,7 @@ export interface AppEvents {
+   [AppEvent.PasteTimeout]: never[];
+   [AppEvent.TerminalBackground]: [string];
+   [AppEvent.TransientMessage]: [TransientMessagePayload];
++  [AppEvent.ScrollToBottom]: never[];
+ }
+ 
+ export const appEvents = new EventEmitter<AppEvents>();
+diff --git a/packages/cli/test-setup.ts b/packages/cli/test-setup.ts
+index 850510cb14..1a0947b959 100644
+--- a/packages/cli/test-setup.ts
++++ b/packages/cli/test-setup.ts
+@@ -87,7 +87,8 @@ beforeEach(() => {
+ 
+       if (
+         relevantStack.includes('OverflowContext.tsx') ||
+-        relevantStack.includes('useTimedMessage.ts')
++        relevantStack.includes('useTimedMessage.ts') ||
++        relevantStack.includes('useInlineEditBuffer.ts')
+       ) {
+         return;
+       }
+diff --git a/packages/core/src/config/config.ts b/packages/core/src/config/config.ts
+index 6e3bd41b55..4b8a1c9be4 100644
+--- a/packages/core/src/config/config.ts
++++ b/packages/core/src/config/config.ts
+@@ -648,6 +648,8 @@ export interface ConfigParameters {
+   trustedFolder?: boolean;
+   useBackgroundColor?: boolean;
+   useAlternateBuffer?: boolean;
++  useTerminalBuffer?: boolean;
++  useRenderProcess?: boolean;
+   useRipgrep?: boolean;
+   enableInteractiveShell?: boolean;
+   shellBackgroundCompletionBehavior?: string;
+@@ -866,6 +868,8 @@ export class Config implements McpContext, AgentLoopContext {
+   private readonly skipNextSpeakerCheck: boolean;
+   private readonly useBackgroundColor: boolean;
+   private readonly useAlternateBuffer: boolean;
++  private readonly useTerminalBuffer: boolean;
++  private readonly useRenderProcess: boolean;
+   private shellExecutionConfig: ShellExecutionConfig;
+   private readonly extensionManagement: boolean = true;
+   private readonly extensionRegistryURI: string | undefined;
+@@ -1207,6 +1211,8 @@ export class Config implements McpContext, AgentLoopContext {
+     this.useRipgrep = params.useRipgrep ?? true;
+     this.useBackgroundColor = params.useBackgroundColor ?? true;
+     this.useAlternateBuffer = params.useAlternateBuffer ?? false;
++    this.useTerminalBuffer = params.useTerminalBuffer ?? true;
++    this.useRenderProcess = params.useRenderProcess ?? true;
+     this.enableInteractiveShell = params.enableInteractiveShell ?? false;
+ 
+     const requestedBehavior = params.shellBackgroundCompletionBehavior;
+@@ -1696,7 +1702,6 @@ export class Config implements McpContext, AgentLoopContext {
+       {
+         workspace: this.targetDir,
+         forbiddenPaths: this.getSandboxForbiddenPaths.bind(this),
+-        includeDirectories: this.pendingIncludeDirectories,
+         policyManager: this._sandboxPolicyManager,
+       },
+       this.getApprovalMode(),
+@@ -3235,6 +3240,14 @@ export class Config implements McpContext, AgentLoopContext {
+     return this.useAlternateBuffer;
+   }
+ 
++  getUseTerminalBuffer(): boolean {
++    return this.useTerminalBuffer;
++  }
++
++  getUseRenderProcess(): boolean {
++    return this.useRenderProcess;
++  }
++
+   getEnableInteractiveShell(): boolean {
+     return this.enableInteractiveShell;
+   }

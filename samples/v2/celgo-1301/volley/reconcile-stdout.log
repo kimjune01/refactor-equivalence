@@ -1,0 +1,283 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1301
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9b97-51c5-7801-a811-0daab224211f
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll reconcile the two markdown files directly and write only the next spec file. I’m first reading the existing claims and hunt findings so I can preserve the structure and apply blocker/warning handling exactly.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1301exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C2 — Remove the duplicate env import alias
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:28
+**Change**: Delete the `envlib` alias import of `github.com/google/cel-go/common/env` and update the affected helper signatures and calls in this file to use the existing `env` import, including `runtimeTypeAgrees`, `typeAssignable`, `addLetVar`, `resolveFn`, `addLetFn`, `AddLetVar`, `AddLetFn`, `AddDeclVar`, `AddDeclFn`, `env.NewVariable`, and `env.SerializeTypeDesc`.
+**Goal link**: The goal says the REPL should track types in terms of environment config `TypeDesc`; using one package name for that type keeps the migration direct.
+**Justification**: The extra alias is accidental complexity from the first-pass migration and obscures that all TypeDesc conversion is coming from the same environment config package.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+ succeeded in 0ms:
+## Finding F1 — Alias removal collides with local env variables
+**Severity**: blocker
+**Claim**: C2
+**What**: The claim says to delete the `envlib` alias and update calls such as `env.NewVariable` and `env.SerializeTypeDesc` to use the existing `env` import, but several affected functions already have a local parameter named `env *cel.Env`. A literal implementation makes `env.NewVariable` and `env.SerializeTypeDesc` resolve against the local `*cel.Env`, not the imported `common/env` package, so the code will not compile unless the implementer guesses that those parameters must also be renamed.
+**Evidence**: `repl/evaluator.go:132` has `func (l *letFunction) updateImpl(env *cel.Env) error` and currently calls `envlib.NewVariable(...)` at `repl/evaluator.go:138` and `repl/evaluator.go:148`. `repl/evaluator.go:544` has `func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error` and currently calls `envlib.SerializeTypeDesc(...)` at `repl/evaluator.go:576`. Replacing those with `env.NewVariable` / `env.SerializeTypeDesc` while retaining the parameter names resolves `env` to the local `*cel.Env`.
+**Fix**: Narrow/clarify C2 to explicitly rename the shadowing `env *cel.Env` parameters/local variables in every affected scope before replacing `envlib.` references, or remove the claim.
+codex
+The hunt found one blocker against C2, so that claim has to move to `Rejected`; C1 and C3 can stay as they were. I’m writing the round-2 spec now with the original rejected items preserved.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-2-claims.md
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+## Rejected
+
+- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
+- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
+- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
+- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
+- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
+- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+apply_patch(auto_approved=true) exited 0 in 27ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/celgo-1301/volley/round-2-claims.md b/samples/v2/celgo-1301/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a25f77a2b44da5c3b9c4b6ea7747cb375ee865aa
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Use the environment YAML loader in REPL config parsing
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
++**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
++**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
++**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
++
++### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
++**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
++**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
++**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
++
++## Rejected
++
++- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
++- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
++- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
++- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
++- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
++- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+
+file update:
+diff --git a/samples/v2/celgo-1301/volley/round-2-claims.md b/samples/v2/celgo-1301/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a25f77a2b44da5c3b9c4b6ea7747cb375ee865aa
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Use the environment YAML loader in REPL config parsing
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
++**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
++**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
++**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
++
++### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
++**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
++**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
++**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
++
++## Rejected
++
++- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
++- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
++- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
++- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
++- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
++- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1301/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1301 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+## Rejected
+
+- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
+- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
+- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
+- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
+file update:
+diff --git a/samples/v2/celgo-1301/volley/round-2-claims.md b/samples/v2/celgo-1301/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a25f77a2b44da5c3b9c4b6ea7747cb375ee865aa
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Use the environment YAML loader in REPL config parsing
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
++**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
++**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
++**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
++
++### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
++**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
++**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
++**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
++
++## Rejected
++
++- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
++- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
++- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
++- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
++- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
++- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+
+codex
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+## Rejected
+
+- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
+- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
+- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
+- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
+- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
+- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+file update:
+diff --git a/samples/v2/celgo-1301/volley/round-2-claims.md b/samples/v2/celgo-1301/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a25f77a2b44da5c3b9c4b6ea7747cb375ee865aa
+--- /dev/null
++++ b/samples/v2/celgo-1301/volley/round-2-claims.md
+@@ -0,0 +1,22 @@
++## Accepted Claims
++
++### C1 — Use the environment YAML loader in REPL config parsing
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
++**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
++**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
++**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
++
++### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
++**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
++**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
++**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
++**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
++
++## Rejected
++
++- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
++- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
++- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
++- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
++- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
++- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.
+
+tokens used
+6,670
+## Accepted Claims
+
+### C1 — Use the environment YAML loader in REPL config parsing
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/evaluator.go`:920
+**Change**: In `parseYAMLConfig`, replace the local `var c env.Config` plus `yaml.Unmarshal(yamlSrc, &c)` block with a call to `env.ConfigFromYAML(yamlSrc)`, and pass the returned `*env.Config` to `cel.FromConfig`.
+**Goal link**: The goal adds YAML environment config support for shorthand type specifiers; routing REPL YAML loading through the new environment-level loader makes that intent explicit at the REPL boundary.
+**Justification**: This removes duplicate YAML decoding logic from the REPL and centralizes shorthand TypeDesc parsing in `common/env` without changing the resulting config.
+
+### C3 — Reuse TypeDesc shape for mapping-node YAML decoding
+**File**: `/tmp/refactor-eq-workdir/cleanroom-v2/1301/common/env/io.go`:24
+**Change**: Replace the hand-copied `internalTypeDesc` struct with a local defined type based on `TypeDesc` that has no `UnmarshalYAML` method, and in `(*TypeDesc).UnmarshalYAML` decode mapping nodes into that type before assigning back to `*td`.
+**Goal link**: The goal adds shorthand parsing while preserving the existing structured YAML type form; using the existing TypeDesc field shape makes the structured fallback clearer.
+**Justification**: This removes duplicated field definitions and YAML tags while preserving the recursion break needed by custom unmarshalling.
+
+## Rejected
+
+- Remove the duplicate env import alias in `repl/evaluator.go`: rejected due to blocker finding F1 in `hunt-spec-round-1.md`; replacing `envlib.NewVariable` and `envlib.SerializeTypeDesc` with `env.NewVariable` and `env.SerializeTypeDesc` collides with existing local `env *cel.Env` parameters, so the literal claim would not compile.
+- Fix `checkWellKnown` so `google.protobuf.DoubleValue` and `google.protobuf.FloatValue` return `double_wrapper`: this appears to correct a bug in `/tmp/refactor-eq-workdir/cleanroom-v2/1301/repl/typefmt.go`:104, but it changes observable REPL type parsing behavior rather than being a behavior-preserving refactor.
+- Remove `fmt.Println(tc.confIn.Variables[0].Name, tc.confIn.Variables[0].TypeName)` from `common/env/io_test.go`: this is stray test output, but test files are explicitly out of scope for accepted claims.
+- Regenerate or clean up the ANTLR generated files under `repl/parser`: those files are in the allowed edit set, but changing generated parser artifacts is not a bounded source refactor and would require generator-version assumptions outside the goal.
+- Reintroduce or reshape the `StringsMaxPrecision` formatting option changes in `ext/strings.go`, `ext/formatting.go`, or `ext/formatting_v2.go`: those edits are part of the supplied artifact but do not relate to shorthand environment YAML or REPL TypeDesc tracking, so they are outside the goal-anchored refactor scope.
+- Widen `ParseTypeDesc` whitespace handling beyond literal spaces in `common/env/io.go`: accepting tabs or other whitespace could be desirable parser behavior, but it would expand accepted input and is therefore not behavior-preserving.

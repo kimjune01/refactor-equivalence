@@ -1,0 +1,2539 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-24557
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9ae9-1bfe-77f3-bbe3-cc6d953a50a4
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/24557/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt             # files the implementer may have changed
+cargo build                                         # full build, not just typecheck
+cargo test --workspace                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run this as a read-only adversarial review. First I’m going to switch to the specified cleanroom, read the spec inputs and allowed set, then run the required build and workspace tests before writing the findings file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc 'pwd && ls' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+Cargo.lock
+crates/ruff_index/src/slice.rs
+crates/ty_python_semantic/Cargo.toml
+crates/ty_python_semantic/tests/mdtest.rs
+crates/ty_static/src/env_vars.rs
+crates/ty_test/Cargo.toml
+crates/ty_test/src/lib.rs
+crates/ty_test/src/matcher.rs
+crates/ty_test/src/parser.rs
+crates/ty_test/src/pragma_comments.rs
+ succeeded in 0ms:
+# PR #24557 — Add inline snapshots to mdtest
+
+## PR body
+
+## Summary
+
+This PR adds support for inline snapshots to mdtests.
+
+The design differs from what was discussed in https://github.com/astral-sh/ty/issues/195:
+
+* There's no `cargo insta` integration because it's unclear to me how that would work. 
+* Diagnostic snapshotting is selective. Diagnostics that should be snapshotted must be marked with a `# snapshot: <code?>` comment. I think this design is superior because:
+  * The test fails if there's a `diagnostic` block without any `# snapshot:` comment (is now unused)
+  * The test can automatically insert the `diagnostic` block if there's at least one `# snapshot:` comment
+  * Unlike with external snapshots, it allows asserting a single diagnostic in an existing test case without snapshotting many unrelated diagnostics too.
+* Each file has its own `diagnostic` block (favors proximity)
+
+Future extension:
+
+* Add a mode to capture all diagnostics if we see the need for it
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Remove duplicate assertion keyword trimming
+**File**: `crates/ty_test/src/pragma_comments.rs`:277
+**Change**: In `UnparsedAssertion::from_comment`, delete the second consecutive `let keyword = keyword.trim();` binding and keep the single trim performed immediately after `split_once(':')`.
+**Goal link**: This clarifies assertion pragma parsing for `# error:` and `# revealed:` comments within the broader pragma comment parser.
+**Justification**: The duplicate trim is accidental structure from the extraction into `pragma_comments.rs`; removing it preserves parsing behavior while making assertion comment parsing simpler.
+**Hunt note**: Retained as narrowed per F1 because the cleanup is limited to `UnparsedAssertion::from_comment`; it does not claim to simplify the separately recognized `# snapshot` branch.
+
+### C2 — Drop unused matcher lifetime parameter
+**File**: `crates/ty_test/src/matcher.rs`:326
+**Change**: Change `Matcher::match_line<'a, 'b>(...) -> ... where 'b: 'a` to use only the diagnostic lifetime that is actually needed, removing the unused `'b` parameter and its `where` clause.
+**Goal link**: This clarifies the matcher change that now returns diagnostics selected by `# snapshot` comments.
+**Justification**: The extra lifetime no longer corresponds to any argument after switching from raw assertion slices to `LinePragmaComments`, so removing it reduces type-level noise without changing matching behavior.
+
+### C3 — Remove inert snapshot update override hook
+**File**: `crates/ty_test/src/lib.rs`:808
+**Change**: In `is_update_inline_snapshots_enabled`, remove the `#[cfg(test)]` branch that calls `snapshot_update_mode_override`, and delete the `snapshot_update_mode_override` function that always returns `None`.
+**Goal link**: This clarifies that inline snapshot updating is controlled solely by `MDTEST_UPDATE_SNAPSHOTS`, as described in the PR goal.
+**Justification**: The override hook has no implementation and cannot affect the existing suite, so deleting it removes an unused indirection around the update-mode decision.
+ succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/24557
+AGENTS.md
+BREAKING_CHANGES.md
+CHANGELOG.md
+CLAUDE.md
+CONTRIBUTING.md
+Cargo.lock
+Cargo.toml
+Dockerfile
+FORGE_ALLOWED_FILES.txt
+FORGE_INPUT_DIFF.patch
+GOAL.md
+LICENSE
+README.md
+_typos.toml
+assets
+changelogs
+clippy.toml
+crates
+dist-workspace.toml
+codex
+The accepted spec is small and mostly cleanup-oriented, so after the required build and tests I’ll inspect only the permitted files plus the original patch for evidence of missed claims, behavior changes, or out-of-scope edits.
+exec
+/bin/zsh -lc 'cargo build' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 38.02s:
+   Compiling unicode-ident v1.0.24
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling cfg-if v1.0.3
+   Compiling memchr v2.8.0
+   Compiling libc v0.2.184
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling once_cell v1.21.3
+   Compiling smallvec v1.15.1
+   Compiling equivalent v1.0.2
+   Compiling itoa v1.0.15
+   Compiling regex-syntax v0.8.10
+   Compiling rustversion v1.0.22
+   Compiling bitflags v2.11.0
+   Compiling find-msvc-tools v0.1.2
+   Compiling shlex v1.3.0
+   Compiling aho-corasick v1.1.4
+   Compiling either v1.15.0
+codex
+The build is still running. One issue already surfaced in normal compilation: `ty_test` now has an unused import warning in `lib.rs`; I’ll keep checking whether that ties to the accepted cleanup or remains only a non-blocking hygiene issue after the full commands finish.
+exec
+/bin/zsh -lc 'cargo build > /tmp/hunt-code-build.log 2>&1; code=$?; echo "BUILD_EXIT=$code"; tail -50 /tmp/hunt-code-build.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 123ms:
+BUILD_EXIT=0
+warning: unused import: `ruff_db::parsed::parsed_module`
+  --> crates/ty_test/src/lib.rs:14:5
+   |
+14 | use ruff_db::parsed::parsed_module;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+exec
+/bin/zsh -lc 'cargo test --workspace > /tmp/hunt-code-test.log 2>&1; code=$?; echo "TEST_EXIT=$code"; tail -50 /tmp/hunt-code-test.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24557codex
+I reran `cargo build` into a log so the report can include the required exit code and tail exactly. Now the full workspace test command is running; while it runs I’ll inspect the changed areas against the accepted claims.
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/matcher.rs | sed -n '300,360p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/pragma_comments.rs | sed -n '240,310p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+   300	            "{}{}{}",
+   301	            &path_captures[1], normalized_path, &path_captures[3]
+   302	        )
+   303	    }
+   304	
+   305	    PATH_IN_CLASS_DISPLAY_REGEX.replace_all(ty, normalize_path_captures)
+   306	}
+   307	
+   308	struct Matcher {
+   309	    line_index: LineIndex,
+   310	    source: SourceText,
+   311	}
+   312	
+   313	impl Matcher {
+   314	    fn from_file(db: &Db, file: File) -> Self {
+   315	        Self {
+   316	            line_index: line_index(db, file),
+   317	            source: source_text(db, file),
+   318	        }
+   319	    }
+ succeeded in 0ms:
+   240	        }
+   241	
+   242	        UnparsedAssertion::from_comment(comment).map(Self::Assertion)
+   243	    }
+   244	}
+   245	
+   246	/// A single assertion comment.
+   247	///
+   248	/// This type represents an *attempted* assertion comment, but not necessarily a *valid* assertion comment.
+   249	/// Parsing is done lazily in `matcher.rs`; this allows us to emit nicer error messages
+   250	/// in the event of an invalid comment.
+   251	#[derive(Debug)]
+   252	pub(crate) enum UnparsedAssertion<'a> {
+   253	    /// A `# revealed:` assertion.
+   254	    Revealed(&'a str),
+   255	    /// An `# error:` assertion.
+   256	    Error(&'a str),
+   257	}
+   258	
+   259	impl std::fmt::Display for UnparsedAssertion<'_> {
+exec
+/bin/zsh -lc "nl -ba crates/ty_test/src/lib.rs | sed -n '1,40p;780,830p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+     1	use crate::config::Log;
+     2	use crate::db::Db;
+     3	use crate::matcher::Failure;
+     4	use crate::parser::{BacktickOffsets, CodeBlock, EmbeddedFileSourceMap};
+     5	use anyhow::anyhow;
+     6	use camino::Utf8Path;
+     7	use colored::Colorize;
+     8	use config::SystemKind;
+     9	use parser as test_parser;
+    10	use ruff_db::Db as _;
+    11	use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig};
+    12	use ruff_db::files::{File, FileRootKind, system_path_to_file};
+    13	use ruff_db::panic::{PanicError, catch_unwind};
+    14	use ruff_db::parsed::parsed_module;
+    15	use ruff_db::source::line_index;
+    16	use ruff_db::system::{DbWithWritableSystem as _, SystemPath, SystemPathBuf};
+    17	use ruff_db::testing::{setup_logging, setup_logging_with_filter};
+    18	use ruff_diagnostics::Applicability;
+    19	use ruff_source_file::{LineIndex, OneIndexed};
+    20	use ruff_text_size::{Ranged, TextRange};
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+diff --git a/Cargo.lock b/Cargo.lock
+index 62a205395b..af77f19aef 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4666,7 +4666,6 @@ dependencies = [
+  "ty_module_resolver",
+  "ty_python_core",
+  "ty_site_packages",
+- "ty_static",
+  "ty_test",
+  "ty_vendored",
+ ]
+@@ -4762,6 +4761,7 @@ dependencies = [
+  "rustc-stable-hash",
+  "salsa",
+  "serde",
++ "similar 3.1.0",
+  "smallvec",
+  "tempfile",
+  "thiserror 2.0.18",
+exec
+/bin/zsh -lc 'rg -n "parsed_module|snapshot_update_mode_override|fn match_line|Check a slice|UnparsedAssertion|keyword = keyword.trim" crates/ty_test/src crates/ty_python_semantic/tests crates/ty_static/src/env_vars.rs crates/ruff_index/src/slice.rs' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+crates/ty_test/src/lib.rs:14:use ruff_db::parsed::parsed_module;
+crates/ty_test/src/lib.rs:810:    if let Some(is_enabled) = snapshot_update_mode_override() {
+crates/ty_test/src/lib.rs:818:fn snapshot_update_mode_override() -> Option<bool> {
+crates/ty_test/src/pragma_comments.rs:187:/// An [`UnparsedAssertion`] with the [`TextRange`] of its original inline comment.
+crates/ty_test/src/pragma_comments.rs:203:/// A vector of [`UnparsedAssertion`]s belonging to a single line.
+crates/ty_test/src/pragma_comments.rs:207:type AssertionVec<'a> = SmallVec<[UnparsedAssertion<'a>; 1]>;
+crates/ty_test/src/pragma_comments.rs:230:    Assertion(UnparsedAssertion<'a>),
+crates/ty_test/src/pragma_comments.rs:242:        UnparsedAssertion::from_comment(comment).map(Self::Assertion)
+crates/ty_test/src/pragma_comments.rs:252:pub(crate) enum UnparsedAssertion<'a> {
+crates/ty_test/src/pragma_comments.rs:259:impl std::fmt::Display for UnparsedAssertion<'_> {
+crates/ty_test/src/pragma_comments.rs:270:impl<'a> UnparsedAssertion<'a> {
+crates/ty_test/src/pragma_comments.rs:275:        let keyword = keyword.trim();
+crates/ty_test/src/pragma_comments.rs:277:        let keyword = keyword.trim();
+crates/ty_test/src/pragma_comments.rs:520:    use ruff_db::parsed::parsed_module;
+crates/ty_test/src/pragma_comments.rs:545:        let parsed = parsed_module(&db, file).load(&db);
+crates/ty_test/src/pragma_comments.rs:687:        let [UnparsedAssertion::Error(error1)] = &line1.assertions[..] else {
+crates/ty_test/src/pragma_comments.rs:695:        let [UnparsedAssertion::Error(error2)] = &line2.assertions[..] else {
+crates/ty_test/src/pragma_comments.rs:723:            UnparsedAssertion::Error(error1),
+crates/ty_test/src/pragma_comments.rs:724:            UnparsedAssertion::Revealed(expected_ty),
+crates/ty_test/src/pragma_comments.rs:735:        let [UnparsedAssertion::Error(error2)] = &line2.assertions[..] else {
+exec
+/bin/zsh -lc 'find /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557 -maxdepth 3 -type f | sort' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/anomalies.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/codex-dir.diff
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/codex-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/merge-decisions.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/merged.diff
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/opus-dir.diff
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/opus-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/blind-blind/winner-implement-summary.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/c_test_commit.txt
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/deviations.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/find_c_test.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/find_c_test.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/GOAL.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/goal/pr-metadata.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/diff-base-to-test.patch
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/meta.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/no-op-class.txt
+/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/pipeline.log
+exec
+/bin/zsh -lc 'wc -l /tmp/hunt-code-test.log; tail -50 /tmp/hunt-code-test.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+     115 /tmp/hunt-code-test.log
+   Compiling pest_derive v2.8.2
+   Compiling clap_complete v4.5.58
+   Compiling libtest-mimic v0.8.1
+   Compiling libtest-mimic v0.7.3
+   Compiling insta v1.47.2
+   Compiling clap_complete_nushell v4.5.8
+   Compiling datatest-stable v0.3.3
+   Compiling clap_complete_command v0.6.1
+   Compiling tryfn v1.0.0
+   Compiling ruff_cache v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_cache)
+   Compiling ruff_python_trivia v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_trivia)
+   Compiling ruff_source_file v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_source_file)
+   Compiling insta-cmd v0.6.0
+   Compiling ruff_python_parser v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_parser)
+   Compiling ruff_python_literal v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_literal)
+   Compiling ruff_python_index v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_index)
+   Compiling ruff_db v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_db)
+   Compiling ruff_python_codegen v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_codegen)
+   Compiling ruff_python_semantic v0.0.0 (/private/tmp/refactor-eq-workdir/cleanroom-v2/24557/crates/ruff_python_semantic)
+ succeeded in 56.80s:
+TEST_EXIT=101
+
+thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
+
+[31m---- expected: tests/../examples/multislice.svg[0m
+[32m++++ actual:   stdout[0m
+[2m  21[0m [2m  18[0m [2m|[0m [2m  <text xml:space="preserve" class="container fg">
+[0m[2m  22[0m      [31m-[0m [31m    <tspan x="10px" [0m[4m[31my="28px"><tspan class="fg-bright-red[0m[31m [0m[4m[31mbold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched[0m[31m types</tspan>
+[0m     [2m  19[0m [32m+[0m [32m    <tspan x="10px" [0m[4m[32my="28px"><tspan>error:[0m[32m [0m[4m[32mmismatched[0m[32m types</tspan>
+[0m[2m  23[0m [2m  20[0m [2m|[0m [2m</tspan>
+[0m[2m  24[0m      [31m-[0m [31m    <tspan x="10px" y="46px"><tspan>   [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan>[0m[31m src/format.rs</tspan>
+[0m     [2m  21[0m [32m+[0m [32m    <tspan x="10px" y="46px"><tspan>   [0m[4m[32m--&gt;[0m[32m src/format.rs</tspan>
+[0m[2m  25[0m [2m  22[0m [2m|[0m [2m</tspan>
+[0m[2m  26[0m      [31m-[0m [31m    <tspan x="10px" y="64px"><tspan>    [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">|</tspan>[0m[31m
+[0m     [2m  23[0m [32m+[0m [32m    <tspan x="10px" y="64px"><tspan>    [0m[4m[32m|</tspan>[0m[32m
+[0m[2m  27[0m [2m  24[0m [2m|[0m [2m</tspan>
+[0m[2m  28[0m      [31m-[0m [31m    <tspan x="10px" [0m[4m[31my="82px"><tspan class="fg-bright-blue bold">[0m[31m 51 [0m[4m[31m|</tspan><tspan>[0m[31m Foo</tspan>
+[0m     [2m  25[0m [32m+[0m [32m    <tspan x="10px" [0m[4m[32my="82px"><tspan>[0m[32m 51 [0m[4m[32m|[0m[32m Foo</tspan>
+[0m[2m  29[0m [2m  26[0m [2m|[0m [2m</tspan>
+[0m[2m  30[0m      [31m-[0m [31m    <tspan x="10px" y="100px"><tspan>    [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">|</tspan>[0m[31m
+codex
+The accepted refactor claims are not present in the current tree: the duplicate trim, stale doc comment, unused lifetime, and test-only snapshot override are all still there. I’m waiting on the workspace tests now before finalizing the report, since a test failure would take the first blocker slot.
+exec
+/bin/zsh -lc 'tail -50 /tmp/hunt-code-build.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24557exec
+/bin/zsh -lc 'test -e /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md; echo EXISTS=$?' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+warning: unused import: `ruff_db::parsed::parsed_module`
+  --> crates/ty_test/src/lib.rs:14:5
+   |
+14 | use ruff_db::parsed::parsed_module;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+ succeeded in 0ms:
+EXISTS=1
+exec
+/bin/zsh -lc 'tail -50 /tmp/hunt-code-test.log' in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+
+thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
+
+[31m---- expected: tests/../examples/multislice.svg[0m
+[32m++++ actual:   stdout[0m
+[2m  21[0m [2m  18[0m [2m|[0m [2m  <text xml:space="preserve" class="container fg">
+[0m[2m  22[0m      [31m-[0m [31m    <tspan x="10px" [0m[4m[31my="28px"><tspan class="fg-bright-red[0m[31m [0m[4m[31mbold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched[0m[31m types</tspan>
+[0m     [2m  19[0m [32m+[0m [32m    <tspan x="10px" [0m[4m[32my="28px"><tspan>error:[0m[32m [0m[4m[32mmismatched[0m[32m types</tspan>
+[0m[2m  23[0m [2m  20[0m [2m|[0m [2m</tspan>
+[0m[2m  24[0m      [31m-[0m [31m    <tspan x="10px" y="46px"><tspan>   [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan>[0m[31m src/format.rs</tspan>
+[0m     [2m  21[0m [32m+[0m [32m    <tspan x="10px" y="46px"><tspan>   [0m[4m[32m--&gt;[0m[32m src/format.rs</tspan>
+[0m[2m  25[0m [2m  22[0m [2m|[0m [2m</tspan>
+[0m[2m  26[0m      [31m-[0m [31m    <tspan x="10px" y="64px"><tspan>    [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">|</tspan>[0m[31m
+[0m     [2m  23[0m [32m+[0m [32m    <tspan x="10px" y="64px"><tspan>    [0m[4m[32m|</tspan>[0m[32m
+[0m[2m  27[0m [2m  24[0m [2m|[0m [2m</tspan>
+[0m[2m  28[0m      [31m-[0m [31m    <tspan x="10px" [0m[4m[31my="82px"><tspan class="fg-bright-blue bold">[0m[31m 51 [0m[4m[31m|</tspan><tspan>[0m[31m Foo</tspan>
+[0m     [2m  25[0m [32m+[0m [32m    <tspan x="10px" [0m[4m[32my="82px"><tspan>[0m[32m 51 [0m[4m[32m|[0m[32m Foo</tspan>
+[0m[2m  29[0m [2m  26[0m [2m|[0m [2m</tspan>
+[0m[2m  30[0m      [31m-[0m [31m    <tspan x="10px" y="100px"><tspan>    [0m[4m[31m</tspan><tspan class="fg-bright-blue bold">|</tspan>[0m[31m
+[0m     [2m  27[0m [32m+[0m [32m    <tspan x="10px" y="100px"><tspan>    [0m[4m[32m|</tspan>[0m[32m
+codex
+The workspace test command failed, so the report will have a blocker F1 for the registered tests. I’m going to write the findings file now with the command exit codes/tails and the concrete current-line evidence for the accepted claims that were not applied.
+exec
+/bin/zsh -lc "perl -pe 's/\\e\\[[0-9;?]*[A-Za-z]//g' /tmp/hunt-code-test.log | tail -50 > /tmp/hunt-code-test-tail.clean; perl -pe 's/\\e\\[[0-9;?]*[A-Za-z]//g' /tmp/hunt-code-build.log | tail -50 > /tmp/hunt-code-build-tail.clean; wc -l /tmp/hunt-code-build-tail.clean /tmp/hunt-code-test-tail.clean; sed -n '1,80p' /tmp/hunt-code-test-tail.clean" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+      10 /tmp/hunt-code-build-tail.clean
+      50 /tmp/hunt-code-test-tail.clean
+      60 total
+
+thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
+
+---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
+  21   18 |   <text xml:space="preserve" class="container fg">
+  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
+       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
+  23   20 | </tspan>
+  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
+       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
+  25   22 | </tspan>
+  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
+       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
+  27   24 | </tspan>
+  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
+       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+## Build: PASS
+## Tests: FAIL
+
+## Command Results
+
+`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
+
+Allowed files:
+
+```text
+Cargo.lock
+crates/ruff_index/src/slice.rs
+crates/ty_python_semantic/Cargo.toml
+crates/ty_python_semantic/tests/mdtest.rs
+crates/ty_static/src/env_vars.rs
+crates/ty_test/Cargo.toml
+crates/ty_test/src/lib.rs
+crates/ty_test/src/matcher.rs
+crates/ty_test/src/parser.rs
+crates/ty_test/src/pragma_comments.rs
+```
+
+`cargo build` exit code: 0
+
+Tail:
+
+```text
+warning: unused import: `ruff_db::parsed::parsed_module`
+  --> crates/ty_test/src/lib.rs:14:5
+   |
+14 | use ruff_db::parsed::parsed_module;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+```
+
+`cargo test --workspace` exit code: 101
+
+Tail 50 lines:
+
+```text
+
+thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
+
+---- expected: tests/../examples/multislice.svg
++++ actual:   stdout
+  21   18 |   <text xml:space="preserve" class="container fg">
+  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
+       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
+  23   20 | </tspan>
+  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
+       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
+  25   22 | </tspan>
+  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
+       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
+  27   24 | </tspan>
+  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
+       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
+  29   26 | </tspan>
+  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
+       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
+  31   28 | </tspan>
+  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
+       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
+  33   30 | </tspan>
+  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
+       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
+  35   32 | </tspan>
+  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
+       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
+  37   34 | </tspan>
+  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
+       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
+  39   36 | </tspan>
+  40   37 |     <tspan x="10px" y="190px">
+  41   38 | </tspan>
+  42   39 |   </text>
+
+Update with SNAPSHOTS=overwrite
+
+
+
+failures:
+    expected_type
+    footer
+    format
+    multislice
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
+
+error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
+```
+
+## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
+**Severity**: blocker
+**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
+**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
+**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
+
+## Finding F2 — Accepted C1 cleanup was not applied
+**Severity**: warning
+**File**: crates/ty_test/src/pragma_comments.rs:277
+**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
+
+```rust
+        let (keyword, body) = comment_body.split_once(':')?;
+        let keyword = keyword.trim();
+
+        let keyword = keyword.trim();
+```
+
+**Fix**: Delete the second `let keyword = keyword.trim();` binding.
+
+## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
+**Severity**: warning
+**File**: crates/ty_test/src/matcher.rs:321
+**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
+
+```rust
+    /// Check a slice of [`Diagnostic`]s against a slice of
+    /// [`UnparsedAssertion`]s.
+    ///
+    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
+    /// assertions.
+    fn match_line<'a, 'b>(
+        &self,
+        diagnostics: &'a [&'a Diagnostic],
+        pragmas: &LinePragmaComments,
+    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
+    where
+        'b: 'a,
+```
+
+**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
+
+## Finding F4 — Accepted C3 override-hook removal was not applied
+**Severity**: warning
+**File**: crates/ty_test/src/lib.rs:808
+**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
+
+```rust
+fn is_update_inline_snapshots_enabled() -> bool {
+    #[cfg(test)]
+    if let Some(is_enabled) = snapshot_update_mode_override() {
+        return is_enabled;
+    }
+
+    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
+}
+
+#[cfg(test)]
+fn snapshot_update_mode_override() -> Option<bool> {
+    None
+}
+```
+
+**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+## Build: PASS
+## Tests: FAIL
+
+## Command Results
+
+`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
+
+Allowed files:
+
+```text
+Cargo.lock
+crates/ruff_index/src/slice.rs
+crates/ty_python_semantic/Cargo.toml
+crates/ty_python_semantic/tests/mdtest.rs
+crates/ty_static/src/env_vars.rs
+crates/ty_test/Cargo.toml
+crates/ty_test/src/lib.rs
+crates/ty_test/src/matcher.rs
+crates/ty_test/src/parser.rs
+crates/ty_test/src/pragma_comments.rs
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+file update
+M /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+apply_patch(auto_approved=true) exited 0 in 14ms:
+Success. Updated the following files:
+M /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+exec
+/bin/zsh -lc "sed -n '36,48p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+```
+
+`cargo test --workspace` exit code: 101
+
+Tail 50 lines:
+
+```text
+
+thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
+
+---- expected: tests/../examples/multislice.svg
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+exec
+/bin/zsh -lc "sed -n '48,56p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+---- expected: tests/../examples/multislice.svg
++++ actual:   stdout
+  21   18 |   <text xml:space="preserve" class="container fg">
+  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
+       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
+  23   20 | </tspan>
+  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
+       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
+  25   22 | </tspan>
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..066f0302216b3a58b83ed2dd6f8c3ce4ff31e38b
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+file update
+M /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -48,3 +48,3 @@
+ ---- expected: tests/../examples/multislice.svg
+-+++ actual:   stdout
++++++ actual:   stdout
+   21   18 |   <text xml:space="preserve" class="container fg">
+apply_patch(auto_approved=true) exited 0 in 14ms:
+Success. Updated the following files:
+M /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..d34c50b0f8692ab6c09a6a175fefb93a5d0329e4
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
++++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..d34c50b0f8692ab6c09a6a175fefb93a5d0329e4
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
++++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+exec
+/bin/zsh -lc "sed -n '48,52p' /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24557 succeeded in 0ms:
+---- expected: tests/../examples/multislice.svg
+++++ actual:   stdout
+  21   18 |   <text xml:space="preserve" class="container fg">
+  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
+       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..d34c50b0f8692ab6c09a6a175fefb93a5d0329e4
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
++++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+codex
+Completed the adversarial review and wrote the findings to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md).
+
+Results:
+- `cargo build`: PASS, exit code 0, with an unused import warning in `crates/ty_test/src/lib.rs`.
+- `cargo test --workspace`: FAIL, exit code 101. This is blocker F1.
+- Also recorded three warning findings for accepted sharpened-spec claims that were not applied: C1, C2/C5, and C3.
+
+I did not edit source files.
+file update:
+diff --git a/samples/v2/ruff-24557/gates/hunt-code-round-1.md b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..d34c50b0f8692ab6c09a6a175fefb93a5d0329e4
+--- /dev/null
++++ b/samples/v2/ruff-24557/gates/hunt-code-round-1.md
+@@ -0,0 +1,160 @@
++## Build: PASS
++## Tests: FAIL
++
++## Command Results
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/inputs/allowed-files.txt` exit code: 0
++
++Allowed files:
++
++```text
++Cargo.lock
++crates/ruff_index/src/slice.rs
++crates/ty_python_semantic/Cargo.toml
++crates/ty_python_semantic/tests/mdtest.rs
++crates/ty_static/src/env_vars.rs
++crates/ty_test/Cargo.toml
++crates/ty_test/src/lib.rs
++crates/ty_test/src/matcher.rs
++crates/ty_test/src/parser.rs
++crates/ty_test/src/pragma_comments.rs
++```
++
++`cargo build` exit code: 0
++
++Tail:
++
++```text
++warning: unused import: `ruff_db::parsed::parsed_module`
++  --> crates/ty_test/src/lib.rs:14:5
++   |
++14 | use ruff_db::parsed::parsed_module;
++   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++   |
++   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
++
++warning: `ty_test` (lib) generated 1 warning (run `cargo fix --lib -p ty_test` to apply 1 suggestion)
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
++```
++
++`cargo test --workspace` exit code: 101
++
++Tail 50 lines:
++
++```text
++
++thread 'multislice' (15657387) panicked at crates/ruff_annotate_snippets/tests/examples.rs:26:5:
++
++---- expected: tests/../examples/multislice.svg
++++++ actual:   stdout
++  21   18 |   <text xml:space="preserve" class="container fg">
++  22      -     <tspan x="10px" y="28px"><tspan class="fg-bright-red bold">error</tspan><tspan>: </tspan><tspan class="bold">mismatched types</tspan>
++       19 +     <tspan x="10px" y="28px"><tspan>error: mismatched types</tspan>
++  23   20 | </tspan>
++  24      -     <tspan x="10px" y="46px"><tspan>   </tspan><tspan class="fg-bright-blue bold">--&gt;</tspan><tspan> src/format.rs</tspan>
++       21 +     <tspan x="10px" y="46px"><tspan>   --&gt; src/format.rs</tspan>
++  25   22 | </tspan>
++  26      -     <tspan x="10px" y="64px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       23 +     <tspan x="10px" y="64px"><tspan>    |</tspan>
++  27   24 | </tspan>
++  28      -     <tspan x="10px" y="82px"><tspan class="fg-bright-blue bold"> 51 |</tspan><tspan> Foo</tspan>
++       25 +     <tspan x="10px" y="82px"><tspan> 51 | Foo</tspan>
++  29   26 | </tspan>
++  30      -     <tspan x="10px" y="100px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       27 +     <tspan x="10px" y="100px"><tspan>    |</tspan>
++  31   28 | </tspan>
++  32      -     <tspan x="10px" y="118px"><tspan>   </tspan><tspan class="fg-bright-blue bold">:::</tspan><tspan> src/display.rs</tspan>
++       29 +     <tspan x="10px" y="118px"><tspan>   ::: src/display.rs</tspan>
++  33   30 | </tspan>
++  34      -     <tspan x="10px" y="136px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       31 +     <tspan x="10px" y="136px"><tspan>    |</tspan>
++  35   32 | </tspan>
++  36      -     <tspan x="10px" y="154px"><tspan class="fg-bright-blue bold">129 |</tspan><tspan> Faa</tspan>
++       33 +     <tspan x="10px" y="154px"><tspan>129 | Faa</tspan>
++  37   34 | </tspan>
++  38      -     <tspan x="10px" y="172px"><tspan>    </tspan><tspan class="fg-bright-blue bold">|</tspan>
++       35 +     <tspan x="10px" y="172px"><tspan>    |</tspan>
++  39   36 | </tspan>
++  40   37 |     <tspan x="10px" y="190px">
++  41   38 | </tspan>
++  42   39 |   </text>
++
++Update with SNAPSHOTS=overwrite
++
++
++
++failures:
++    expected_type
++    footer
++    format
++    multislice
++
++test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.77s
++
++error: test failed, to rerun pass `-p ruff_annotate_snippets --test examples`
++```
++
++## Finding F1 — Workspace tests fail in ruff_annotate_snippets examples
++**Severity**: blocker
++**File**: crates/ruff_annotate_snippets/tests/examples.rs:26
++**What**: The required `cargo test --workspace` command exits 101. The tail shows four failed snapshot/example tests: `expected_type`, `footer`, `format`, and `multislice`, with SVG output missing the expected styled `tspan` classes.
++**Fix**: Restore the expected annotate-snippets SVG rendering behavior or update the checked-in SVG examples if the rendering change is intentional.
++
++## Finding F2 — Accepted C1 cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/pragma_comments.rs:277
++**What**: The sharpened spec accepted C1, requiring removal of the second consecutive `keyword.trim()` binding in `UnparsedAssertion::from_comment`, but the current file still has both trims:
++
++```rust
++        let (keyword, body) = comment_body.split_once(':')?;
++        let keyword = keyword.trim();
++
++        let keyword = keyword.trim();
++```
++
++**Fix**: Delete the second `let keyword = keyword.trim();` binding.
++
++## Finding F3 — Accepted C2/C5 matcher cleanup was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/matcher.rs:321
++**What**: The sharpened spec accepted C2 and C5, requiring `Matcher::match_line` to drop the unused `'b` lifetime and refresh the stale doc comment. The current file still documents the old assertion-slice API and still declares `'b` plus the inert `where 'b: 'a` clause:
++
++```rust
++    /// Check a slice of [`Diagnostic`]s against a slice of
++    /// [`UnparsedAssertion`]s.
++    ///
++    /// Return vector of [`Unmatched`] for any unmatched diagnostics or
++    /// assertions.
++    fn match_line<'a, 'b>(
++        &self,
++        diagnostics: &'a [&'a Diagnostic],
++        pragmas: &LinePragmaComments,
++    ) -> Result<SmallVec<[Diagnostic; 2]>, Vec<Failure>>
++    where
++        'b: 'a,
++```
++
++**Fix**: Update the doc comment to describe `LinePragmaComments` and the returned inline snapshot diagnostics, and change the signature to use only the required diagnostic lifetime.
++
++## Finding F4 — Accepted C3 override-hook removal was not applied
++**Severity**: warning
++**File**: crates/ty_test/src/lib.rs:808
++**What**: The sharpened spec accepted C3, requiring removal of the inert `#[cfg(test)]` snapshot update override hook. The current file still calls `snapshot_update_mode_override`, and the function still exists and always returns `None`:
++
++```rust
++fn is_update_inline_snapshots_enabled() -> bool {
++    #[cfg(test)]
++    if let Some(is_enabled) = snapshot_update_mode_override() {
++        return is_enabled;
++    }
++
++    std::env::var_os(MDTEST_UPDATE_SNAPSHOTS).is_some()
++}
++
++#[cfg(test)]
++fn snapshot_update_mode_override() -> Option<bool> {
++    None
++}
++```
++
++**Fix**: Remove the `#[cfg(test)]` branch and delete `snapshot_update_mode_override`.
+
+tokens used
+67,583
+Completed the adversarial review and wrote the findings to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/ruff-24557/gates/hunt-code-round-1.md).
+
+Results:
+- `cargo build`: PASS, exit code 0, with an unused import warning in `crates/ty_test/src/lib.rs`.
+- `cargo test --workspace`: FAIL, exit code 101. This is blocker F1.
+- Also recorded three warning findings for accepted sharpened-spec claims that were not applied: C1, C2/C5, and C3.
+
+I did not edit source files.

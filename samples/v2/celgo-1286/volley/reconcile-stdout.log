@@ -1,0 +1,310 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/1286
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c2f-aaf1-7e90-96e5-aa2a82f69e7d
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+## Finding F1 — C1 centralizes the wrong proto field-name rule
+**Severity**: blocker
+**Claim**: C1
+**What**: The claim tells the implementer to centralize a `field.TextName()` / `field.JSONName()` conditional and use it from both `fieldToVariable` and `ContextProtoVars`. That changes `fieldToVariable`'s non-JSON behavior from `string(field.Name())` to `field.TextName()`. In this codebase, proto field lookup is indexed by descriptor `Name()`, not text-format name. The two differ for proto2 group fields, so the claim would create declarations keyed by `NestedGroup` while the registry/type model and existing tests expect `nestedgroup`. It also leaves `ContextProtoVars` looking up the registry field by `TextName()`, which cannot find a group field indexed by `Name()`.
+**Evidence**: `cel/options.go:783` currently declares context variables with `string(field.Name())` unless JSON names are enabled, while `cel/options.go:869` uses `field.TextName()` for activation names. `common/types/pb/type.go:52` indexes field descriptions by `fd.Name()`, and `common/types/pb/type.go:346` defines that as `string(fd.desc.Name())`. `common/types/pb/type_test.go:97` asserts that the proto2 group field is found as `nestedgroup`. The protobuf API documents `TextName()` as different for groups at `vendor/google.golang.org/protobuf/reflect/protoreflect/type.go:305`.
+**Fix**: Narrow C1 so the helper returns `string(field.Name())` in proto-name mode and `field.JSONName()` in JSON-name mode, and use that same helper in `ContextProtoVars` before `FindStructFieldType` and when populating `vars`.
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Centralize context proto field-name selection
+**File**: cel/options.go:783
+**Change**: Add a small unexported helper near `fieldToVariable`, for example `protoFieldName(field protoreflect.FieldDescriptor, jsonFieldNames bool) string`, and use it in both `fieldToVariable` and `ContextProtoVars` instead of repeating the `field.TextName()` / `field.JSONName()` conditional.
+**Goal link**: This clarifies the goal aspect that context proto declarations and context proto activations must choose the same JSON-vs-proto field-name mode.
+**Justification**: Keeping the name-selection rule in one local helper removes duplicated conditional logic while preserving the existing proto-name default and JSON-name behavior under `JSONFieldNames(true)`.
+
+### C2 — Make registry JSONFieldNames option a direct delegation
+**File**: common/types/provider.go:106
+**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
+**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
+**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
+
+### C3 — Use idiomatic inline error handling for registry reconfiguration
+**File**: cel/env.go:857
+**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
+**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
+**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
+
+exec
+/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley' in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+total 232
+-rw-r--r--@ 1 junekim  staff  42864 Apr 17 09:04 hunt-spec-round-1-stdout.log
+-rw-r--r--@ 1 junekim  staff   1592 Apr 17 09:04 hunt-spec-round-1.md
+-rw-r--r--@ 1 junekim  staff   5984 Apr 17 09:04 reconcile-stdout.log
+-rw-r--r--@ 1 junekim  staff   4962 Apr 17 09:02 round-1-claims.md
+-rw-r--r--@ 1 junekim  staff  51389 Apr 17 09:02 round-1-codex-stdout.log
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md
+## Accepted Claims
+
+### C2 — Make registry JSONFieldNames option a direct delegation
+**File**: common/types/provider.go:106
+**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
+**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
+**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
+
+### C3 — Use idiomatic inline error handling for registry reconfiguration
+**File**: cel/env.go:857
+**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
+**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
+**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
+
+### C4 — Correct stale Program comment after json_name validation
+**File**: cel/program.go:227
+**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
+**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
+**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
+
+### C5 — Align JSONFieldNames EnvOption documentation with implementation
+**File**: cel/options.go:437
+**Change**: Rewrite the `JSONFieldNames` doc comment to state that the option enables protobuf field access by JSON names for environments backed by `*types.Registry`, rather than saying it creates a copy of the registry or infers support from AST extension metadata.
+**Goal link**: This clarifies the user-facing feature added by the goal: JSON-name access is controlled explicitly by `cel.JSONFieldNames(true)`.
+**Justification**: The current comment overstates implementation details and mixes checking/planning metadata with registry setup, so tightening it reduces confusion while leaving the API and behavior unchanged.
+
+## Rejected
+
+- Centralize context proto field-name selection as a shared `field.TextName()` / `field.JSONName()` helper for both `fieldToVariable` and `ContextProtoVars`: rejected due to hunt finding F1 (blocker), because the proposed proto-name branch would change `fieldToVariable` from `string(field.Name())` to `field.TextName()` and break proto2 group fields whose descriptor `Name()` and `TextName()` differ.
+- Fix `common/ast.SourceInfo.HasExtension` to scan every extension and compare versions semantically: this is a real behavior fix for multi-extension or major-version cases, not a behavior-preserving refactor, and it would need direct test coverage.
+- Move feature serialization in `Env.ToConfig` or feature deserialization in `configToEnvOptions` back to their original later positions: this would break the goal path where `DeclareContextProto` must see `JSONFieldNames(true)` before generating context field declarations.
+- Change `JSONFieldNames(true)` to accept arbitrary custom providers or wrapper types instead of requiring `*types.Registry`: this crosses a compatibility boundary and would change the observable error covered by `TestJSONFieldNamesInvalidProvider`.
+- Change `ContextProtoVars` to accept `cel.JSONFieldNames(true)` rather than `types.JSONFieldNames(true)`: this would be a public API shape change, not a bounded cleanup, and would mix environment options with registry options.
+- Restore or alias the old `types.ProtoTypes` name alongside `ProtoTypeDefs`: that is an API compatibility addition outside the narrow JSON-field-name expression cleanup and is not directly justified by the goal text.
+- Remove the `json_name` AST extension validation from `newProgram`: this would permit planning a JSON-name-checked AST in an environment without `JSONFieldNames(true)`, changing the observable safety behavior added for the goal.
+apply_patch(auto_approved=true) exited 0 in 26ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/celgo-1286/volley/round-2-claims.md b/samples/v2/celgo-1286/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7575f03402807ae77313d48e8b56b6a0f875446
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/round-2-claims.md
+@@ -0,0 +1,35 @@
++## Accepted Claims
++
++### C2 — Make registry JSONFieldNames option a direct delegation
++**File**: common/types/provider.go:106
++**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
++**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
++**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
++
++### C3 — Use idiomatic inline error handling for registry reconfiguration
++**File**: cel/env.go:857
++**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
++**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
++**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
++
++### C4 — Correct stale Program comment after json_name validation
++**File**: cel/program.go:227
++**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
++**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
++**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
++
++### C5 — Align JSONFieldNames EnvOption documentation with implementation
++**File**: cel/options.go:437
++**Change**: Rewrite the `JSONFieldNames` doc comment to state that the option enables protobuf field access by JSON names for environments backed by `*types.Registry`, rather than saying it creates a copy of the registry or infers support from AST extension metadata.
++**Goal link**: This clarifies the user-facing feature added by the goal: JSON-name access is controlled explicitly by `cel.JSONFieldNames(true)`.
++**Justification**: The current comment overstates implementation details and mixes checking/planning metadata with registry setup, so tightening it reduces confusion while leaving the API and behavior unchanged.
++
++## Rejected
++
++- Centralize context proto field-name selection as a shared `field.TextName()` / `field.JSONName()` helper for both `fieldToVariable` and `ContextProtoVars`: rejected due to hunt finding F1 (blocker), because the proposed proto-name branch would change `fieldToVariable` from `string(field.Name())` to `field.TextName()` and break proto2 group fields whose descriptor `Name()` and `TextName()` differ.
++- Fix `common/ast.SourceInfo.HasExtension` to scan every extension and compare versions semantically: this is a real behavior fix for multi-extension or major-version cases, not a behavior-preserving refactor, and it would need direct test coverage.
++- Move feature serialization in `Env.ToConfig` or feature deserialization in `configToEnvOptions` back to their original later positions: this would break the goal path where `DeclareContextProto` must see `JSONFieldNames(true)` before generating context field declarations.
++- Change `JSONFieldNames(true)` to accept arbitrary custom providers or wrapper types instead of requiring `*types.Registry`: this crosses a compatibility boundary and would change the observable error covered by `TestJSONFieldNamesInvalidProvider`.
++- Change `ContextProtoVars` to accept `cel.JSONFieldNames(true)` rather than `types.JSONFieldNames(true)`: this would be a public API shape change, not a bounded cleanup, and would mix environment options with registry options.
++- Restore or alias the old `types.ProtoTypes` name alongside `ProtoTypeDefs`: that is an API compatibility addition outside the narrow JSON-field-name expression cleanup and is not directly justified by the goal text.
++- Remove the `json_name` AST extension validation from `newProgram`: this would permit planning a JSON-name-checked AST in an environment without `JSONFieldNames(true)`, changing the observable safety behavior added for the goal.
+
+file update:
+diff --git a/samples/v2/celgo-1286/volley/round-2-claims.md b/samples/v2/celgo-1286/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7575f03402807ae77313d48e8b56b6a0f875446
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/round-2-claims.md
+@@ -0,0 +1,35 @@
++## Accepted Claims
++
++### C2 — Make registry JSONFieldNames option a direct delegation
++**File**: common/types/provider.go:106
++**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
++**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
++**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
++
++### C3 — Use idiomatic inline error handling for registry reconfiguration
++**File**: cel/env.go:857
++**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
++**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
++**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
++
++### C4 — Correct stale Program comment after json_name validation
++**File**: cel/program.go:227
++**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
++**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
++**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
++
++### C5 — Align JSONFieldNames EnvOption documentation with implementation
++**File**: cel/options.go:437
++**Change**: Rewrite the `JSONFieldNames` doc comment to state that the option enables protobuf field access by JSON names for environments backed by `*types.Registry`, rather than saying it creates a copy of the registry or infers support from AST extension metadata.
++**Goal link**: This clarifies the user-facing feature added by the goal: JSON-name access is controlled explicitly by `cel.JSONFieldNames(true)`.
++**Justification**: The current comment overstates implementation details and mixes checking/planning metadata with registry setup, so tightening it reduces confusion while leaving the API and behavior unchanged.
++
++## Rejected
++
++- Centralize context proto field-name selection as a shared `field.TextName()` / `field.JSONName()` helper for both `fieldToVariable` and `ContextProtoVars`: rejected due to hunt finding F1 (blocker), because the proposed proto-name branch would change `fieldToVariable` from `string(field.Name())` to `field.TextName()` and break proto2 group fields whose descriptor `Name()` and `TextName()` differ.
++- Fix `common/ast.SourceInfo.HasExtension` to scan every extension and compare versions semantically: this is a real behavior fix for multi-extension or major-version cases, not a behavior-preserving refactor, and it would need direct test coverage.
++- Move feature serialization in `Env.ToConfig` or feature deserialization in `configToEnvOptions` back to their original later positions: this would break the goal path where `DeclareContextProto` must see `JSONFieldNames(true)` before generating context field declarations.
++- Change `JSONFieldNames(true)` to accept arbitrary custom providers or wrapper types instead of requiring `*types.Registry`: this crosses a compatibility boundary and would change the observable error covered by `TestJSONFieldNamesInvalidProvider`.
++- Change `ContextProtoVars` to accept `cel.JSONFieldNames(true)` rather than `types.JSONFieldNames(true)`: this would be a public API shape change, not a bounded cleanup, and would mix environment options with registry options.
++- Restore or alias the old `types.ProtoTypes` name alongside `ProtoTypeDefs`: that is an API compatibility addition outside the narrow JSON-field-name expression cleanup and is not directly justified by the goal text.
++- Remove the `json_name` AST extension validation from `newProgram`: this would permit planning a JSON-name-checked AST in an environment without `JSONFieldNames(true)`, changing the observable safety behavior added for the goal.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1286 succeeded in 0ms:
+## Accepted Claims
+
+### C2 — Make registry JSONFieldNames option a direct delegation
+**File**: common/types/provider.go:106
+**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
+**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
+**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
+
+### C3 — Use idiomatic inline error handling for registry reconfiguration
+**File**: cel/env.go:857
+**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
+**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
+**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
+
+### C4 — Correct stale Program comment after json_name validation
+**File**: cel/program.go:227
+**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
+**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
+**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
+
+file update:
+diff --git a/samples/v2/celgo-1286/volley/round-2-claims.md b/samples/v2/celgo-1286/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7575f03402807ae77313d48e8b56b6a0f875446
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/round-2-claims.md
+@@ -0,0 +1,35 @@
++## Accepted Claims
++
++### C2 — Make registry JSONFieldNames option a direct delegation
++**File**: common/types/provider.go:106
++**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
++**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
++**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
++
++### C3 — Use idiomatic inline error handling for registry reconfiguration
++**File**: cel/env.go:857
++**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
++**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
++**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
++
++### C4 — Correct stale Program comment after json_name validation
++**File**: cel/program.go:227
++**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
++**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
++**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
++
++### C5 — Align JSONFieldNames EnvOption documentation with implementation
++**File**: cel/options.go:437
++**Change**: Rewrite the `JSONFieldNames` doc comment to state that the option enables protobuf field access by JSON names for environments backed by `*types.Registry`, rather than saying it creates a copy of the registry or infers support from AST extension metadata.
++**Goal link**: This clarifies the user-facing feature added by the goal: JSON-name access is controlled explicitly by `cel.JSONFieldNames(true)`.
++**Justification**: The current comment overstates implementation details and mixes checking/planning metadata with registry setup, so tightening it reduces confusion while leaving the API and behavior unchanged.
++
++## Rejected
++
++- Centralize context proto field-name selection as a shared `field.TextName()` / `field.JSONName()` helper for both `fieldToVariable` and `ContextProtoVars`: rejected due to hunt finding F1 (blocker), because the proposed proto-name branch would change `fieldToVariable` from `string(field.Name())` to `field.TextName()` and break proto2 group fields whose descriptor `Name()` and `TextName()` differ.
++- Fix `common/ast.SourceInfo.HasExtension` to scan every extension and compare versions semantically: this is a real behavior fix for multi-extension or major-version cases, not a behavior-preserving refactor, and it would need direct test coverage.
++- Move feature serialization in `Env.ToConfig` or feature deserialization in `configToEnvOptions` back to their original later positions: this would break the goal path where `DeclareContextProto` must see `JSONFieldNames(true)` before generating context field declarations.
++- Change `JSONFieldNames(true)` to accept arbitrary custom providers or wrapper types instead of requiring `*types.Registry`: this crosses a compatibility boundary and would change the observable error covered by `TestJSONFieldNamesInvalidProvider`.
++- Change `ContextProtoVars` to accept `cel.JSONFieldNames(true)` rather than `types.JSONFieldNames(true)`: this would be a public API shape change, not a bounded cleanup, and would mix environment options with registry options.
++- Restore or alias the old `types.ProtoTypes` name alongside `ProtoTypeDefs`: that is an API compatibility addition outside the narrow JSON-field-name expression cleanup and is not directly justified by the goal text.
++- Remove the `json_name` AST extension validation from `newProgram`: this would permit planning a JSON-name-checked AST in an environment without `JSONFieldNames(true)`, changing the observable safety behavior added for the goal.
+
+codex
+/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/celgo-1286/volley/round-2-claims.md b/samples/v2/celgo-1286/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7575f03402807ae77313d48e8b56b6a0f875446
+--- /dev/null
++++ b/samples/v2/celgo-1286/volley/round-2-claims.md
+@@ -0,0 +1,35 @@
++## Accepted Claims
++
++### C2 — Make registry JSONFieldNames option a direct delegation
++**File**: common/types/provider.go:106
++**Change**: Simplify the `JSONFieldNames(enabled bool) RegistryOption` closure to return `r, r.WithJSONFieldNames(enabled)` directly, without the temporary `err` variable.
++**Goal link**: This clarifies that the public registry option is only a thin adapter over the registry's JSON-field-name mode.
++**Justification**: Removing the local temporary reduces incidental boilerplate around the new JSON field-name registry configuration and keeps behavior identical.
++
++### C3 — Use idiomatic inline error handling for registry reconfiguration
++**File**: cel/env.go:857
++**Change**: Replace the separate `err := reg.WithJSONFieldNames(true)` assignment and following `if err != nil` with `if err := reg.WithJSONFieldNames(true); err != nil { return nil, err }`.
++**Goal link**: This clarifies that environment configuration has a single bounded side effect when `JSONFieldNames(true)` is enabled: reconfigure the proto registry for JSON names.
++**Justification**: The inline form matches surrounding Go idioms for one-shot error checks and removes unnecessary state without changing provider compatibility or error behavior.
++
++### C4 — Correct stale Program comment after json_name validation
++**File**: cel/program.go:227
++**Change**: Replace the comment `Configure the type provider, considering whether the AST indicates whether it supports JSON field names` with a comment that describes the following block as attribute-factory selection, or delete it if no extra explanation is needed.
++**Goal link**: This clarifies the goal aspect that `Program` validates the AST `json_name` extension against the environment feature, while the provider was already configured on the `Env`.
++**Justification**: The existing comment describes a provider reconfiguration that does not occur in this block, so removing or correcting it eliminates misleading accidental structure without affecting behavior.
++
++### C5 — Align JSONFieldNames EnvOption documentation with implementation
++**File**: cel/options.go:437
++**Change**: Rewrite the `JSONFieldNames` doc comment to state that the option enables protobuf field access by JSON names for environments backed by `*types.Registry`, rather than saying it creates a copy of the registry or infers support from AST extension metadata.
++**Goal link**: This clarifies the user-facing feature added by the goal: JSON-name access is controlled explicitly by `cel.JSONFieldNames(true)`.
++**Justification**: The current comment overstates implementation details and mixes checking/planning metadata with registry setup, so tightening it reduces confusion while leaving the API and behavior unchanged.
++
++## Rejected
++
++- Centralize context proto field-name selection as a shared `field.TextName()` / `field.JSONName()` helper for both `fieldToVariable` and `ContextProtoVars`: rejected due to hunt finding F1 (blocker), because the proposed proto-name branch would change `fieldToVariable` from `string(field.Name())` to `field.TextName()` and break proto2 group fields whose descriptor `Name()` and `TextName()` differ.
++- Fix `common/ast.SourceInfo.HasExtension` to scan every extension and compare versions semantically: this is a real behavior fix for multi-extension or major-version cases, not a behavior-preserving refactor, and it would need direct test coverage.
++- Move feature serialization in `Env.ToConfig` or feature deserialization in `configToEnvOptions` back to their original later positions: this would break the goal path where `DeclareContextProto` must see `JSONFieldNames(true)` before generating context field declarations.
++- Change `JSONFieldNames(true)` to accept arbitrary custom providers or wrapper types instead of requiring `*types.Registry`: this crosses a compatibility boundary and would change the observable error covered by `TestJSONFieldNamesInvalidProvider`.
++- Change `ContextProtoVars` to accept `cel.JSONFieldNames(true)` rather than `types.JSONFieldNames(true)`: this would be a public API shape change, not a bounded cleanup, and would mix environment options with registry options.
++- Restore or alias the old `types.ProtoTypes` name alongside `ProtoTypeDefs`: that is an API compatibility addition outside the narrow JSON-field-name expression cleanup and is not directly justified by the goal text.
++- Remove the `json_name` AST extension validation from `newProgram`: this would permit planning a JSON-name-checked AST in an environment without `JSONFieldNames(true)`, changing the observable safety behavior added for the goal.
+
+tokens used
+8,841
+/Users/junekim/Documents/refactor-equivalence/samples/v2/celgo-1286/volley/round-2-claims.md

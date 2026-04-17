@@ -1,0 +1,1566 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-24512
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9a96-3cac-7ad1-b134-eb830b786868
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and artifact first, then apply only the accepted claims within the allowed files. After edits I’ll write the required `IMPLEMENT_SUMMARY.md` and avoid running tests.
+exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24512exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+# PR #24512 — feat(ui): enable "TerminalBuffer" mode to solve flicker
+
+## PR body
+
+This PR introduces a new `TerminalBuffer` rendering mode to resolve UI flicker issues experienced in the traditional alternate buffer mode.
+
+### Key Changes
+*   **Terminal Buffer Mode:** Introduces `TerminalBuffer` for a smooth, flicker-free rendering experience by leveraging static rendering for history items.
+*   **Settings Updates:** Adds `renderProcess` and `terminalBuffer` configuration options to customize the rendering strategy.
+*   **Serializer Fixes:** Fixes the terminal serializer to correctly handle and preserve wide characters (multi-byte unicode) during rendering.
+*   **Mouse Mode Toggle:** Adds a new shortcut to toggle mouse mode explicitly, managing scrollback behaviour cleanly.
+*   **Debug Tooling:** Incorporates new commands for dumping frame data and recording sessions to aid UI development.
+
+### Motivation
+The standard Ink alternate buffer mode relies on full-screen rewrites which causes flicker, especially on slower terminal emulators. `TerminalBuffer` separates static content (chat history) from dynamic elements (input prompt, spinners), drastically reducing the screen area that needs redrawing.
+
+### Fixed Issues
+*   Fixes #14411
+*   Resolves general terminal rendering flicker in alternate buffer mode.
+
+ succeeded in 0ms:
+## Accepted Claims
+
+### C2 — Remove shadowed startup providers
+**File**: packages/cli/src/interactiveCli.tsx:106
+**Change**: In `AppWrapper`, remove the outer `MouseProvider` and `ScrollProvider` wrappers and their now-unused imports, leaving `TerminalProvider`, `OverflowProvider`, and the rest of the tree unchanged.
+**Goal link**: The goal adds an explicit mouse-mode toggle to manage scrollback behavior cleanly.
+**Justification**: `AppContainer` now owns the dynamic `MouseProvider` and `ScrollProvider` around `<App />`, so the startup-level providers are shadowed for the rendered UI and add an extra context layer that does not serve the new toggle behavior.
+
+### C3 — Drop the unused `isStatic` VirtualizedList prop
+**File**: packages/cli/src/ui/components/shared/VirtualizedList.tsx:34
+**Change**: Remove `isStatic` from `VirtualizedListProps`, remove it from props destructuring, and simplify the observer guards from `!isStatic && !fixedItemHeight` to `!fixedItemHeight`.
+**Goal link**: The goal's static rendering behavior is driven by TerminalBuffer item classification and fixed-height list optimization.
+**Justification**: No production call site passes `isStatic`, while `renderStatic`, `isStaticItem`, and `fixedItemHeight` carry the active behavior, so this deletes dead configuration surface without changing rendering.
+
+### C4 — Remove duplicate inherited ScrollableList prop declarations
+**File**: packages/cli/src/ui/components/shared/ScrollableList.tsx:31
+**Change**: In `ScrollableListProps`, keep only `hasFocus` as the prop specific to `ScrollableList`; remove redeclarations of props still inherited from `VirtualizedListProps`, such as `width`, `scrollbar`, `stableScrollback`, `copyModeEnabled`, and `fixedItemHeight`; and remove `isStatic` because C3 removes it from the underlying `VirtualizedListProps` surface entirely.
+**Goal link**: The goal adds TerminalBuffer options to the shared virtualized scrolling path.
+**Justification**: Keeping active options defined once in `VirtualizedListProps` makes the propagation from `ScrollableList` to `VirtualizedList` clearer, while deleting `isStatic` consistently from both prop surfaces removes dead configuration introduced by the first-pass refactor.
+**Hunt note**: Retained as narrowed for F2 because the claim no longer describes `isStatic` as inherited after C3; it explicitly removes `isStatic` from `ScrollableListProps` for the same dead-prop reason as C3.
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+diff --git a/packages/cli/src/config/config.ts b/packages/cli/src/config/config.ts
+index 37f1291475..c1ac3e57dd 100755
+--- a/packages/cli/src/config/config.ts
++++ b/packages/cli/src/config/config.ts
+@@ -1001,6 +1001,8 @@ export async function loadCliConfig(
+     trustedFolder,
+     useBackgroundColor: settings.ui?.useBackgroundColor,
+     useAlternateBuffer: settings.ui?.useAlternateBuffer,
++    useTerminalBuffer: settings.ui?.terminalBuffer,
++    useRenderProcess: settings.ui?.renderProcess,
+     useRipgrep: settings.tools?.useRipgrep,
+     enableInteractiveShell: settings.tools?.shell?.enableInteractiveShell,
+     shellBackgroundCompletionBehavior: settings.tools?.shell
+diff --git a/packages/cli/src/config/settingsSchema.ts b/packages/cli/src/config/settingsSchema.ts
+index 9b62c9d93f..01e248e797 100644
+--- a/packages/cli/src/config/settingsSchema.ts
++++ b/packages/cli/src/config/settingsSchema.ts
+@@ -743,6 +743,24 @@ const SETTINGS_SCHEMA = {
+           'Use an alternate screen buffer for the UI, preserving shell history.',
+         showInDialog: true,
+exec
+/bin/zsh -lc "sed -n '1,200p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+packages/cli/src/config/config.ts
+packages/cli/src/config/settingsSchema.ts
+packages/cli/src/interactiveCli.tsx
+packages/cli/src/test-utils/mockConfig.ts
+packages/cli/src/test-utils/render.tsx
+packages/cli/src/ui/AppContainer.tsx
+packages/cli/src/ui/components/Composer.tsx
+packages/cli/src/ui/components/InputPrompt.tsx
+packages/cli/src/ui/components/MainContent.tsx
+packages/cli/src/ui/components/StatusRow.tsx
+packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx
+packages/cli/src/ui/components/messages/ToolResultDisplay.tsx
+packages/cli/src/ui/components/shared/MaxSizedBox.tsx
+packages/cli/src/ui/components/shared/Scrollable.tsx
+packages/cli/src/ui/components/shared/ScrollableList.tsx
+packages/cli/src/ui/components/shared/VirtualizedList.tsx
+packages/cli/src/ui/contexts/UIStateContext.tsx
+packages/cli/src/ui/hooks/useAlternateBuffer.ts
+packages/cli/src/ui/hooks/useAnimatedScrollbar.ts
+packages/cli/src/ui/hooks/useBatchedScroll.ts
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-codex-24512
+SECURITY.md
+SHARPENED_SPEC.md
+FORGE_INPUT_DIFF.patch
+sea/sea-launch.cjs
+sea/sea-launch.test.js
+eslint.config.js
+GEMINI.md
+tsconfig.json
+packages/a2a-server/src/index.ts
+packages/a2a-server/src/commands/command-registry.ts
+packages/a2a-server/src/commands/memory.test.ts
+packages/a2a-server/src/commands/memory.ts
+packages/a2a-server/src/commands/extensions.test.ts
+packages/a2a-server/src/commands/command-registry.test.ts
+packages/a2a-server/src/commands/restore.test.ts
+packages/a2a-server/src/commands/types.ts
+packages/a2a-server/src/commands/extensions.ts
+packages/a2a-server/src/commands/init.test.ts
+packages/a2a-server/src/commands/init.ts
+codex
+The accepted scope is narrow: `interactiveCli.tsx`, `VirtualizedList.tsx`, and `ScrollableList.tsx`. I’m checking those files directly now so the changes match the current tree rather than blindly applying the larger artifact.
+exec
+/bin/zsh -lc "sed -n '1,190p' packages/cli/src/interactiveCli.tsx" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React from 'react';
+import { render } from 'ink';
+import { basename } from 'node:path';
+import { AppContainer } from './ui/AppContainer.js';
+import { ConsolePatcher } from './ui/utils/ConsolePatcher.js';
+import { registerCleanup, setupTtyCheck } from './utils/cleanup.js';
+import {
+  type StartupWarning,
+  type Config,
+  type ResumedSessionData,
+  coreEvents,
+  createWorkingStdio,
+  disableMouseEvents,
+  enableMouseEvents,
+exec
+/bin/zsh -lc "sed -n '1,110p' packages/cli/src/ui/components/shared/ScrollableList.tsx" in /tmp/refactor-eq-workdir/bb-codex-24512exec
+/bin/zsh -lc "sed -n '1,150p' packages/cli/src/ui/components/shared/VirtualizedList.tsx && sed -n '430,500p' packages/cli/src/ui/components/shared/VirtualizedList.tsx" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useCallback,
+  useMemo,
+  useLayoutEffect,
+} from 'react';
+import type React from 'react';
+import {
+  VirtualizedList,
+  type VirtualizedListRef,
+  type VirtualizedListProps,
+  SCROLL_TO_ITEM_END,
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  useState,
+  useRef,
+  useLayoutEffect,
+  forwardRef,
+  useImperativeHandle,
+  useMemo,
+  useCallback,
+  memo,
+} from 'react';
+import type React from 'react';
+import { theme } from '../../semantic-colors.js';
+import { useBatchedScroll } from '../../hooks/useBatchedScroll.js';
+
+exec
+/bin/zsh -lc 'rg "isStatic|MouseProvider|ScrollProvider" packages/cli/src/interactiveCli.tsx packages/cli/src/ui/components/shared/VirtualizedList.tsx packages/cli/src/ui/components/shared/ScrollableList.tsx' in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+packages/cli/src/ui/components/shared/ScrollableList.tsx:import { useScrollable } from '../../contexts/ScrollProvider.js';
+packages/cli/src/ui/components/shared/ScrollableList.tsx:  isStatic?: boolean;
+packages/cli/src/interactiveCli.tsx:import { MouseProvider } from './ui/contexts/MouseContext.js';
+packages/cli/src/interactiveCli.tsx:import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+packages/cli/src/interactiveCli.tsx:            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+packages/cli/src/interactiveCli.tsx:                <ScrollProvider>
+packages/cli/src/interactiveCli.tsx:                </ScrollProvider>
+packages/cli/src/interactiveCli.tsx:            </MouseProvider>
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:  isStatic?: boolean;
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:  isStaticItem?: (item: T, index: number) => boolean;
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:    isStatic,
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:    isStaticItem,
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:        if (!isStatic && !fixedItemHeight) {
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:          isStaticItem?.(item, i) === true;
+codex
+I’m making the source edits now: removing the shadow providers/imports, deleting the dead `isStatic` prop surface, tightening the observer guard, and replacing the draft comment with the invariant from the spec.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -33,3 +33,2 @@
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+@@ -43,3 +42,2 @@
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+@@ -105,21 +103,17 @@
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -32,8 +32,2 @@
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -33,3 +33,2 @@
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+@@ -126,3 +125,2 @@
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+@@ -448,3 +446,3 @@
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+@@ -455,3 +453,3 @@
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+@@ -469,8 +467,4 @@
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+apply_patch(auto_approved=true) exited 0 in 14ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+M /tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+codex
+The requested source edits are in place. I’m doing a constrained sanity check with `rg` and `git diff` only, then I’ll write the required implementation summary.
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24512exec
+/bin/zsh -lc 'rg "isStatic|MouseProvider|ScrollProvider" packages/cli/src/interactiveCli.tsx packages/cli/src/ui/components/shared/VirtualizedList.tsx packages/cli/src/ui/components/shared/ScrollableList.tsx' in /tmp/refactor-eq-workdir/bb-codex-24512exec
+/bin/zsh -lc 'git diff -- packages/cli/src/interactiveCli.tsx packages/cli/src/ui/components/shared/VirtualizedList.tsx packages/cli/src/ui/components/shared/ScrollableList.tsx' in /tmp/refactor-eq-workdir/bb-codex-24512 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ succeeded in 0ms:
+packages/cli/src/ui/components/shared/ScrollableList.tsx:import { useScrollable } from '../../contexts/ScrollProvider.js';
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:  isStaticItem?: (item: T, index: number) => boolean;
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:    isStaticItem,
+packages/cli/src/ui/components/shared/VirtualizedList.tsx:          isStaticItem?.(item, i) === true;
+ exited 129 in 0ms:
+warning: Limiting comparison with pathspecs is only supported if both paths are directories.
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+codex
+This worktree is not a Git repository, so `git diff/status` is unavailable here. The direct search confirms the removed `isStatic` prop is gone from the edited surfaces, with only the active `isStaticItem` API remaining.
+exec
+/bin/zsh -lc 'ls -l IMPLEMENT_SUMMARY.md 2>/dev/null || true' in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+file update
+A /tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+Applied claims: C2, C3, C4, C5
+
+Modified files:
+- packages/cli/src/interactiveCli.tsx
+- packages/cli/src/ui/components/shared/VirtualizedList.tsx
+- packages/cli/src/ui/components/shared/ScrollableList.tsx
+
+Summary:
+- C2: Removed the shadowed startup-level MouseProvider and ScrollProvider wrappers from AppWrapper, along with their unused imports.
+- C3: Removed the unused isStatic VirtualizedList prop and simplified observer guards to depend only on fixedItemHeight.
+- C4: Removed duplicate inherited ScrollableList prop declarations, leaving only hasFocus as the ScrollableList-specific prop.
+- C5: Replaced the draft readiness commentary above isReady with a concise viewport-measurement invariant.
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b243d6b2ed9b63cbc783c3eca64df51648c6b25
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,12 @@
++Applied claims: C2, C3, C4, C5
++
++Modified files:
++- packages/cli/src/interactiveCli.tsx
++- packages/cli/src/ui/components/shared/VirtualizedList.tsx
++- packages/cli/src/ui/components/shared/ScrollableList.tsx
++
++Summary:
++- C2: Removed the shadowed startup-level MouseProvider and ScrollProvider wrappers from AppWrapper, along with their unused imports.
++- C3: Removed the unused isStatic VirtualizedList prop and simplified observer guards to depend only on fixedItemHeight.
++- C4: Removed duplicate inherited ScrollableList prop declarations, leaving only hasFocus as the ScrollableList-specific prop.
++- C5: Replaced the draft readiness commentary above isReady with a concise viewport-measurement invariant.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b243d6b2ed9b63cbc783c3eca64df51648c6b25
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,12 @@
++Applied claims: C2, C3, C4, C5
++
++Modified files:
++- packages/cli/src/interactiveCli.tsx
++- packages/cli/src/ui/components/shared/VirtualizedList.tsx
++- packages/cli/src/ui/components/shared/ScrollableList.tsx
++
++Summary:
++- C2: Removed the shadowed startup-level MouseProvider and ScrollProvider wrappers from AppWrapper, along with their unused imports.
++- C3: Removed the unused isStatic VirtualizedList prop and simplified observer guards to depend only on fixedItemHeight.
++- C4: Removed duplicate inherited ScrollableList prop declarations, leaving only hasFocus as the ScrollableList-specific prop.
++- C5: Replaced the draft readiness commentary above isReady with a concise viewport-measurement invariant.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+exec
+/bin/zsh -lc "sed -n '130,260p' packages/cli/src/ui/components/shared/ScrollableList.tsx && sed -n '450,485p' packages/cli/src/ui/components/shared/VirtualizedList.tsx && sed -n '90,130p' packages/cli/src/interactiveCli.tsx && sed -n '1,80p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-24512 succeeded in 0ms:
+      }
+
+      const clampedTarget = Math.max(
+        0,
+        Math.min(maxScrollTop, effectiveTarget),
+      );
+
+      if (duration === 0) {
+        if (
+          targetScrollTop === SCROLL_TO_ITEM_END ||
+          targetScrollTop >= maxScrollTop
+        ) {
+          virtualizedListRef.current?.scrollTo(Number.MAX_SAFE_INTEGER);
+        } else {
+          virtualizedListRef.current?.scrollTo(Math.round(clampedTarget));
+        }
+        flashScrollbar();
+        return;
+      }
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b243d6b2ed9b63cbc783c3eca64df51648c6b25
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,12 @@
++Applied claims: C2, C3, C4, C5
++
++Modified files:
++- packages/cli/src/interactiveCli.tsx
++- packages/cli/src/ui/components/shared/VirtualizedList.tsx
++- packages/cli/src/ui/components/shared/ScrollableList.tsx
++
++Summary:
++- C2: Removed the shadowed startup-level MouseProvider and ScrollProvider wrappers from AppWrapper, along with their unused imports.
++- C3: Removed the unused isStatic VirtualizedList prop and simplified observer guards to depend only on fixedItemHeight.
++- C4: Removed duplicate inherited ScrollableList prop declarations, leaving only hasFocus as the ScrollableList-specific prop.
++- C5: Replaced the draft readiness commentary above isReady with a concise viewport-measurement invariant.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+codex
+Implemented the accepted claims C2, C3, C4, and C5.
+
+Modified:
+- [interactiveCli.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx)
+- [VirtualizedList.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx)
+- [ScrollableList.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx)
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md)
+
+I did not run tests, per the task instructions. The worktree is not a Git repository, so I could not use `git diff/status`; I verified the targeted removals with direct file reads and `rg`.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b243d6b2ed9b63cbc783c3eca64df51648c6b25
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,12 @@
++Applied claims: C2, C3, C4, C5
++
++Modified files:
++- packages/cli/src/interactiveCli.tsx
++- packages/cli/src/ui/components/shared/VirtualizedList.tsx
++- packages/cli/src/ui/components/shared/ScrollableList.tsx
++
++Summary:
++- C2: Removed the shadowed startup-level MouseProvider and ScrollProvider wrappers from AppWrapper, along with their unused imports.
++- C3: Removed the unused isStatic VirtualizedList prop and simplified observer guards to depend only on fixedItemHeight.
++- C4: Removed duplicate inherited ScrollableList prop declarations, leaving only hasFocus as the ScrollableList-specific prop.
++- C5: Replaced the draft readiness commentary above isReady with a concise viewport-measurement invariant.
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+index 418f58b193232149dcab8683fd1b14a0c2c06f3c..2b5d159fff2c447559923e4baa0bd14e14020ccc
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx
+@@ -31,7 +31,6 @@
+ import { checkForUpdates } from './ui/utils/updateCheck.js';
+ import { handleAutoUpdate } from './utils/handleAutoUpdate.js';
+ import { SettingsContext } from './ui/contexts/SettingsContext.js';
+-import { MouseProvider } from './ui/contexts/MouseContext.js';
+ import { StreamingState } from './ui/types.js';
+ import { computeTerminalTitle } from './utils/windowTitle.js';
+ 
+@@ -41,7 +40,6 @@
+ import { loadKeyMatchers } from './ui/key/keyMatchers.js';
+ import { KeypressProvider } from './ui/contexts/KeypressContext.js';
+ import { useKittyKeyboardProtocol } from './ui/hooks/useKittyKeyboardProtocol.js';
+-import { ScrollProvider } from './ui/contexts/ScrollProvider.js';
+ import { TerminalProvider } from './ui/contexts/TerminalContext.js';
+ import { OverflowProvider } from './ui/contexts/OverflowContext.js';
+ import { profiler } from './ui/components/DebugProfiler.js';
+@@ -103,25 +101,21 @@
+       <SettingsContext.Provider value={settings}>
+         <KeyMatchersProvider value={matchers}>
+           <KeypressProvider config={config}>
+-            <MouseProvider mouseEventsEnabled={mouseEventsEnabled}>
+-              <TerminalProvider>
+-                <ScrollProvider>
+-                  <OverflowProvider>
+-                    <SessionStatsProvider>
+-                      <VimModeProvider>
+-                        <AppContainer
+-                          config={config}
+-                          startupWarnings={startupWarnings}
+-                          version={version}
+-                          resumedSessionData={resumedSessionData}
+-                          initializationResult={initializationResult}
+-                        />
+-                      </VimModeProvider>
+-                    </SessionStatsProvider>
+-                  </OverflowProvider>
+-                </ScrollProvider>
+-              </TerminalProvider>
+-            </MouseProvider>
++            <TerminalProvider>
++              <OverflowProvider>
++                <SessionStatsProvider>
++                  <VimModeProvider>
++                    <AppContainer
++                      config={config}
++                      startupWarnings={startupWarnings}
++                      version={version}
++                      resumedSessionData={resumedSessionData}
++                      initializationResult={initializationResult}
++                    />
++                  </VimModeProvider>
++                </SessionStatsProvider>
++              </OverflowProvider>
++            </TerminalProvider>
+           </KeypressProvider>
+         </KeyMatchersProvider>
+       </SettingsContext.Provider>
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+index 326005726fd2781efec677578eb6bb35f4d62b0c..28ff2dd2b053b7f9833a0d0f6ededec9c600fb59
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx
+@@ -30,12 +30,6 @@
+ 
+ interface ScrollableListProps<T> extends VirtualizedListProps<T> {
+   hasFocus: boolean;
+-  width?: string | number;
+-  scrollbar?: boolean;
+-  stableScrollback?: boolean;
+-  copyModeEnabled?: boolean;
+-  isStatic?: boolean;
+-  fixedItemHeight?: boolean;
+ }
+ 
+ export type ScrollableListRef<T> = VirtualizedListRef<T>;
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+index e7b756b649e5f5dbacd0606e60a53c7642f1ae18..e128c9a9b31559a87657b11ef42a5c6ffd599deb
+--- a//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
++++ b//tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx
+@@ -31,7 +31,6 @@
+   initialScrollOffsetInIndex?: number;
+   scrollbarThumbColor?: string;
+   renderStatic?: boolean;
+-  isStatic?: boolean;
+   isStaticItem?: (item: T, index: number) => boolean;
+   width?: number | string;
+   overflowToBackbuffer?: boolean;
+@@ -124,7 +123,6 @@
+     initialScrollIndex,
+     initialScrollOffsetInIndex,
+     renderStatic,
+-    isStatic,
+     isStaticItem,
+     width,
+     overflowToBackbuffer,
+@@ -446,14 +444,14 @@
+         const key = keyExtractor(item, i);
+         // Always update the key mapping because React can reuse nodes at different indices/keys
+         nodeToKeyRef.current.set(node, key);
+-        if (!isStatic && !fixedItemHeight && !observedNodes.current.has(node)) {
++        if (!fixedItemHeight && !observedNodes.current.has(node)) {
+           itemsObserver.observe(node);
+         }
+       }
+     }
+     for (const node of observedNodes.current) {
+       if (!currentNodes.has(node)) {
+-        if (!isStatic && !fixedItemHeight) {
++        if (!fixedItemHeight) {
+           itemsObserver.unobserve(node);
+         }
+         nodeToKeyRef.current.delete(node);
+@@ -467,12 +465,8 @@
+     renderStatic || overflowToBackbuffer ? 0 : startIndex;
+   const renderRangeEnd = renderStatic ? data.length - 1 : endIndex;
+ 
+-  // Always evaluate shouldBeStatic, width, etc. if we have a known width from the prop.
+-  // If containerHeight or containerWidth is 0 we defer rendering unless a static render or defined width overrides.
+-  // Wait, if it's not static and no width we need to wait for measure.
+-  // BUT the initial render MUST render *something* with a width if width prop is provided to avoid layout shifts.
+-  // We MUST wait for containerHeight > 0 before rendering, especially if renderStatic is true.
+-  // If containerHeight is 0, we will misclassify items as isOutsideViewport and permanently print them to StaticRender!
++  // Defer rendering until height is known, except in tests or with numeric
++  // widths, to avoid classifying items as static before viewport measurement.
+   const isReady =
+     containerHeight > 0 ||
+     process.env['NODE_ENV'] === 'test' ||
+
+tokens used
+34,479
+Implemented the accepted claims C2, C3, C4, and C5.
+
+Modified:
+- [interactiveCli.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/interactiveCli.tsx)
+- [VirtualizedList.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/VirtualizedList.tsx)
+- [ScrollableList.tsx](/tmp/refactor-eq-workdir/bb-codex-24512/packages/cli/src/ui/components/shared/ScrollableList.tsx)
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24512/IMPLEMENT_SUMMARY.md)
+
+I did not run tests, per the task instructions. The worktree is not a Git repository, so I could not use `git diff/status`; I verified the targeted removals with direct file reads and `rg`.

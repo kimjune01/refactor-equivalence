@@ -1,0 +1,122 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-09 04:30:09
++++ /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-17 10:07:07
+@@ -56,7 +56,6 @@
+ 
+ type buildFlags struct {
+ 	tempDir             string
+-	execPath            string
+ 	execFile            string
+ 	dockerfileBuildPath string
+ 	archivePath         string
+@@ -87,7 +86,7 @@
+ 	Local proxy adding authentication is started. 
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+-		return flags.deployOnagentEngine()
++		return flags.deployOnAgentEngine()
+ 	},
+ }
+ 
+@@ -112,17 +111,17 @@
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
+-			f.source.origEntryPointPath = flags.source.entryPointPath
+-			absp, err := filepath.Abs(flags.source.entryPointPath)
++			f.source.origEntryPointPath = f.source.entryPointPath
++			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.source.entryPointPath, err)
+ 			}
+ 			f.source.entryPointPath = absp
+ 
+-			if flags.build.tempDir == "" {
+-				flags.build.tempDir = os.TempDir()
++			if f.build.tempDir == "" {
++				f.build.tempDir = os.TempDir()
+ 			}
+-			absp, err = filepath.Abs(flags.build.tempDir)
++			absp, err = filepath.Abs(f.build.tempDir)
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+@@ -136,14 +135,11 @@
+ 			dir, file := path.Split(f.source.entryPointPath)
+ 			f.source.srcBasePath = dir
+ 			f.source.entryPointPath = file
+-			if f.build.execPath == "" {
+-				exec, err := util.StripExtension(f.source.entryPointPath, ".go")
+-				if err != nil {
+-					return fmt.Errorf("cannot strip '.go' extension from entry point path '%v': %w", f.source.entryPointPath, err)
+-				}
+-				f.build.execFile = exec
+-				f.build.execPath = path.Join(f.build.tempDir, exec)
++			exec, err := util.StripExtension(f.source.entryPointPath, ".go")
++			if err != nil {
++				return fmt.Errorf("cannot strip '.go' extension from entry point path '%v': %w", f.source.entryPointPath, err)
+ 			}
++			f.build.execFile = exec
+ 			f.build.dockerfileBuildPath = path.Join(f.build.tempDir, "Dockerfile")
+ 			f.build.archivePath = path.Join(f.build.tempDir, "archive.tgz")
+ 
+@@ -163,24 +159,6 @@
+ 		})
+ }
+ 
+-// compileEntryPoint builds locally the server using flags and environment variables in order to be run in agentEngine containter
+-func (f *deployAgentEngineFlags) compileEntryPoint() error {
+-	return util.LogStartStop("Compiling server",
+-		func(p util.Printer) error {
+-			p("Using", f.source.entryPointPath, "as entry point")
+-			// for help on ldflags you can run go build -ldflags="--help" ./examples/quickstart/main.go
+-			//    -s    disable symbol table
+-			//    -w    disable DWARF generation
+-			//   using those flags reduces the size of an executable
+-			cmd := exec.Command("go", "build", "-ldflags", "-s -w", "-o", f.build.execPath, f.source.entryPointPath)
+-
+-			cmd.Dir = f.source.srcBasePath
+-			// build using staticallly linked libs, for linux/amd64
+-			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+-			return util.LogCommand(cmd, p)
+-		})
+-}
+-
+ // prepareDockerfile creates a temporary Dockerfile which will be executed by agentEngine
+ func (f *deployAgentEngineFlags) prepareDockerfile() error {
+ 	return util.LogStartStop("Preparing Dockerfile",
+@@ -197,17 +175,17 @@
+ FROM gcr.io/distroless/static-debian11
+ 
+ COPY --from=builder /app/` + f.build.execFile + `  /app/` + f.build.execFile + `
+-EXPOSE ` + strconv.Itoa(flags.agentEngine.serverPort) + `
++EXPOSE ` + strconv.Itoa(f.agentEngine.serverPort) + `
+ # Command to run the executable when the container starts
+-CMD ["/app/` + f.build.execFile + `", "web", "-port", "` + strconv.Itoa(flags.agentEngine.serverPort) + `"`)
++CMD ["/app/` + f.build.execFile + `", "web", "-port", "` + strconv.Itoa(f.agentEngine.serverPort) + `"`)
+ 
+-			if flags.agentEngine.api {
++			if f.agentEngine.api {
+ 				b.WriteString(`, "api", "-webui_address", "127.0.0.1:` + strconv.Itoa(f.proxy.port) + `"`)
+ 			}
+-			if flags.agentEngine.a2a {
+-				b.WriteString(`, "a2a", "--a2a_agent_url", "` + flags.agentEngine.a2aAgentCardURL + `"`)
++			if f.agentEngine.a2a {
++				b.WriteString(`, "a2a", "--a2a_agent_url", "` + f.agentEngine.a2aAgentCardURL + `"`)
+ 			}
+-			if flags.agentEngine.webui {
++			if f.agentEngine.webui {
+ 				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"]
+ 				`)
+ 			}
+@@ -330,8 +308,8 @@
+ 		})
+ }
+ 
+-// deployOnagentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+-func (f *deployAgentEngineFlags) deployOnagentEngine() error {
++// deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
++func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+ 	fmt.Println(flags)
+ 
+ 	err := f.computeFlags()

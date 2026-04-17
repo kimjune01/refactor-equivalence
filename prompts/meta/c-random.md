@@ -1,3 +1,15 @@
+# C_random generator spec — DROPPED IN v2
+
+**Status:** dropped from v2. Retained here for historical reference; see `PREREG_V2.md` §Snapshot Definitions > `C_random` — DROPPED.
+
+Reason for drop (v2 round 6, codex hostile-review concern #1): the proposed `C_random` transformations (local renames, redundant parentheses, statement reordering) don't approximate what the LLM actually does (multi-file structural reshaping). Even a clean `C_random` measures noise, not the alternative-intervention shape. The intended inference — "metrics reward simplification specifically vs. any change" — isn't supported by this control.
+
+Trade-off accepted in v2: P1 measures direction-of-change only, not simplification-specificity.
+
+---
+
+(original v1 text preserved below for historical trail)
+
 # C_random generator spec
 
 Semantics-preserving but non-simplifying transformation of `C_test`. Purpose: control for "metrics reward any change" vs. "metrics reward simplification specifically."

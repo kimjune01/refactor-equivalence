@@ -1,0 +1,416 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24763
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9aa9-da57-77e0-a030-970e82438ce6
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/round-1-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/hunt-spec-round-1.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/round-2-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the existing round-1 claims and the hunt findings, then write only the reconciled Markdown file at the requested path.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24763 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use a read-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
+**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
+**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
+
+### C2 — Use a write-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
+**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
+**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
+
+### C3 — Cleanup grep command probing with one finally block
+**File**: packages/core/src/tools/grep.ts:351
+**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
+**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/hunt-spec-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24763 succeeded in 0ms:
+## Finding F1 — Invocation cleanup starts after synchronous failure points
+**Severity**: warning
+**Claim**: C4
+**What**: The claim says to wrap only the existing child-process wait promise in `try...finally`. In `DiscoveredToolInvocation.execute`, the sandbox cleanup function is assigned before `spawn`, but `spawn`, `child.stdin.write(...)`, and `child.stdin.end()` all occur before the wait promise. If any of those synchronous steps throws, the claimed `finally` will never run, leaving the prepared sandbox cleanup uncalled despite the goal's requirement to cover synchronous throws.
+**Evidence**: `packages/core/src/tools/tool-registry.ts:72` assigns `cleanupFunc`; `packages/core/src/tools/tool-registry.ts:84` spawns the child; `packages/core/src/tools/tool-registry.ts:87` writes stdin; `packages/core/src/tools/tool-registry.ts:96` is where the wait promise begins.
+**Fix**: Clarify/narrow C4 so the `try...finally` starts immediately after sandbox preparation and includes `spawn`, stdin writes, listener registration, and the wait promise; keep cleanup behavior otherwise unchanged.
+
+## Finding F2 — Streaming cleanup does not cover pre-teardown synchronous failures
+**Severity**: warning
+**Claim**: C7
+**What**: The claim places cleanup in an inner `try...finally` inside the generator's existing teardown block, around only the process-exit wait. That misses synchronous failures after `prepareCommand` but before the generator reaches its `try`/`finally`, such as a synchronous `spawn` failure or a failure while creating the readline interface. Those are exactly the kinds of paths the goal says should be covered by robust cleanup during synchronous throws.
+**Evidence**: `packages/core/src/utils/shell-utils.ts:900` prepares the sandboxed command; `packages/core/src/utils/shell-utils.ts:909` calls `spawn`; `packages/core/src/utils/shell-utils.ts:916` creates the readline interface; the existing generator `try` does not begin until `packages/core/src/utils/shell-utils.ts:949`, and C7 only wraps the wait at `packages/core/src/utils/shell-utils.ts:971`.
+**Fix**: Clarify C7 to add an outer cleanup guard that covers all work after `prepareCommand`, including `spawn` and readline setup, while still preserving the existing generator teardown behavior and avoiding duplicate cleanup calls.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+## Accepted Claims
+
+### C1 — Use a read-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
+**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
+**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
+
+### C2 — Use a write-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
+**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
+**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
+
+### C3 — Cleanup grep command probing with one finally block
+**File**: packages/core/src/tools/grep.ts:351
+**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
+**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
+
+### C4 — Use try/finally for discovered tool invocation cleanup
+**File**: packages/core/src/tools/tool-registry.ts:96
+**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
+**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
+**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
+**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
+
+### C5 — Use try/finally for tool discovery cleanup
+**File**: packages/core/src/tools/tool-registry.ts:397
+**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
+**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
+**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
+
+### C6 — Cleanup spawnAsync through an outer finally
+**File**: packages/core/src/utils/shell-utils.ts:850
+**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
+**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
+
+### C7 — Cleanup execStreaming after the full streaming lifecycle settles
+**File**: packages/core/src/utils/shell-utils.ts:971
+**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
+**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
+**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
+**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
+
+## Rejected
+
+- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
+- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
+- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
+- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.
+apply_patch(auto_approved=true) exited 0 in 25ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+file update:
+diff --git a/samples/v2/gemini-cli-24763/volley/round-2-claims.md b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..abc7637d49cde20889343993fef4426833505eae
+--- /dev/null
++++ b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+@@ -0,0 +1,52 @@
++## Accepted Claims
++
++### C1 — Use a read-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
++**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
++**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
++
++### C2 — Use a write-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
++**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
++**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
++
++### C3 — Cleanup grep command probing with one finally block
++**File**: packages/core/src/tools/grep.ts:351
++**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
++**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
++
++### C4 — Use try/finally for discovered tool invocation cleanup
++**File**: packages/core/src/tools/tool-registry.ts:96
++**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
++**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
++**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
++**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
++
++### C5 — Use try/finally for tool discovery cleanup
++**File**: packages/core/src/tools/tool-registry.ts:397
++**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
++**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
++**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
++
++### C6 — Cleanup spawnAsync through an outer finally
++**File**: packages/core/src/utils/shell-utils.ts:850
++**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
++**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
++
++### C7 — Cleanup execStreaming after the full streaming lifecycle settles
++**File**: packages/core/src/utils/shell-utils.ts:971
++**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
++**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
++**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
++**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
++
++## Rejected
++
++- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
++- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
++- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
++- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24763/volley/round-2-claims.md b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..abc7637d49cde20889343993fef4426833505eae
+--- /dev/null
++++ b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+@@ -0,0 +1,52 @@
++## Accepted Claims
++
++### C1 — Use a read-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
++**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
++**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
++
++### C2 — Use a write-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
++**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
++**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
++
++### C3 — Cleanup grep command probing with one finally block
++**File**: packages/core/src/tools/grep.ts:351
++**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
++**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
++
++### C4 — Use try/finally for discovered tool invocation cleanup
++**File**: packages/core/src/tools/tool-registry.ts:96
++**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
++**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
++**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
++**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
++
++### C5 — Use try/finally for tool discovery cleanup
++**File**: packages/core/src/tools/tool-registry.ts:397
++**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
++**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
++**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
++
++### C6 — Cleanup spawnAsync through an outer finally
++**File**: packages/core/src/utils/shell-utils.ts:850
++**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
++**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
++
++### C7 — Cleanup execStreaming after the full streaming lifecycle settles
++**File**: packages/core/src/utils/shell-utils.ts:971
++**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
++**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
++**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
++**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
++
++## Rejected
++
++- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
++- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
++- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
++- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.
+
+codex
+## Accepted Claims
+
+### C1 — Use a read-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
+**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
+**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
+
+### C2 — Use a write-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
+**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
+**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
+
+### C3 — Cleanup grep command probing with one finally block
+**File**: packages/core/src/tools/grep.ts:351
+**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
+**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
+
+### C4 — Use try/finally for discovered tool invocation cleanup
+**File**: packages/core/src/tools/tool-registry.ts:96
+**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
+**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
+**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
+**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
+
+### C5 — Use try/finally for tool discovery cleanup
+**File**: packages/core/src/tools/tool-registry.ts:397
+**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
+**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
+**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
+
+### C6 — Cleanup spawnAsync through an outer finally
+**File**: packages/core/src/utils/shell-utils.ts:850
+**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
+**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
+
+### C7 — Cleanup execStreaming after the full streaming lifecycle settles
+**File**: packages/core/src/utils/shell-utils.ts:971
+**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
+**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
+**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
+**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
+
+## Rejected
+
+- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
+- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
+- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
+- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.
+file update:
+diff --git a/samples/v2/gemini-cli-24763/volley/round-2-claims.md b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..abc7637d49cde20889343993fef4426833505eae
+--- /dev/null
++++ b/samples/v2/gemini-cli-24763/volley/round-2-claims.md
+@@ -0,0 +1,52 @@
++## Accepted Claims
++
++### C1 — Use a read-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
++**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
++**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
++
++### C2 — Use a write-file lifecycle finally for sandbox cleanup
++**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
++**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
++**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
++**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
++
++### C3 — Cleanup grep command probing with one finally block
++**File**: packages/core/src/tools/grep.ts:351
++**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
++**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
++
++### C4 — Use try/finally for discovered tool invocation cleanup
++**File**: packages/core/src/tools/tool-registry.ts:96
++**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
++**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
++**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
++**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
++
++### C5 — Use try/finally for tool discovery cleanup
++**File**: packages/core/src/tools/tool-registry.ts:397
++**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
++**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
++**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
++
++### C6 — Cleanup spawnAsync through an outer finally
++**File**: packages/core/src/utils/shell-utils.ts:850
++**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
++**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
++**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
++
++### C7 — Cleanup execStreaming after the full streaming lifecycle settles
++**File**: packages/core/src/utils/shell-utils.ts:971
++**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
++**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
++**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
++**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
++
++## Rejected
++
++- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
++- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
++- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
++- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.
+
+tokens used
+8,039
+## Accepted Claims
+
+### C1 — Use a read-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
+**Change**: In `SandboxedFileSystemService.readTextFile`, wrap the spawned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal calls for robust sandbox cleanup in process execution paths, especially by using `try...finally`.
+**Justification**: A single `finally` attached to the read operation expresses that cleanup belongs to the sandboxed process lifecycle rather than to individual event branches, while preserving the existing success and failure results.
+
+### C2 — Use a write-file lifecycle finally for sandbox cleanup
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:129
+**Change**: In `SandboxedFileSystemService.writeTextFile`, wrap the spawned child-process promise in `try { await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the duplicated `prepared.cleanup?.()` calls from the `close` and `error` handlers.
+**Goal link**: The goal specifically names the sandboxed `write_file` path as needing guaranteed cleanup.
+**Justification**: Moving cleanup to the write operation's `finally` block removes branch-level duplication and makes the cleanup guarantee independent of which child-process terminal event fires.
+
+### C3 — Cleanup grep command probing with one finally block
+**File**: packages/core/src/tools/grep.ts:351
+**Change**: In `GrepToolInvocation.isCommandAvailable`, wrap the `await new Promise((resolve) => { ... })` process probe in `try...finally`, call `cleanup?.()` from the `finally`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal identifies `GrepTool` success and error paths as cleanup-sensitive sandbox process execution.
+**Justification**: A single cleanup point after the availability probe completes keeps the boolean outcomes unchanged while making sandbox cleanup an invariant of the probe rather than duplicated event-handler work.
+
+### C4 — Use try/finally for discovered tool invocation cleanup
+**File**: packages/core/src/tools/tool-registry.ts:96
+**Change**: In `DiscoveredToolInvocation.execute`, start a `try...finally` immediately after sandbox preparation and after `cleanupFunc` is assigned, covering `spawn`, stdin writes, listener registration, and the existing child-process wait promise; call `cleanupFunc?.()` in the `finally`, remove the cleanup call from `onClose`, and keep `onError` limited to recording `error = err`.
+**Goal link**: The goal calls out `ToolRegistry` tool invocation success and error paths.
+**Justification**: The invocation already funnels normal process completion through the wait promise, and expanding the `try...finally` boundary to include spawn and stdin setup makes sandbox cleanup cover synchronous failures without changing stdout, stderr, code, signal, or error handling.
+**Hunt note**: Retained as narrowed for F1 because the `finally` now begins immediately after sandbox preparation and covers the synchronous failure points identified by the finding.
+
+### C5 — Use try/finally for tool discovery cleanup
+**File**: packages/core/src/tools/tool-registry.ts:397
+**Change**: In `ToolRegistry.discoverAndRegisterToolsFromCommand`, wrap the spawn plus the subsequent `await new Promise<void>(...)` close/error wait in `try...finally`, call `cleanupFunc?.()` in the `finally`, and remove the cleanup calls from the promise's `error` and `close` handlers.
+**Goal link**: The goal names `ToolRegistry` discovery success and error paths as requiring cleanup.
+**Justification**: Treating discovery cleanup as the final step of the spawned discovery command removes duplicated branch cleanup and also covers synchronous failures between sandbox preparation and event registration without changing discovery parsing behavior.
+
+### C6 — Cleanup spawnAsync through an outer finally
+**File**: packages/core/src/utils/shell-utils.ts:850
+**Change**: In `spawnAsync`, wrap the returned child-process promise in `try { return await new Promise(...) } finally { prepared.cleanup?.() }`, and remove the cleanup calls from the `close` and `error` handlers.
+**Goal link**: The goal explicitly includes `shell-utils` `spawnAsync` cleanup.
+**Justification**: The helper's public result stays the same, but cleanup becomes a direct property of the async command execution rather than duplicated across the success and spawn-error branches.
+
+### C7 — Cleanup execStreaming after the full streaming lifecycle settles
+**File**: packages/core/src/utils/shell-utils.ts:971
+**Change**: In `execStreaming`, add an outer `try...finally` that starts immediately after sandbox preparation and covers `spawn`, readline setup, the existing generator streaming loop, and generator teardown; call `prepared.cleanup?.()` from that outer `finally`, and remove the cleanup calls from the early-error, `checkExit`, and late `error` handler branches while preserving the existing process-exit wait and abort behavior.
+**Goal link**: The goal specifically calls for robust cleanup in `execStreaming`, including aborted or early-closed generators.
+**Justification**: Making cleanup cover all work after sandbox preparation ensures synchronous setup failures, normal streaming completion, aborts, and early generator close all release the sandbox while preserving line streaming and allowed-exit-code handling.
+**Hunt note**: Retained as narrowed for F2 because the cleanup guard now covers the pre-teardown synchronous failure points identified by the finding, including `spawn` and readline creation.
+
+## Rejected
+
+- Add cleanup handling to `packages/core/src/services/shellExecutionService.ts` `childProcessFallback` and `executeWithPty`: rejected because `packages/core/src/services/shellExecutionService.ts` is not present in `allowed-files.txt`, even though the goal text mentions it.
+- Introduce a shared helper for all sandboxed child-process cleanup across `SandboxedFileSystemService`, `GrepTool`, `ToolRegistry`, and `shell-utils`: rejected because it would be a broader abstraction spanning unrelated modules, and the goal can be expressed more cleanly with bounded local `try...finally` refactors.
+- Change `SandboxManager.prepareCommand` or the `SandboxedCommand.cleanup` contract to make cleanup idempotent globally: rejected because `packages/core/src/services/sandboxManager.ts` is outside the allowed edit set and would cross a shared service API boundary.
+- Remove the `try/catch` around sandbox preparation in `GrepToolInvocation.isCommandAvailable`: rejected because that fallback intentionally preserves command probing when sandbox preparation fails, and changing it would alter observable behavior.

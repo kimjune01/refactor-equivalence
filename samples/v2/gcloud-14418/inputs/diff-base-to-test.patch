@@ -1,0 +1,2308 @@
+diff --git a/spanner/channel_finder.go b/spanner/channel_finder.go
+index a1705a59ed..29ddd04602 100644
+--- a/spanner/channel_finder.go
++++ b/spanner/channel_finder.go
+@@ -20,6 +20,7 @@ import (
+ 	"context"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
+ )
+@@ -43,6 +44,27 @@ func (f *channelFinder) useDeterministicRandom() {
+ 	f.rangeCache.useDeterministicRandom()
+ }
+ 
++func (f *channelFinder) setLifecycleManager(lifecycleManager *endpointLifecycleManager) {
++	if f == nil {
++		return
++	}
++	f.rangeCache.setLifecycleManager(lifecycleManager)
++}
++
++func (f *channelFinder) recordEndpointLatency(address string, latency time.Duration) {
++	if f == nil {
++		return
++	}
++	f.rangeCache.recordEndpointLatency(address, latency)
++}
++
++func (f *channelFinder) recordEndpointError(address string) {
++	if f == nil {
++		return
++	}
++	f.rangeCache.recordEndpointError(address)
++}
++
+ func (f *channelFinder) update(update *sppb.CacheUpdate) {
+ 	if update == nil {
+ 		return
+@@ -64,13 +86,44 @@ func (f *channelFinder) update(update *sppb.CacheUpdate) {
+ 	f.rangeCache.addRanges(update)
+ }
+ 
++func (f *channelFinder) updateAsync(update *sppb.CacheUpdate) {
++	if !f.shouldProcessUpdate(update) {
++		return
++	}
++	f.update(update)
++}
++
++func (f *channelFinder) shouldProcessUpdate(update *sppb.CacheUpdate) bool {
++	if update == nil {
++		return false
++	}
++	if f.isMaterialUpdate(update) {
++		return true
++	}
++	updateDatabaseID := update.GetDatabaseId()
++	return updateDatabaseID != 0 && f.databaseID.Load() != updateDatabaseID
++}
++
++func (*channelFinder) isMaterialUpdate(update *sppb.CacheUpdate) bool {
++	if update == nil {
++		return false
++	}
++	return len(update.GetGroup()) > 0 ||
++		len(update.GetRange()) > 0 ||
++		(update.GetKeyRecipes() != nil && len(update.GetKeyRecipes().GetRecipe()) > 0)
++}
++
+ func (f *channelFinder) findServerRead(ctx context.Context, req *sppb.ReadRequest, preferLeader bool) channelEndpoint {
++	return f.findServerReadWithExclusions(ctx, req, preferLeader, nil)
++}
++
++func (f *channelFinder) findServerReadWithExclusions(ctx context.Context, req *sppb.ReadRequest, preferLeader bool, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if req == nil {
+ 		return nil
+ 	}
+ 	f.recipeCache.computeReadKeys(req)
+ 	hint := ensureReadRoutingHint(req)
+-	return f.fillRoutingHint(ctx, preferLeader, rangeModeCoveringSplit, req.GetDirectedReadOptions(), hint)
++	return f.fillRoutingHintWithExclusions(ctx, preferLeader, rangeModeCoveringSplit, req.GetDirectedReadOptions(), hint, excludedEndpoints)
+ }
+ 
+ func (f *channelFinder) findServerReadWithTransaction(ctx context.Context, req *sppb.ReadRequest) channelEndpoint {
+@@ -81,12 +134,16 @@ func (f *channelFinder) findServerReadWithTransaction(ctx context.Context, req *
+ }
+ 
+ func (f *channelFinder) findServerExecuteSQL(ctx context.Context, req *sppb.ExecuteSqlRequest, preferLeader bool) channelEndpoint {
++	return f.findServerExecuteSQLWithExclusions(ctx, req, preferLeader, nil)
++}
++
++func (f *channelFinder) findServerExecuteSQLWithExclusions(ctx context.Context, req *sppb.ExecuteSqlRequest, preferLeader bool, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if req == nil {
+ 		return nil
+ 	}
+ 	f.recipeCache.computeQueryKeys(req)
+ 	hint := ensureExecuteSQLRoutingHint(req)
+-	return f.fillRoutingHint(ctx, preferLeader, rangeModePickRandom, req.GetDirectedReadOptions(), hint)
++	return f.fillRoutingHintWithExclusions(ctx, preferLeader, rangeModePickRandom, req.GetDirectedReadOptions(), hint, excludedEndpoints)
+ }
+ 
+ func (f *channelFinder) findServerExecuteSQLWithTransaction(ctx context.Context, req *sppb.ExecuteSqlRequest) channelEndpoint {
+@@ -97,13 +154,21 @@ func (f *channelFinder) findServerExecuteSQLWithTransaction(ctx context.Context,
+ }
+ 
+ func (f *channelFinder) findServerBeginTransaction(ctx context.Context, req *sppb.BeginTransactionRequest) channelEndpoint {
++	return f.findServerBeginTransactionWithExclusions(ctx, req, nil)
++}
++
++func (f *channelFinder) findServerBeginTransactionWithExclusions(ctx context.Context, req *sppb.BeginTransactionRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if req == nil || req.GetMutationKey() == nil {
+ 		return nil
+ 	}
+-	return f.routeMutation(ctx, req.GetMutationKey(), preferLeaderFromTransactionOptions(req.GetOptions()), ensureBeginTransactionRoutingHint(req))
++	return f.routeMutationWithExclusions(ctx, req.GetMutationKey(), preferLeaderFromTransactionOptions(req.GetOptions()), ensureBeginTransactionRoutingHint(req), excludedEndpoints)
+ }
+ 
+ func (f *channelFinder) fillCommitRoutingHint(ctx context.Context, req *sppb.CommitRequest) channelEndpoint {
++	return f.fillCommitRoutingHintWithExclusions(ctx, req, nil)
++}
++
++func (f *channelFinder) fillCommitRoutingHintWithExclusions(ctx context.Context, req *sppb.CommitRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if req == nil {
+ 		return nil
+ 	}
+@@ -111,10 +176,14 @@ func (f *channelFinder) fillCommitRoutingHint(ctx context.Context, req *sppb.Com
+ 	if mutation == nil {
+ 		return nil
+ 	}
+-	return f.routeMutation(ctx, mutation, true, ensureCommitRoutingHint(req))
++	return f.routeMutationWithExclusions(ctx, mutation, true, ensureCommitRoutingHint(req), excludedEndpoints)
+ }
+ 
+ func (f *channelFinder) routeMutation(ctx context.Context, mutation *sppb.Mutation, preferLeader bool, hint *sppb.RoutingHint) channelEndpoint {
++	return f.routeMutationWithExclusions(ctx, mutation, preferLeader, hint, nil)
++}
++
++func (f *channelFinder) routeMutationWithExclusions(ctx context.Context, mutation *sppb.Mutation, preferLeader bool, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if mutation == nil || hint == nil {
+ 		return nil
+ 	}
+@@ -124,10 +193,14 @@ func (f *channelFinder) routeMutation(ctx context.Context, mutation *sppb.Mutati
+ 		return nil
+ 	}
+ 	f.recipeCache.applyTargetRange(hint, target)
+-	return f.fillRoutingHint(ctx, preferLeader, rangeModeCoveringSplit, &sppb.DirectedReadOptions{}, hint)
++	return f.fillRoutingHintWithExclusions(ctx, preferLeader, rangeModeCoveringSplit, &sppb.DirectedReadOptions{}, hint, excludedEndpoints)
+ }
+ 
+ func (f *channelFinder) fillRoutingHint(ctx context.Context, preferLeader bool, mode rangeMode, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint) channelEndpoint {
++	return f.fillRoutingHintWithExclusions(ctx, preferLeader, mode, directedReadOptions, hint, nil)
++}
++
++func (f *channelFinder) fillRoutingHintWithExclusions(ctx context.Context, preferLeader bool, mode rangeMode, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if hint == nil {
+ 		return nil
+ 	}
+@@ -136,7 +209,7 @@ func (f *channelFinder) fillRoutingHint(ctx context.Context, preferLeader bool,
+ 		return nil
+ 	}
+ 	hint.DatabaseId = databaseID
+-	return f.rangeCache.fillRoutingHint(ctx, preferLeader, mode, directedReadOptions, hint)
++	return f.rangeCache.fillRoutingHintWithExclusions(ctx, preferLeader, mode, directedReadOptions, hint, excludedEndpoints)
+ }
+ 
+ func preferLeaderFromSelector(selector *sppb.TransactionSelector) bool {
+diff --git a/spanner/client.go b/spanner/client.go
+index 9bf396e519..93252b276b 100644
+--- a/spanner/client.go
++++ b/spanner/client.go
+@@ -654,13 +654,17 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
+ 	sc.mu.Unlock()
+ 
+ 	var locationRouter *locationRouter
+-	if isExperimentalLocationAPIEnabled() {
++	if isExperimentalLocationAPIEnabledForConfig(config) {
+ 		sc.baseClientOpts = endpointClientOpts
++		defaultEndpointAddress := ""
+ 		if conn := pool.Conn(); conn != nil {
+ 			sc.endpointAuthority = normalizeAuthorityTarget(conn.Target())
++			defaultEndpointAddress = sc.endpointAuthority
+ 		}
+-		epCache := newEndpointClientCache(sc.createEndpointClient)
++		epCache := newEndpointClientCacheWithDefaultAddress(sc.createEndpointClient, defaultEndpointAddress)
+ 		locationRouter = newLocationRouter(epCache)
++		locationRouter.lifecycleManager = newEndpointLifecycleManager(epCache)
++		locationRouter.finder.setLifecycleManager(locationRouter.lifecycleManager)
+ 	}
+ 
+ 	// Create a session manager.
+diff --git a/spanner/endpoint_client_cache.go b/spanner/endpoint_client_cache.go
+index 7b7f4b3b95..246b0b281d 100644
+--- a/spanner/endpoint_client_cache.go
++++ b/spanner/endpoint_client_cache.go
+@@ -19,32 +19,62 @@ package spanner
+ import (
+ 	"context"
+ 	"sync"
+-	"sync/atomic"
++
++	"google.golang.org/grpc"
++	"google.golang.org/grpc/connectivity"
+ )
+ 
+ // grpcChannelEndpoint is a channelEndpoint backed by a real gRPC connection.
+ type grpcChannelEndpoint struct {
+ 	address string
+ 	client  spannerClient
+-	healthy atomic.Bool
++	conn    *grpc.ClientConn
+ }
+ 
++var (
++	_ channelEndpoint      = (*grpcChannelEndpoint)(nil)
++	_ channelEndpointCache = (*endpointClientCache)(nil)
++)
++
+ func (e *grpcChannelEndpoint) Address() string {
+ 	return e.address
+ }
+ 
+ func (e *grpcChannelEndpoint) IsHealthy() bool {
+-	return e.healthy.Load()
++	if e == nil || e.conn == nil {
++		return false
++	}
++	state := e.conn.GetState()
++	if state == connectivity.Shutdown {
++		return false
++	}
++	return state == connectivity.Ready
++}
++
++func (e *grpcChannelEndpoint) IsTransientFailure() bool {
++	if e == nil || e.conn == nil {
++		return false
++	}
++	return e.conn.GetState() == connectivity.TransientFailure
++}
++
++func (e *grpcChannelEndpoint) GetConn() *grpc.ClientConn {
++	if e == nil {
++		return nil
++	}
++	return e.conn
+ }
+ 
+ // endpointClientCache implements channelEndpointCache with actual gRPC
+ // connections to specific server addresses.
+ type endpointClientCache struct {
+-	mu            sync.RWMutex
+-	endpoints     map[string]*grpcChannelEndpoint
+-	inflight      map[string]*endpointClientCreation
+-	clientFactory func(ctx context.Context, address string) (spannerClient, error)
+-	closed        bool
++	mu              sync.RWMutex
++	endpoints       map[string]*grpcChannelEndpoint
++	inflight        map[string]*endpointClientCreation
++	evicted         map[string]struct{}
++	defaultEndpoint channelEndpoint
++	clientFactory   func(ctx context.Context, address string) (spannerClient, error)
++	closed          bool
+ }
+ 
+ type endpointClientCreation struct {
+@@ -53,10 +83,16 @@ type endpointClientCreation struct {
+ }
+ 
+ func newEndpointClientCache(clientFactory func(ctx context.Context, address string) (spannerClient, error)) *endpointClientCache {
++	return newEndpointClientCacheWithDefaultAddress(clientFactory, "")
++}
++
++func newEndpointClientCacheWithDefaultAddress(clientFactory func(ctx context.Context, address string) (spannerClient, error), defaultAddress string) *endpointClientCache {
+ 	return &endpointClientCache{
+-		endpoints:     make(map[string]*grpcChannelEndpoint),
+-		inflight:      make(map[string]*endpointClientCreation),
+-		clientFactory: clientFactory,
++		endpoints:       make(map[string]*grpcChannelEndpoint),
++		inflight:        make(map[string]*endpointClientCreation),
++		evicted:         make(map[string]struct{}),
++		defaultEndpoint: &passthroughChannelEndpoint{address: defaultAddress},
++		clientFactory:   clientFactory,
+ 	}
+ }
+ 
+@@ -67,6 +103,9 @@ func (c *endpointClientCache) Get(ctx context.Context, address string) channelEn
+ 	if ctx == nil {
+ 		ctx = context.Background()
+ 	}
++	if address == c.defaultEndpoint.Address() {
++		return c.defaultEndpoint
++	}
+ 	// Fast path: read lock.
+ 	c.mu.RLock()
+ 	if ep, ok := c.endpoints[address]; ok {
+@@ -101,16 +140,18 @@ func (c *endpointClientCache) Get(ctx context.Context, address string) channelEn
+ 
+ 	c.mu.Lock()
+ 	delete(c.inflight, address)
+-	if err == nil && !c.closed {
++	_, wasEvicted := c.evicted[address]
++	delete(c.evicted, address)
++	if err == nil && !c.closed && !wasEvicted {
+ 		ep := &grpcChannelEndpoint{
+ 			address: address,
+ 			client:  client,
++			conn:    client.Connection(),
+ 		}
+-		ep.healthy.Store(true)
+ 		c.endpoints[address] = ep
+ 		creation.ep = ep
+ 	}
+-	shouldCloseClient := c.closed && client != nil
++	shouldCloseClient := (c.closed || wasEvicted) && client != nil
+ 	close(creation.done)
+ 	c.mu.Unlock()
+ 
+@@ -120,6 +161,44 @@ func (c *endpointClientCache) Get(ctx context.Context, address string) channelEn
+ 	return creation.ep
+ }
+ 
++// GetIfPresent returns a cached endpoint without creating a new gRPC connection.
++func (c *endpointClientCache) GetIfPresent(address string) channelEndpoint {
++	if address == c.defaultEndpoint.Address() {
++		return c.defaultEndpoint
++	}
++	c.mu.RLock()
++	defer c.mu.RUnlock()
++	ep, ok := c.endpoints[address]
++	if !ok {
++		return nil
++	}
++	return ep
++}
++
++// Evict removes a cached endpoint and closes its underlying client.
++func (c *endpointClientCache) Evict(address string) {
++	if address == c.defaultEndpoint.Address() {
++		return
++	}
++
++	c.mu.Lock()
++	ep := c.endpoints[address]
++	if ep != nil {
++		delete(c.endpoints, address)
++	} else if _, ok := c.inflight[address]; ok {
++		c.evicted[address] = struct{}{}
++	}
++	c.mu.Unlock()
++
++	if ep != nil && ep.client != nil {
++		_ = ep.client.Close()
++	}
++}
++
++func (c *endpointClientCache) DefaultChannel() channelEndpoint {
++	return c.defaultEndpoint
++}
++
+ // ClientFor resolves a channelEndpoint to the underlying spannerClient.
+ func (c *endpointClientCache) ClientFor(ep channelEndpoint) spannerClient {
+ 	if ep == nil {
+diff --git a/spanner/endpoint_exclusion.go b/spanner/endpoint_exclusion.go
+new file mode 100644
+index 0000000000..aea96638ca
+--- /dev/null
++++ b/spanner/endpoint_exclusion.go
+@@ -0,0 +1,169 @@
++/*
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package spanner
++
++import (
++	"sync"
++	"time"
++)
++
++const (
++	maxTrackedExcludedLogicalRequests = 100_000
++	excludedLogicalRequestTTL         = 10 * time.Minute
++)
++
++type endpointExcluder func(string) bool
++
++type logicalRequestEndpointExclusion struct {
++	addresses map[string]struct{}
++	expiresAt time.Time
++}
++
++type logicalRequestEndpointExclusionCache struct {
++	mu         sync.Mutex
++	entries    map[string]logicalRequestEndpointExclusion
++	maxEntries int
++	ttl        time.Duration
++	now        func() time.Time
++}
++
++func noExcludedEndpoints(string) bool {
++	return false
++}
++
++func isEndpointExcluded(excluded endpointExcluder, address string) bool {
++	return excluded != nil && excluded(address)
++}
++
++func newLogicalRequestEndpointExclusionCache() *logicalRequestEndpointExclusionCache {
++	return newLogicalRequestEndpointExclusionCacheWithOptions(
++		maxTrackedExcludedLogicalRequests,
++		excludedLogicalRequestTTL,
++		time.Now,
++	)
++}
++
++func newLogicalRequestEndpointExclusionCacheWithOptions(
++	maxEntries int,
++	ttl time.Duration,
++	now func() time.Time,
++) *logicalRequestEndpointExclusionCache {
++	if maxEntries <= 0 {
++		maxEntries = maxTrackedExcludedLogicalRequests
++	}
++	if ttl <= 0 {
++		ttl = excludedLogicalRequestTTL
++	}
++	if now == nil {
++		now = time.Now
++	}
++	return &logicalRequestEndpointExclusionCache{
++		entries:    make(map[string]logicalRequestEndpointExclusion),
++		maxEntries: maxEntries,
++		ttl:        ttl,
++		now:        now,
++	}
++}
++
++func (c *logicalRequestEndpointExclusionCache) record(logicalRequestKey, address string) {
++	if c == nil || logicalRequestKey == "" || address == "" {
++		return
++	}
++
++	now := c.now()
++
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	c.pruneExpiredLocked(now)
++
++	entry := c.entries[logicalRequestKey]
++	if entry.addresses == nil {
++		entry.addresses = make(map[string]struct{})
++	}
++	entry.addresses[address] = struct{}{}
++	entry.expiresAt = now.Add(c.ttl)
++	c.entries[logicalRequestKey] = entry
++
++	c.pruneOverflowLocked()
++}
++
++func (c *logicalRequestEndpointExclusionCache) consume(logicalRequestKey string) endpointExcluder {
++	if c == nil || logicalRequestKey == "" {
++		return noExcludedEndpoints
++	}
++
++	now := c.now()
++
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	c.pruneExpiredLocked(now)
++
++	entry, ok := c.entries[logicalRequestKey]
++	if !ok || len(entry.addresses) == 0 {
++		return noExcludedEndpoints
++	}
++	delete(c.entries, logicalRequestKey)
++
++	addresses := make(map[string]struct{}, len(entry.addresses))
++	for address := range entry.addresses {
++		addresses[address] = struct{}{}
++	}
++	return func(address string) bool {
++		_, ok := addresses[address]
++		return ok
++	}
++}
++
++func (c *logicalRequestEndpointExclusionCache) pruneExpiredLocked(now time.Time) {
++	for logicalRequestKey, entry := range c.entries {
++		if now.After(entry.expiresAt) {
++			delete(c.entries, logicalRequestKey)
++		}
++	}
++}
++
++func (c *logicalRequestEndpointExclusionCache) pruneOverflowLocked() {
++	for len(c.entries) > c.maxEntries {
++		var (
++			oldestKey string
++			oldestAt  time.Time
++			found     bool
++		)
++		for logicalRequestKey, entry := range c.entries {
++			if !found || entry.expiresAt.Before(oldestAt) {
++				oldestKey = logicalRequestKey
++				oldestAt = entry.expiresAt
++				found = true
++			}
++		}
++		if !found {
++			return
++		}
++		delete(c.entries, oldestKey)
++	}
++}
++
++func (c *logicalRequestEndpointExclusionCache) size() int {
++	if c == nil {
++		return 0
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return len(c.entries)
++}
+diff --git a/spanner/endpoint_lifecycle_manager.go b/spanner/endpoint_lifecycle_manager.go
+new file mode 100644
+index 0000000000..68e360efc3
+--- /dev/null
++++ b/spanner/endpoint_lifecycle_manager.go
+@@ -0,0 +1,433 @@
++/*
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package spanner
++
++import (
++	"context"
++	"sync"
++	"time"
++
++	"google.golang.org/grpc/connectivity"
++)
++
++const (
++	defaultLifecycleProbeInterval  = time.Minute
++	defaultIdleEvictionDuration    = 30 * time.Minute
++	lifecycleEvictionCheckInterval = 5 * time.Minute
++	maxTransientFailureProbeCount  = 3
++)
++
++type lifecycleEvictionReason int
++
++const (
++	lifecycleEvictionReasonTransientFailure lifecycleEvictionReason = iota
++	lifecycleEvictionReasonShutdown
++	lifecycleEvictionReasonIdle
++	lifecycleEvictionReasonStale
++)
++
++type endpointLifecycleState struct {
++	address                      string
++	lastProbeAt                  time.Time
++	lastRealTrafficAt            time.Time
++	lastReadyAt                  time.Time
++	consecutiveTransientFailures int
++	needsCreate                  bool
++}
++
++type endpointLifecycleManager struct {
++	endpointCache          channelEndpointCache
++	defaultEndpointAddress string
++	probeInterval          time.Duration
++	idleEvictionDuration   time.Duration
++	now                    func() time.Time
++
++	mu                               sync.Mutex
++	endpoints                        map[string]*endpointLifecycleState
++	transientFailureEvictedAddresses map[string]struct{}
++	shutdownOnce                     sync.Once
++	stopped                          bool
++
++	workCh chan struct{}
++	stopCh chan struct{}
++	doneCh chan struct{}
++}
++
++func newEndpointLifecycleManager(endpointCache channelEndpointCache) *endpointLifecycleManager {
++	return newEndpointLifecycleManagerWithOptions(
++		endpointCache,
++		defaultLifecycleProbeInterval,
++		defaultIdleEvictionDuration,
++		time.Now,
++	)
++}
++
++func newEndpointLifecycleManagerWithOptions(
++	endpointCache channelEndpointCache,
++	probeInterval time.Duration,
++	idleEvictionDuration time.Duration,
++	now func() time.Time,
++) *endpointLifecycleManager {
++	if endpointCache == nil {
++		endpointCache = newPassthroughChannelEndpointCache()
++	}
++	if probeInterval <= 0 {
++		probeInterval = defaultLifecycleProbeInterval
++	}
++	if idleEvictionDuration <= 0 {
++		idleEvictionDuration = defaultIdleEvictionDuration
++	}
++	if now == nil {
++		now = time.Now
++	}
++
++	manager := &endpointLifecycleManager{
++		endpointCache:                    endpointCache,
++		defaultEndpointAddress:           endpointCache.DefaultChannel().Address(),
++		probeInterval:                    probeInterval,
++		idleEvictionDuration:             idleEvictionDuration,
++		now:                              now,
++		endpoints:                        make(map[string]*endpointLifecycleState),
++		transientFailureEvictedAddresses: make(map[string]struct{}),
++		workCh:                           make(chan struct{}, 1),
++		stopCh:                           make(chan struct{}),
++		doneCh:                           make(chan struct{}),
++	}
++	go manager.run()
++	return manager
++}
++
++func (m *endpointLifecycleManager) run() {
++	defer close(m.doneCh)
++
++	probeTicker := time.NewTicker(m.probeInterval)
++	defer probeTicker.Stop()
++
++	evictionTicker := time.NewTicker(lifecycleEvictionCheckInterval)
++	defer evictionTicker.Stop()
++
++	for {
++		select {
++		case <-m.workCh:
++			m.processPendingCreations()
++		case <-probeTicker.C:
++			m.processPendingCreations()
++			m.probeManagedEndpoints()
++		case <-evictionTicker.C:
++			m.checkIdleEviction()
++		case <-m.stopCh:
++			return
++		}
++	}
++}
++
++func (m *endpointLifecycleManager) signalWork() {
++	select {
++	case m.workCh <- struct{}{}:
++	default:
++	}
++}
++
++func (m *endpointLifecycleManager) recordRealTraffic(address string) {
++	if m == nil || address == "" || address == m.defaultEndpointAddress {
++		return
++	}
++
++	now := m.now()
++
++	m.mu.Lock()
++	if m.stopped {
++		m.mu.Unlock()
++		return
++	}
++	state, ok := m.endpoints[address]
++	if !ok {
++		state = &endpointLifecycleState{
++			address:           address,
++			lastRealTrafficAt: now,
++			needsCreate:       true,
++		}
++		m.endpoints[address] = state
++		m.mu.Unlock()
++		m.signalWork()
++		return
++	}
++	state.lastRealTrafficAt = now
++	m.mu.Unlock()
++
++	if m.endpointCache.GetIfPresent(address) == nil {
++		m.mu.Lock()
++		if state = m.endpoints[address]; state != nil && !m.stopped {
++			state.needsCreate = true
++		}
++		m.mu.Unlock()
++		m.signalWork()
++	}
++}
++
++func (m *endpointLifecycleManager) requestEndpointRecreation(address string) {
++	if m == nil || address == "" || address == m.defaultEndpointAddress {
++		return
++	}
++
++	now := m.now()
++
++	m.mu.Lock()
++	if m.stopped {
++		m.mu.Unlock()
++		return
++	}
++	state, ok := m.endpoints[address]
++	if !ok {
++		state = &endpointLifecycleState{
++			address:           address,
++			lastRealTrafficAt: now,
++		}
++		m.endpoints[address] = state
++	}
++	state.needsCreate = true
++	m.mu.Unlock()
++
++	m.signalWork()
++}
++
++func (m *endpointLifecycleManager) processPendingCreations() {
++	if m == nil {
++		return
++	}
++
++	addresses := m.pendingCreationAddresses()
++	for _, address := range addresses {
++		endpoint := m.endpointCache.Get(context.Background(), address)
++		if endpoint == nil {
++			m.mu.Lock()
++			if state := m.endpoints[address]; state != nil && !m.stopped {
++				state.needsCreate = true
++			}
++			m.mu.Unlock()
++			continue
++		}
++
++		m.mu.Lock()
++		_, stillManaged := m.endpoints[address]
++		m.mu.Unlock()
++		if !stillManaged {
++			m.endpointCache.Evict(address)
++		}
++	}
++}
++
++func (m *endpointLifecycleManager) pendingCreationAddresses() []string {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++
++	if m.stopped {
++		return nil
++	}
++
++	addresses := make([]string, 0, len(m.endpoints))
++	for address, state := range m.endpoints {
++		if !state.needsCreate {
++			continue
++		}
++		state.needsCreate = false
++		addresses = append(addresses, address)
++	}
++	return addresses
++}
++
++func (m *endpointLifecycleManager) probeManagedEndpoints() {
++	if m == nil {
++		return
++	}
++
++	for _, address := range m.managedAddresses() {
++		m.probe(address)
++	}
++}
++
++func (m *endpointLifecycleManager) managedAddresses() []string {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++
++	if m.stopped {
++		return nil
++	}
++
++	addresses := make([]string, 0, len(m.endpoints))
++	for address := range m.endpoints {
++		addresses = append(addresses, address)
++	}
++	return addresses
++}
++
++func (m *endpointLifecycleManager) probe(address string) {
++	endpoint := m.endpointCache.GetIfPresent(address)
++	if endpoint == nil {
++		return
++	}
++
++	conn := endpoint.GetConn()
++	if conn == nil {
++		return
++	}
++
++	now := m.now()
++	state := conn.GetState()
++
++	m.mu.Lock()
++	lifecycleState, ok := m.endpoints[address]
++	if !ok || m.stopped {
++		m.mu.Unlock()
++		return
++	}
++	lifecycleState.lastProbeAt = now
++
++	switch state {
++	case connectivity.Ready:
++		lifecycleState.lastReadyAt = now
++		lifecycleState.consecutiveTransientFailures = 0
++		delete(m.transientFailureEvictedAddresses, address)
++		m.mu.Unlock()
++		return
++	case connectivity.Idle:
++		lifecycleState.consecutiveTransientFailures = 0
++		m.mu.Unlock()
++		conn.Connect()
++		return
++	case connectivity.Connecting:
++		lifecycleState.consecutiveTransientFailures = 0
++		m.mu.Unlock()
++		return
++	case connectivity.TransientFailure:
++		lifecycleState.consecutiveTransientFailures++
++		evict := lifecycleState.consecutiveTransientFailures >= maxTransientFailureProbeCount
++		m.mu.Unlock()
++		if evict {
++			m.evictEndpoint(address, lifecycleEvictionReasonTransientFailure)
++		}
++		return
++	case connectivity.Shutdown:
++		m.mu.Unlock()
++		m.evictEndpoint(address, lifecycleEvictionReasonShutdown)
++		return
++	default:
++		m.mu.Unlock()
++		return
++	}
++}
++
++func (m *endpointLifecycleManager) checkIdleEviction() {
++	if m == nil {
++		return
++	}
++
++	now := m.now()
++	var toEvict []string
++
++	m.mu.Lock()
++	if m.stopped {
++		m.mu.Unlock()
++		return
++	}
++	for address, state := range m.endpoints {
++		if address == m.defaultEndpointAddress {
++			continue
++		}
++		if now.Sub(state.lastRealTrafficAt) > m.idleEvictionDuration {
++			toEvict = append(toEvict, address)
++		}
++	}
++	m.mu.Unlock()
++
++	for _, address := range toEvict {
++		m.evictEndpoint(address, lifecycleEvictionReasonIdle)
++	}
++}
++
++func (m *endpointLifecycleManager) evictEndpoint(address string, reason lifecycleEvictionReason) {
++	if m == nil || address == "" || address == m.defaultEndpointAddress {
++		return
++	}
++
++	m.mu.Lock()
++	if m.stopped {
++		m.mu.Unlock()
++		return
++	}
++	if _, ok := m.endpoints[address]; !ok {
++		m.mu.Unlock()
++		return
++	}
++	delete(m.endpoints, address)
++	if reason == lifecycleEvictionReasonTransientFailure {
++		m.transientFailureEvictedAddresses[address] = struct{}{}
++	} else {
++		delete(m.transientFailureEvictedAddresses, address)
++	}
++	m.mu.Unlock()
++
++	m.endpointCache.Evict(address)
++}
++
++func (m *endpointLifecycleManager) isManaged(address string) bool {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++	_, ok := m.endpoints[address]
++	return ok
++}
++
++func (m *endpointLifecycleManager) wasRecentlyEvictedTransientFailure(address string) bool {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++	_, ok := m.transientFailureEvictedAddresses[address]
++	return ok
++}
++
++func (m *endpointLifecycleManager) getEndpointState(address string) (endpointLifecycleState, bool) {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++
++	state, ok := m.endpoints[address]
++	if !ok {
++		return endpointLifecycleState{}, false
++	}
++	return *state, true
++}
++
++func (m *endpointLifecycleManager) managedEndpointCount() int {
++	m.mu.Lock()
++	defer m.mu.Unlock()
++	return len(m.endpoints)
++}
++
++func (m *endpointLifecycleManager) shutdown() {
++	if m == nil {
++		return
++	}
++
++	m.shutdownOnce.Do(func() {
++		m.mu.Lock()
++		m.stopped = true
++		m.endpoints = make(map[string]*endpointLifecycleState)
++		m.transientFailureEvictedAddresses = make(map[string]struct{})
++		m.mu.Unlock()
++
++		close(m.stopCh)
++		<-m.doneCh
++	})
++}
+diff --git a/spanner/key_range_cache.go b/spanner/key_range_cache.go
+index e77c4a20d4..4c8197928c 100644
+--- a/spanner/key_range_cache.go
++++ b/spanner/key_range_cache.go
+@@ -20,16 +20,20 @@ import (
+ 	"bytes"
+ 	"context"
+ 	"hash/crc32"
++	"math"
+ 	"math/rand"
+ 	"sort"
+ 	"sync"
++	"time"
+ 
+ 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
++	"google.golang.org/grpc/connectivity"
+ )
+ 
+ const (
+ 	maxLocalReplicaDistance        = 5
+ 	defaultMinEntriesForRandomPick = 1000
++	defaultLatencyErrorPenalty     = 250 * time.Millisecond
+ )
+ 
+ var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
+@@ -42,7 +46,8 @@ const (
+ )
+ 
+ type keyRangeCache struct {
+-	endpointCache channelEndpointCache
++	endpointCache    channelEndpointCache
++	lifecycleManager *endpointLifecycleManager
+ 
+ 	mu     sync.Mutex
+ 	ranges []*cachedRange // sorted by limit key
+@@ -51,6 +56,10 @@ type keyRangeCache struct {
+ 	accessCounter               int64
+ 	deterministicRandom         bool
+ 	minEntriesForRandomPickHint int
++	replicaSelector             replicaSelector
++	latencyTrackers             map[string]latencyTracker
++	latencyTrackerFactory       func() latencyTracker
++	latencyErrorPenalty         time.Duration
+ }
+ 
+ type cachedTablet struct {
+@@ -93,6 +102,7 @@ func newKeyRangeCache(endpointCache channelEndpointCache) *keyRangeCache {
+ 		endpointCache:               endpointCache,
+ 		groups:                      make(map[uint64]*cachedGroup),
+ 		minEntriesForRandomPickHint: defaultMinEntriesForRandomPick,
++		latencyErrorPenalty:         defaultLatencyErrorPenalty,
+ 	}
+ }
+ 
+@@ -111,6 +121,86 @@ func (c *keyRangeCache) setMinEntriesForRandomPick(value int) {
+ 	c.minEntriesForRandomPickHint = value
+ }
+ 
++func (c *keyRangeCache) setLifecycleManager(lifecycleManager *endpointLifecycleManager) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.lifecycleManager = lifecycleManager
++}
++
++func (c *keyRangeCache) setReplicaSelector(selector replicaSelector) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.replicaSelector = selector
++}
++
++func (c *keyRangeCache) setLatencyTrackerFactory(factory func() latencyTracker) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if factory == nil {
++		factory = func() latencyTracker { return newEWMALatencyTracker() }
++	}
++	c.latencyTrackerFactory = factory
++	c.latencyTrackers = make(map[string]latencyTracker)
++}
++
++func (c *keyRangeCache) recordEndpointLatency(address string, latency time.Duration) {
++	if c == nil || address == "" {
++		return
++	}
++	tracker := c.getOrCreateLatencyTracker(address)
++	if tracker == nil {
++		return
++	}
++	tracker.update(latency)
++}
++
++func (c *keyRangeCache) recordEndpointError(address string) {
++	if c == nil || address == "" {
++		return
++	}
++	tracker := c.getOrCreateLatencyTracker(address)
++	if tracker == nil {
++		return
++	}
++
++	c.mu.Lock()
++	penalty := c.latencyErrorPenalty
++	c.mu.Unlock()
++	tracker.recordError(penalty)
++}
++
++func (c *keyRangeCache) latencyScore(address string) float64 {
++	if c == nil || address == "" {
++		return math.MaxFloat64
++	}
++	c.mu.Lock()
++	tracker := c.latencyTrackers[address]
++	c.mu.Unlock()
++	if tracker == nil {
++		return math.MaxFloat64
++	}
++	return tracker.getScore()
++}
++
++func (c *keyRangeCache) getOrCreateLatencyTracker(address string) latencyTracker {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	tracker := c.latencyTrackers[address]
++	if tracker != nil {
++		return tracker
++	}
++	if c.latencyTrackerFactory == nil {
++		return nil
++	}
++	tracker = c.latencyTrackerFactory()
++	if tracker == nil {
++		return nil
++	}
++	c.latencyTrackers[address] = tracker
++	return tracker
++}
++
+ func (c *keyRangeCache) addRanges(cacheUpdate *sppb.CacheUpdate) {
+ 	if cacheUpdate == nil {
+ 		return
+@@ -131,6 +221,10 @@ func (c *keyRangeCache) addRanges(cacheUpdate *sppb.CacheUpdate) {
+ }
+ 
+ func (c *keyRangeCache) fillRoutingHint(ctx context.Context, preferLeader bool, mode rangeMode, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint) channelEndpoint {
++	return c.fillRoutingHintWithExclusions(ctx, preferLeader, mode, directedReadOptions, hint, nil)
++}
++
++func (c *keyRangeCache) fillRoutingHintWithExclusions(ctx context.Context, preferLeader bool, mode rangeMode, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if hint == nil || len(hint.GetKey()) == 0 {
+ 		return nil
+ 	}
+@@ -140,6 +234,8 @@ func (c *keyRangeCache) fillRoutingHint(ctx context.Context, preferLeader bool,
+ 
+ 	c.mu.Lock()
+ 	targetRange := c.findRangeLocked(hint.GetKey(), hint.GetLimitKey(), mode)
++	lifecycleManager := c.lifecycleManager
++	selector := c.replicaSelector
+ 	c.mu.Unlock()
+ 	if targetRange == nil || targetRange.group == nil {
+ 		return nil
+@@ -150,7 +246,7 @@ func (c *keyRangeCache) fillRoutingHint(ctx context.Context, preferLeader bool,
+ 	hint.Key = append(hint.Key[:0], targetRange.startKey...)
+ 	hint.LimitKey = append(hint.LimitKey[:0], targetRange.limitKey...)
+ 
+-	return targetRange.group.fillRoutingHint(ctx, c.endpointCache, preferLeader, directedReadOptions, hint)
++	return targetRange.group.fillRoutingHintWithExclusions(ctx, c, selector, c.endpointCache, lifecycleManager, preferLeader, directedReadOptions, hint, excludedEndpoints)
+ }
+ 
+ func (c *keyRangeCache) clear() {
+@@ -171,6 +267,24 @@ func (c *keyRangeCache) size() int {
+ 	return len(c.ranges)
+ }
+ 
++func (c *keyRangeCache) getActiveAddresses() map[string]struct{} {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	addresses := make(map[string]struct{})
++	for _, group := range c.groups {
++		group.mu.Lock()
++		for _, tablet := range group.tablets {
++			if tablet.serverAddress == "" {
++				continue
++			}
++			addresses[tablet.serverAddress] = struct{}{}
++		}
++		group.mu.Unlock()
++	}
++	return addresses
++}
++
+ func (c *keyRangeCache) shrinkTo(newSize int) {
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+@@ -494,10 +608,14 @@ func (t *cachedTablet) matchesReplicaSelection(selection *sppb.DirectedReadOptio
+ }
+ 
+ func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
++	return t.shouldSkipWithExclusions(hint, nil)
++}
++
++func (t *cachedTablet) shouldSkipWithExclusions(hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) bool {
+ 	if hint == nil {
+ 		return true
+ 	}
+-	if t.skip || t.serverAddress == "" || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
++	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) || (t.endpoint != nil && !t.endpoint.IsHealthy()) {
+ 		hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
+ 			TabletUid:   t.tabletUID,
+ 			Incarnation: append([]byte(nil), t.incarnation...),
+@@ -507,6 +625,97 @@ func (t *cachedTablet) shouldSkip(hint *sppb.RoutingHint) bool {
+ 	return false
+ }
+ 
++func (t *cachedTablet) shouldSkipForRouting(ctx context.Context, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) bool {
++	if hint == nil {
++		return true
++	}
++	if t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) {
++		t.addSkippedTablet(hint, skippedTabletUIDs)
++		return true
++	}
++
++	t.clearShutdownEndpoint()
++
++	if t.endpoint == nil && endpointCache != nil {
++		t.endpoint = endpointCache.Get(ctx, t.serverAddress)
++	}
++	if t.endpoint == nil {
++		if lifecycleManager != nil {
++			lifecycleManager.requestEndpointRecreation(t.serverAddress)
++		}
++		t.maybeAddRecentTransientFailureSkip(lifecycleManager, hint, skippedTabletUIDs)
++		return true
++	}
++	if t.endpoint.IsHealthy() {
++		return false
++	}
++
++	if lifecycleManager != nil {
++		lifecycleManager.requestEndpointRecreation(t.serverAddress)
++	}
++	if t.endpoint.IsTransientFailure() {
++		t.addSkippedTablet(hint, skippedTabletUIDs)
++		return true
++	}
++
++	t.maybeAddRecentTransientFailureSkip(lifecycleManager, hint, skippedTabletUIDs)
++	return true
++}
++
++func (t *cachedTablet) recordKnownTransientFailure(endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) {
++	if hint == nil || t.skip || t.serverAddress == "" || isEndpointExcluded(excludedEndpoints, t.serverAddress) {
++		return
++	}
++
++	t.clearShutdownEndpoint()
++
++	if t.endpoint == nil && endpointCache != nil {
++		t.endpoint = endpointCache.GetIfPresent(t.serverAddress)
++	}
++	if t.endpoint != nil && t.endpoint.IsTransientFailure() {
++		t.addSkippedTablet(hint, skippedTabletUIDs)
++		return
++	}
++
++	t.maybeAddRecentTransientFailureSkip(lifecycleManager, hint, skippedTabletUIDs)
++}
++
++func (t *cachedTablet) clearShutdownEndpoint() {
++	if t.endpoint == nil {
++		return
++	}
++	conn := t.endpoint.GetConn()
++	if conn == nil {
++		return
++	}
++	if conn.GetState() == connectivity.Shutdown {
++		t.endpoint = nil
++	}
++}
++
++func (t *cachedTablet) maybeAddRecentTransientFailureSkip(lifecycleManager *endpointLifecycleManager, hint *sppb.RoutingHint, skippedTabletUIDs map[uint64]struct{}) {
++	if lifecycleManager == nil || !lifecycleManager.wasRecentlyEvictedTransientFailure(t.serverAddress) {
++		return
++	}
++	t.addSkippedTablet(hint, skippedTabletUIDs)
++}
++
++func (t *cachedTablet) addSkippedTablet(hint *sppb.RoutingHint, skippedTabletUIDs map[uint64]struct{}) {
++	if hint == nil {
++		return
++	}
++	if skippedTabletUIDs != nil {
++		if _, ok := skippedTabletUIDs[t.tabletUID]; ok {
++			return
++		}
++		skippedTabletUIDs[t.tabletUID] = struct{}{}
++	}
++	hint.SkippedTabletUid = append(hint.SkippedTabletUid, &sppb.RoutingHint_SkippedTablet{
++		TabletUid:   t.tabletUID,
++		Incarnation: append([]byte(nil), t.incarnation...),
++	})
++}
++
+ func (t *cachedTablet) pick(ctx context.Context, endpointCache channelEndpointCache, hint *sppb.RoutingHint) channelEndpoint {
+ 	if hint != nil {
+ 		hint.TabletUid = t.tabletUID
+@@ -577,66 +786,131 @@ func (g *cachedGroup) leaderLocked() *cachedTablet {
+ }
+ 
+ func (g *cachedGroup) fillRoutingHint(ctx context.Context, endpointCache channelEndpointCache, preferLeader bool, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint) channelEndpoint {
++	return g.fillRoutingHintWithExclusions(ctx, nil, nil, endpointCache, nil, preferLeader, directedReadOptions, hint, nil)
++}
++
++func (g *cachedGroup) fillRoutingHintWithExclusions(ctx context.Context, cache *keyRangeCache, selector replicaSelector, endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, preferLeader bool, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	g.mu.Lock()
+ 
+ 	if directedReadOptions == nil {
+ 		directedReadOptions = &sppb.DirectedReadOptions{}
+ 	}
+ 	hasDirectedReadOptions := directedReadOptions.GetReplicas() != nil
++	skippedTabletUIDs := skippedTabletUIDsFromHint(hint)
+ 
+ 	leader := g.leaderLocked()
+-	if preferLeader && !hasDirectedReadOptions && leader != nil && leader.distance <= maxLocalReplicaDistance && !leader.shouldSkip(hint) {
+-		if leader.endpoint != nil || leader.serverAddress == "" {
+-			endpoint := leader.pick(ctx, endpointCache, hint)
+-			g.mu.Unlock()
+-			return endpoint
+-		}
+-		if hint != nil {
+-			hint.TabletUid = leader.tabletUID
+-		}
+-		serverAddress := leader.serverAddress
+-		g.mu.Unlock()
+-		endpoint := endpointCache.Get(ctx, serverAddress)
+-		g.mu.Lock()
+-		if leader.endpoint == nil && leader.serverAddress == serverAddress {
+-			leader.endpoint = endpoint
+-		}
+-		if hint != nil {
+-			hint.TabletUid = leader.tabletUID
+-		}
+-		result := leader.endpoint
++	if preferLeader && !hasDirectedReadOptions && leader != nil && leader.distance <= maxLocalReplicaDistance && !leader.shouldSkipForRouting(ctx, endpointCache, lifecycleManager, hint, excludedEndpoints, skippedTabletUIDs) {
++		g.recordKnownTransientFailuresLocked(endpointCache, lifecycleManager, leader, directedReadOptions, hint, excludedEndpoints, skippedTabletUIDs)
++		endpoint := leader.pick(ctx, endpointCache, hint)
+ 		g.mu.Unlock()
+-		return result
++		return endpoint
+ 	}
++	candidates := make([]*cachedTablet, 0, len(g.tablets))
+ 	for _, tablet := range g.tablets {
+ 		if !tablet.matches(directedReadOptions) {
+ 			continue
+ 		}
+-		if tablet.shouldSkip(hint) {
++		if tablet.shouldSkipForRouting(ctx, endpointCache, lifecycleManager, hint, excludedEndpoints, skippedTabletUIDs) {
+ 			continue
+ 		}
+-		if tablet.endpoint != nil || tablet.serverAddress == "" {
+-			endpoint := tablet.pick(ctx, endpointCache, hint)
+-			g.mu.Unlock()
+-			return endpoint
++		candidates = append(candidates, tablet)
++	}
++	selected := selectReplicaCandidate(cache, selector, candidates)
++	if selected != nil {
++		g.recordKnownTransientFailuresLocked(endpointCache, lifecycleManager, selected, directedReadOptions, hint, excludedEndpoints, skippedTabletUIDs)
++		endpoint := selected.pick(ctx, endpointCache, hint)
++		g.mu.Unlock()
++		return endpoint
++	}
++	g.mu.Unlock()
++	return nil
++}
++
++func selectReplicaCandidate(cache *keyRangeCache, selector replicaSelector, candidates []*cachedTablet) *cachedTablet {
++	if len(candidates) == 0 {
++		return nil
++	}
++	if len(candidates) == 1 || selector == nil {
++		return candidates[0]
++	}
++	if cache != nil && cache.replicaSelectionDeterministic() {
++		return selectReplicaCandidateDeterministically(cache, candidates)
++	}
++
++	endpoints := make([]channelEndpoint, 0, len(candidates))
++	endpointToTablet := make(map[string]*cachedTablet, len(candidates))
++	for _, candidate := range candidates {
++		if candidate == nil || candidate.endpoint == nil {
++			continue
+ 		}
+-		if hint != nil {
+-			hint.TabletUid = tablet.tabletUID
++		endpoints = append(endpoints, candidate.endpoint)
++		endpointToTablet[candidate.endpoint.Address()] = candidate
++	}
++	if len(endpoints) == 0 {
++		return candidates[0]
++	}
++
++	selected := selector.selectReplica(endpoints, func(endpoint channelEndpoint) float64 {
++		if cache == nil || endpoint == nil {
++			return math.MaxFloat64
+ 		}
+-		serverAddress := tablet.serverAddress
+-		g.mu.Unlock()
+-		endpoint := endpointCache.Get(ctx, serverAddress)
+-		g.mu.Lock()
+-		if tablet.endpoint == nil && tablet.serverAddress == serverAddress {
+-			tablet.endpoint = endpoint
++		return cache.latencyScore(endpoint.Address())
++	})
++	if selected == nil {
++		return candidates[0]
++	}
++	tablet := endpointToTablet[selected.Address()]
++	if tablet == nil {
++		return candidates[0]
++	}
++	return tablet
++}
++
++func selectReplicaCandidateDeterministically(cache *keyRangeCache, candidates []*cachedTablet) *cachedTablet {
++	selected := candidates[0]
++	selectedScore := deterministicReplicaScore(cache, selected)
++	for _, candidate := range candidates[1:] {
++		score := deterministicReplicaScore(cache, candidate)
++		if score < selectedScore {
++			selected = candidate
++			selectedScore = score
+ 		}
+-		if hint != nil {
+-			hint.TabletUid = tablet.tabletUID
++	}
++	return selected
++}
++
++func deterministicReplicaScore(cache *keyRangeCache, candidate *cachedTablet) float64 {
++	if cache == nil || candidate == nil || candidate.endpoint == nil {
++		return math.MaxFloat64
++	}
++	return cache.latencyScore(candidate.endpoint.Address())
++}
++
++func (c *keyRangeCache) replicaSelectionDeterministic() bool {
++	if c == nil {
++		return false
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.deterministicRandom
++}
++
++func (g *cachedGroup) recordKnownTransientFailuresLocked(endpointCache channelEndpointCache, lifecycleManager *endpointLifecycleManager, selected *cachedTablet, directedReadOptions *sppb.DirectedReadOptions, hint *sppb.RoutingHint, excludedEndpoints endpointExcluder, skippedTabletUIDs map[uint64]struct{}) {
++	for _, tablet := range g.tablets {
++		if tablet == selected || !tablet.matches(directedReadOptions) {
++			continue
+ 		}
+-		result := tablet.endpoint
+-		g.mu.Unlock()
+-		return result
++		tablet.recordKnownTransientFailure(endpointCache, lifecycleManager, hint, excludedEndpoints, skippedTabletUIDs)
+ 	}
+-	g.mu.Unlock()
+-	return nil
++}
++
++func skippedTabletUIDsFromHint(hint *sppb.RoutingHint) map[uint64]struct{} {
++	if hint == nil || len(hint.GetSkippedTabletUid()) == 0 {
++		return make(map[uint64]struct{})
++	}
++	skippedTabletUIDs := make(map[uint64]struct{}, len(hint.GetSkippedTabletUid()))
++	for _, skippedTablet := range hint.GetSkippedTabletUid() {
++		skippedTabletUIDs[skippedTablet.GetTabletUid()] = struct{}{}
++	}
++	return skippedTabletUIDs
+ }
+diff --git a/spanner/latency_tracker.go b/spanner/latency_tracker.go
+new file mode 100644
+index 0000000000..55d4c0aafb
+--- /dev/null
++++ b/spanner/latency_tracker.go
+@@ -0,0 +1,92 @@
++/*
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package spanner
++
++import (
++	"math"
++	"sync"
++	"time"
++)
++
++const defaultEWMALatencyAlpha = 0.05
++
++type latencyTracker interface {
++	getScore() float64
++	update(latency time.Duration)
++	recordError(penalty time.Duration)
++}
++
++type ewmaLatencyTracker struct {
++	mu          sync.Mutex
++	alpha       float64
++	score       float64
++	initialized bool
++}
++
++var _ latencyTracker = (*ewmaLatencyTracker)(nil)
++
++func newEWMALatencyTracker() *ewmaLatencyTracker {
++	return newEWMALatencyTrackerWithAlpha(defaultEWMALatencyAlpha)
++}
++
++func newEWMALatencyTrackerWithAlpha(alpha float64) *ewmaLatencyTracker {
++	if alpha <= 0 || alpha > 1 {
++		alpha = defaultEWMALatencyAlpha
++	}
++	return &ewmaLatencyTracker{alpha: alpha}
++}
++
++func (t *ewmaLatencyTracker) getScore() float64 {
++	if t == nil {
++		return math.MaxFloat64
++	}
++	t.mu.Lock()
++	defer t.mu.Unlock()
++
++	if !t.initialized {
++		return math.MaxFloat64
++	}
++	return t.score
++}
++
++func (t *ewmaLatencyTracker) update(latency time.Duration) {
++	if t == nil {
++		return
++	}
++	latencyMicros := durationToMicroseconds(latency)
++
++	t.mu.Lock()
++	defer t.mu.Unlock()
++
++	if !t.initialized {
++		t.score = latencyMicros
++		t.initialized = true
++		return
++	}
++	t.score = t.alpha*latencyMicros + (1-t.alpha)*t.score
++}
++
++func (t *ewmaLatencyTracker) recordError(penalty time.Duration) {
++	t.update(penalty)
++}
++
++func durationToMicroseconds(latency time.Duration) float64 {
++	if latency <= 0 {
++		return 0
++	}
++	return float64(latency.Nanoseconds()) / float64(time.Microsecond)
++}
+diff --git a/spanner/location_aware_client.go b/spanner/location_aware_client.go
+index fba7c14d74..64546e1ab9 100644
+--- a/spanner/location_aware_client.go
++++ b/spanner/location_aware_client.go
+@@ -23,7 +23,11 @@ import (
+ 	vkit "cloud.google.com/go/spanner/apiv1"
+ 	"cloud.google.com/go/spanner/apiv1/spannerpb"
+ 	"github.com/googleapis/gax-go/v2"
++	"go.opentelemetry.io/otel/attribute"
++	otrace "go.opentelemetry.io/otel/trace"
+ 	"google.golang.org/grpc"
++	"google.golang.org/grpc/codes"
++	"google.golang.org/grpc/status"
+ )
+ 
+ // locationAwareSpannerClient is a spannerClient wrapper that routes RPCs to
+@@ -42,6 +46,8 @@ type locationAwareSpannerClient struct {
+ 	router                  *locationRouter
+ 	endpointCache           channelEndpointCache
+ 	defaultAffinityEndpoint channelEndpoint
++	defaultEndpointAddress  string
++	excludedEndpoints       *logicalRequestEndpointExclusionCache
+ }
+ 
+ var _ spannerClient = (*locationAwareSpannerClient)(nil)
+@@ -59,11 +65,17 @@ func asGRPCSpannerClient(c spannerClient) *grpcSpannerClient {
+ }
+ 
+ func newLocationAwareSpannerClient(defaultClient spannerClient, router *locationRouter, endpointCache channelEndpointCache) *locationAwareSpannerClient {
++	var defaultAffinityEndpoint channelEndpoint = &passthroughChannelEndpoint{address: ""}
++	if endpointCache != nil && endpointCache.DefaultChannel() != nil {
++		defaultAffinityEndpoint = endpointCache.DefaultChannel()
++	}
+ 	return &locationAwareSpannerClient{
+ 		defaultClient:           defaultClient,
+ 		router:                  router,
+ 		endpointCache:           endpointCache,
+-		defaultAffinityEndpoint: &passthroughChannelEndpoint{address: ""},
++		defaultAffinityEndpoint: defaultAffinityEndpoint,
++		defaultEndpointAddress:  defaultAffinityEndpoint.Address(),
++		excludedEndpoints:       newLogicalRequestEndpointExclusionCache(),
+ 	}
+ }
+ 
+@@ -74,6 +86,59 @@ func (c *locationAwareSpannerClient) affinityTrackingEndpoint(ep channelEndpoint
+ 	return c.defaultAffinityEndpoint
+ }
+ 
++func (c *locationAwareSpannerClient) onRequestRouted(ep channelEndpoint) {
++	if c == nil || c.router == nil || c.router.lifecycleManager == nil || ep == nil || !ep.IsHealthy() {
++		return
++	}
++	c.router.lifecycleManager.recordRealTraffic(ep.Address())
++}
++
++func (c *locationAwareSpannerClient) excludedEndpointsForCall(opts []gax.CallOption) (string, endpointExcluder) {
++	if c == nil || c.excludedEndpoints == nil {
++		return "", noExcludedEndpoints
++	}
++	logicalRequestKey := logicalRequestKeyFromCallOptions(opts)
++	return logicalRequestKey, c.excludedEndpoints.consume(logicalRequestKey)
++}
++
++func (c *locationAwareSpannerClient) maybeExcludeEndpointOnNextCall(ep channelEndpoint, logicalRequestKey string, err error) {
++	if c == nil || c.excludedEndpoints == nil || ep == nil || logicalRequestKey == "" {
++		return
++	}
++	if status.Code(err) != codes.ResourceExhausted {
++		return
++	}
++	if ep.Address() == c.defaultEndpointAddress {
++		return
++	}
++	c.excludedEndpoints.record(logicalRequestKey, ep.Address())
++}
++
++func (c *locationAwareSpannerClient) recordRouteSelectionTrace(ctx context.Context, method string, ep channelEndpoint, usedDefaultEndpoint, hasChannelFinder bool) {
++	if c == nil {
++		return
++	}
++
++	span := otrace.SpanFromContext(ctx)
++	if !span.IsRecording() {
++		return
++	}
++
++	target := c.defaultEndpointAddress
++	if !usedDefaultEndpoint && ep != nil {
++		target = ep.Address()
++	}
++
++	attrs := []attribute.KeyValue{
++		attribute.String("spanner.target", target),
++		attribute.Bool("spanner.route.used_default_endpoint", usedDefaultEndpoint),
++		attribute.Bool("spanner.route.has_channel_finder", hasChannelFinder),
++		attribute.String("spanner.route.method", method),
++	}
++	span.SetAttributes(attrs...)
++	span.AddEvent("spanner.route.selected", otrace.WithAttributes(attrs...))
++}
++
+ // clientForEndpoint resolves a channelEndpoint to a spannerClient, falling
+ // back to the default client if the endpoint is nil, unhealthy, or has no
+ // associated client.
+@@ -85,16 +150,35 @@ func (c *locationAwareSpannerClient) clientForEndpoint(ep channelEndpoint) spann
+ 	if client == nil {
+ 		return c.defaultClient
+ 	}
++	c.onRequestRouted(ep)
+ 	return client
+ }
+ 
+ // affinityClient returns the spannerClient for a given transaction ID based on
+ // affinity, falling back to the default client.
+ func (c *locationAwareSpannerClient) affinityClient(txID []byte) spannerClient {
++	return c.affinityClientWithExclusions(txID, nil)
++}
++
++func (c *locationAwareSpannerClient) affinityEndpoint(txID []byte, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if len(txID) == 0 {
+-		return c.defaultClient
++		return nil
+ 	}
+ 	ep := c.router.getTransactionAffinity(string(txID))
++	if ep != nil && isEndpointExcluded(excludedEndpoints, ep.Address()) {
++		return nil
++	}
++	if ep != nil && !ep.IsHealthy() && c.router != nil && c.router.lifecycleManager != nil {
++		c.router.lifecycleManager.requestEndpointRecreation(ep.Address())
++	}
++	if ep != nil && !ep.IsHealthy() {
++		return nil
++	}
++	return ep
++}
++
++func (c *locationAwareSpannerClient) affinityClientWithExclusions(txID []byte, excludedEndpoints endpointExcluder) spannerClient {
++	ep := c.affinityEndpoint(txID, excludedEndpoints)
+ 	return c.clientForEndpoint(ep)
+ }
+ 
+@@ -151,10 +235,13 @@ func (c *locationAwareSpannerClient) BatchWrite(ctx context.Context, req *spanne
+ // --- Routed RPCs ---
+ 
+ func (c *locationAwareSpannerClient) StreamingRead(ctx context.Context, req *spannerpb.ReadRequest, opts ...gax.CallOption) (spannerpb.Spanner_StreamingReadClient, error) {
+-	ep := c.router.prepareReadRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareReadRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/StreamingRead", ep, client == c.defaultClient, true)
+ 	stream, err := client.StreamingRead(ctx, req, opts...)
+ 	if err != nil {
++		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		return nil, err
+ 	}
+ 	isReadOnlyBegin, readOnlyStrong := readOnlyBeginFromSelector(req.GetTransaction())
+@@ -165,14 +252,21 @@ func (c *locationAwareSpannerClient) StreamingRead(ctx context.Context, req *spa
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
++		nil,
++		func(err error) {
++			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
++		},
+ 	), nil
+ }
+ 
+ func (c *locationAwareSpannerClient) Read(ctx context.Context, req *spannerpb.ReadRequest, opts ...gax.CallOption) (*spannerpb.ResultSet, error) {
+-	ep := c.router.prepareReadRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareReadRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Read", ep, client == c.defaultClient, true)
+ 	resp, err := client.Read(ctx, req, opts...)
+ 	if err != nil {
++		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		return nil, err
+ 	}
+ 	c.router.observeResultSet(resp)
+@@ -187,10 +281,13 @@ func (c *locationAwareSpannerClient) Read(ctx context.Context, req *spannerpb.Re
+ }
+ 
+ func (c *locationAwareSpannerClient) ExecuteStreamingSql(ctx context.Context, req *spannerpb.ExecuteSqlRequest, opts ...gax.CallOption) (spannerpb.Spanner_ExecuteStreamingSqlClient, error) {
+-	ep := c.router.prepareExecuteSQLRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareExecuteSQLRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/ExecuteStreamingSql", ep, client == c.defaultClient, true)
+ 	stream, err := client.ExecuteStreamingSql(ctx, req, opts...)
+ 	if err != nil {
++		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		return nil, err
+ 	}
+ 	isReadOnlyBegin, readOnlyStrong := readOnlyBeginFromSelector(req.GetTransaction())
+@@ -201,14 +298,21 @@ func (c *locationAwareSpannerClient) ExecuteStreamingSql(ctx context.Context, re
+ 		isReadOnlyBegin,
+ 		readOnlyStrong,
+ 		isReadWriteBeginFromSelector(req.GetTransaction()),
++		nil,
++		func(err error) {
++			c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
++		},
+ 	), nil
+ }
+ 
+ func (c *locationAwareSpannerClient) ExecuteSql(ctx context.Context, req *spannerpb.ExecuteSqlRequest, opts ...gax.CallOption) (*spannerpb.ResultSet, error) {
+-	ep := c.router.prepareExecuteSQLRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareExecuteSQLRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/ExecuteSql", ep, client == c.defaultClient, true)
+ 	resp, err := client.ExecuteSql(ctx, req, opts...)
+ 	if err != nil {
++		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		return nil, err
+ 	}
+ 	c.router.observeResultSet(resp)
+@@ -223,10 +327,13 @@ func (c *locationAwareSpannerClient) ExecuteSql(ctx context.Context, req *spanne
+ }
+ 
+ func (c *locationAwareSpannerClient) BeginTransaction(ctx context.Context, req *spannerpb.BeginTransactionRequest, opts ...gax.CallOption) (*spannerpb.Transaction, error) {
+-	ep := c.router.prepareBeginTransactionRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareBeginTransactionRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/BeginTransaction", ep, client == c.defaultClient, true)
+ 	resp, err := client.BeginTransaction(ctx, req, opts...)
+ 	if err != nil {
++		c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 		return nil, err
+ 	}
+ 	c.router.observeTransaction(resp)
+@@ -243,22 +350,29 @@ func (c *locationAwareSpannerClient) BeginTransaction(ctx context.Context, req *
+ // --- Affinity RPCs ---
+ 
+ func (c *locationAwareSpannerClient) Commit(ctx context.Context, req *spannerpb.CommitRequest, opts ...gax.CallOption) (*spannerpb.CommitResponse, error) {
+-	ep := c.router.prepareCommitRequest(ctx, req)
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.router.prepareCommitRequestWithExclusions(ctx, req, excludedEndpoints)
+ 	if txID := req.GetTransactionId(); len(txID) > 0 {
+-		if affinityEndpoint := c.router.getTransactionAffinity(string(txID)); affinityEndpoint != nil {
++		if affinityEndpoint := c.affinityEndpoint(txID, excludedEndpoints); affinityEndpoint != nil {
+ 			ep = affinityEndpoint
+ 		}
+ 	}
+ 	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Commit", ep, client == c.defaultClient, len(req.GetMutations()) > 0)
+ 	resp, err := client.Commit(ctx, req, opts...)
++	c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 	c.router.observeCommitResponse(resp)
+ 	c.router.clearTransactionAffinity(string(req.GetTransactionId()))
+ 	return resp, err
+ }
+ 
+ func (c *locationAwareSpannerClient) Rollback(ctx context.Context, req *spannerpb.RollbackRequest, opts ...gax.CallOption) error {
+-	client := c.affinityClient(req.GetTransactionId())
++	logicalRequestKey, excludedEndpoints := c.excludedEndpointsForCall(opts)
++	ep := c.affinityEndpoint(req.GetTransactionId(), excludedEndpoints)
++	client := c.clientForEndpoint(ep)
++	c.recordRouteSelectionTrace(ctx, "google.spanner.v1.Spanner/Rollback", ep, client == c.defaultClient, false)
+ 	err := client.Rollback(ctx, req, opts...)
++	c.maybeExcludeEndpointOnNextCall(ep, logicalRequestKey, err)
+ 	c.router.clearTransactionAffinity(string(req.GetTransactionId()))
+ 	return err
+ }
+@@ -274,7 +388,11 @@ type affinityTrackingStream struct {
+ 	readOnlyStrong     bool
+ 	trackAffinity      bool
+ 	once               sync.Once
++	errorOnce          sync.Once
++	latencyOnce        sync.Once
+ 	inner              streamingClient
++	onFirstResponse    func()
++	onError            func(error)
+ }
+ 
+ // streamingClient is the shared interface implemented by both
+@@ -291,6 +409,8 @@ func newAffinityTrackingStream(
+ 	trackReadOnlyBegin bool,
+ 	readOnlyStrong bool,
+ 	trackAffinity bool,
++	onFirstResponse func(),
++	onError func(error),
+ ) *affinityTrackingStream {
+ 	return &affinityTrackingStream{
+ 		ClientStream:       inner,
+@@ -300,14 +420,26 @@ func newAffinityTrackingStream(
+ 		readOnlyStrong:     readOnlyStrong,
+ 		trackAffinity:      trackAffinity,
+ 		inner:              inner,
++		onFirstResponse:    onFirstResponse,
++		onError:            onError,
+ 	}
+ }
+ 
+ func (s *affinityTrackingStream) Recv() (*spannerpb.PartialResultSet, error) {
+ 	prs, err := s.inner.Recv()
+ 	if err != nil {
++		s.errorOnce.Do(func() {
++			if s.onError != nil {
++				s.onError(err)
++			}
++		})
+ 		return nil, err
+ 	}
++	s.latencyOnce.Do(func() {
++		if s.onFirstResponse != nil {
++			s.onFirstResponse()
++		}
++	})
+ 	// Record transaction metadata from the first PartialResultSet that contains
+ 	// a transaction ID.
+ 	if txMeta := prs.GetMetadata().GetTransaction(); txMeta != nil && len(txMeta.GetId()) > 0 {
+diff --git a/spanner/location_endpoint.go b/spanner/location_endpoint.go
+index 33e2a7ff34..1bdbb36568 100644
+--- a/spanner/location_endpoint.go
++++ b/spanner/location_endpoint.go
+@@ -19,17 +19,24 @@ package spanner
+ import (
+ 	"context"
+ 	"sync"
++
++	"google.golang.org/grpc"
+ )
+ 
+ // channelEndpoint represents a routable server endpoint.
+ type channelEndpoint interface {
+ 	Address() string
+ 	IsHealthy() bool
++	IsTransientFailure() bool
++	GetConn() *grpc.ClientConn
+ }
+ 
+ // channelEndpointCache caches endpoints by server address.
+ type channelEndpointCache interface {
+ 	Get(ctx context.Context, address string) channelEndpoint
++	GetIfPresent(address string) channelEndpoint
++	Evict(address string)
++	DefaultChannel() channelEndpoint
+ 	ClientFor(ep channelEndpoint) spannerClient
+ 	Close() error
+ }
+@@ -38,6 +45,11 @@ type passthroughChannelEndpoint struct {
+ 	address string
+ }
+ 
++var (
++	_ channelEndpoint      = (*passthroughChannelEndpoint)(nil)
++	_ channelEndpointCache = (*passthroughChannelEndpointCache)(nil)
++)
++
+ func (e *passthroughChannelEndpoint) Address() string {
+ 	return e.address
+ }
+@@ -46,16 +58,31 @@ func (*passthroughChannelEndpoint) IsHealthy() bool {
+ 	return true
+ }
+ 
++func (*passthroughChannelEndpoint) IsTransientFailure() bool {
++	return false
++}
++
++func (*passthroughChannelEndpoint) GetConn() *grpc.ClientConn {
++	return nil
++}
++
+ type passthroughChannelEndpointCache struct {
+-	mu        sync.Mutex
+-	endpoints map[string]*passthroughChannelEndpoint
++	mu              sync.Mutex
++	endpoints       map[string]*passthroughChannelEndpoint
++	defaultEndpoint *passthroughChannelEndpoint
+ }
+ 
+ func newPassthroughChannelEndpointCache() *passthroughChannelEndpointCache {
+-	return &passthroughChannelEndpointCache{endpoints: make(map[string]*passthroughChannelEndpoint)}
++	return &passthroughChannelEndpointCache{
++		endpoints:       make(map[string]*passthroughChannelEndpoint),
++		defaultEndpoint: &passthroughChannelEndpoint{address: ""},
++	}
+ }
+ 
+ func (c *passthroughChannelEndpointCache) Get(_ context.Context, address string) channelEndpoint {
++	if address == "" {
++		return c.defaultEndpoint
++	}
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 	if endpoint, ok := c.endpoints[address]; ok {
+@@ -66,6 +93,32 @@ func (c *passthroughChannelEndpointCache) Get(_ context.Context, address string)
+ 	return endpoint
+ }
+ 
++func (c *passthroughChannelEndpointCache) GetIfPresent(address string) channelEndpoint {
++	if address == "" {
++		return c.defaultEndpoint
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	endpoint, ok := c.endpoints[address]
++	if !ok {
++		return nil
++	}
++	return endpoint
++}
++
++func (c *passthroughChannelEndpointCache) Evict(address string) {
++	if address == c.defaultEndpoint.Address() {
++		return
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	delete(c.endpoints, address)
++}
++
++func (c *passthroughChannelEndpointCache) DefaultChannel() channelEndpoint {
++	return c.defaultEndpoint
++}
++
+ func (c *passthroughChannelEndpointCache) ClientFor(_ channelEndpoint) spannerClient {
+ 	return nil
+ }
+diff --git a/spanner/location_router.go b/spanner/location_router.go
+index 60493bd38f..a9c27f8287 100644
+--- a/spanner/location_router.go
++++ b/spanner/location_router.go
+@@ -28,8 +28,9 @@ import (
+ const experimentalLocationAPIEnvVar = "GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API"
+ 
+ type locationRouter struct {
+-	finder        *channelFinder
+-	endpointCache channelEndpointCache
++	finder           *channelFinder
++	endpointCache    channelEndpointCache
++	lifecycleManager *endpointLifecycleManager
+ 
+ 	affinityMu                      sync.RWMutex
+ 	transactionAffinity             map[string]channelEndpoint
+@@ -37,8 +38,16 @@ type locationRouter struct {
+ }
+ 
+ func isExperimentalLocationAPIEnabled() bool {
+-	enabled, _ := strconv.ParseBool(os.Getenv(experimentalLocationAPIEnvVar))
+-	return enabled
++	return isExperimentalLocationAPIEnabledForConfig(ClientConfig{})
++}
++
++func isExperimentalLocationAPIEnabledForConfig(config ClientConfig) bool {
++	locationAPIEnvValue := os.Getenv(experimentalLocationAPIEnvVar)
++	if locationAPIEnvValue != "" {
++		enabled, _ := strconv.ParseBool(locationAPIEnvValue)
++		return enabled
++	}
++	return config.IsExperimentalHost
+ }
+ 
+ func newLocationRouter(endpointCache channelEndpointCache) *locationRouter {
+@@ -54,75 +63,91 @@ func newLocationRouter(endpointCache channelEndpointCache) *locationRouter {
+ }
+ 
+ func (r *locationRouter) prepareReadRequest(ctx context.Context, req *sppb.ReadRequest) channelEndpoint {
++	return r.prepareReadRequestWithExclusions(ctx, req, nil)
++}
++
++func (r *locationRouter) prepareReadRequestWithExclusions(ctx context.Context, req *sppb.ReadRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if r == nil || req == nil {
+ 		return nil
+ 	}
+ 	if txID := transactionIDFromSelector(req.GetTransaction()); txID != "" {
+ 		if preferLeader, ok := r.getReadOnlyTransactionPreferLeader(txID); ok {
+-			return r.finder.findServerRead(ctx, req, preferLeader)
++			return r.finder.findServerReadWithExclusions(ctx, req, preferLeader, excludedEndpoints)
+ 		}
+-		if ep := r.getTransactionAffinity(txID); ep != nil {
++		if ep := r.getTransactionAffinity(txID); ep != nil && !isEndpointExcluded(excludedEndpoints, ep.Address()) {
+ 			return ep
+ 		}
+ 	}
+-	return r.finder.findServerReadWithTransaction(ctx, req)
++	return r.finder.findServerReadWithExclusions(ctx, req, preferLeaderFromSelector(req.GetTransaction()), excludedEndpoints)
+ }
+ 
+ func (r *locationRouter) prepareExecuteSQLRequest(ctx context.Context, req *sppb.ExecuteSqlRequest) channelEndpoint {
++	return r.prepareExecuteSQLRequestWithExclusions(ctx, req, nil)
++}
++
++func (r *locationRouter) prepareExecuteSQLRequestWithExclusions(ctx context.Context, req *sppb.ExecuteSqlRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if r == nil || req == nil {
+ 		return nil
+ 	}
+ 	if txID := transactionIDFromSelector(req.GetTransaction()); txID != "" {
+ 		if preferLeader, ok := r.getReadOnlyTransactionPreferLeader(txID); ok {
+-			return r.finder.findServerExecuteSQL(ctx, req, preferLeader)
++			return r.finder.findServerExecuteSQLWithExclusions(ctx, req, preferLeader, excludedEndpoints)
+ 		}
+-		if ep := r.getTransactionAffinity(txID); ep != nil {
++		if ep := r.getTransactionAffinity(txID); ep != nil && !isEndpointExcluded(excludedEndpoints, ep.Address()) {
+ 			return ep
+ 		}
+ 	}
+-	return r.finder.findServerExecuteSQLWithTransaction(ctx, req)
++	return r.finder.findServerExecuteSQLWithExclusions(ctx, req, preferLeaderFromSelector(req.GetTransaction()), excludedEndpoints)
+ }
+ 
+ func (r *locationRouter) prepareBeginTransactionRequest(ctx context.Context, req *sppb.BeginTransactionRequest) channelEndpoint {
++	return r.prepareBeginTransactionRequestWithExclusions(ctx, req, nil)
++}
++
++func (r *locationRouter) prepareBeginTransactionRequestWithExclusions(ctx context.Context, req *sppb.BeginTransactionRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if r == nil || req == nil {
+ 		return nil
+ 	}
+-	return r.finder.findServerBeginTransaction(ctx, req)
++	return r.finder.findServerBeginTransactionWithExclusions(ctx, req, excludedEndpoints)
+ }
+ 
+ func (r *locationRouter) prepareCommitRequest(ctx context.Context, req *sppb.CommitRequest) channelEndpoint {
++	return r.prepareCommitRequestWithExclusions(ctx, req, nil)
++}
++
++func (r *locationRouter) prepareCommitRequestWithExclusions(ctx context.Context, req *sppb.CommitRequest, excludedEndpoints endpointExcluder) channelEndpoint {
+ 	if r == nil || req == nil {
+ 		return nil
+ 	}
+-	return r.finder.fillCommitRoutingHint(ctx, req)
++	return r.finder.fillCommitRoutingHintWithExclusions(ctx, req, excludedEndpoints)
+ }
+ 
+ func (r *locationRouter) observePartialResultSet(prs *sppb.PartialResultSet) {
+ 	if r == nil || prs == nil || prs.GetCacheUpdate() == nil {
+ 		return
+ 	}
+-	r.finder.update(prs.GetCacheUpdate())
++	r.finder.updateAsync(prs.GetCacheUpdate())
+ }
+ 
+ func (r *locationRouter) observeResultSet(rs *sppb.ResultSet) {
+ 	if r == nil || rs == nil || rs.GetCacheUpdate() == nil {
+ 		return
+ 	}
+-	r.finder.update(rs.GetCacheUpdate())
++	r.finder.updateAsync(rs.GetCacheUpdate())
+ }
+ 
+ func (r *locationRouter) observeTransaction(tx *sppb.Transaction) {
+ 	if r == nil || tx == nil || tx.GetCacheUpdate() == nil {
+ 		return
+ 	}
+-	r.finder.update(tx.GetCacheUpdate())
++	r.finder.updateAsync(tx.GetCacheUpdate())
+ }
+ 
+ func (r *locationRouter) observeCommitResponse(resp *sppb.CommitResponse) {
+ 	if r == nil || resp == nil || resp.GetCacheUpdate() == nil {
+ 		return
+ 	}
+-	r.finder.update(resp.GetCacheUpdate())
++	r.finder.updateAsync(resp.GetCacheUpdate())
+ }
+ 
+ func (r *locationRouter) setTransactionAffinity(txID string, ep channelEndpoint) {
+@@ -178,7 +203,13 @@ func (r *locationRouter) clearTransactionAffinity(txID string) {
+ }
+ 
+ func (r *locationRouter) Close() error {
+-	if r == nil || r.endpointCache == nil {
++	if r == nil {
++		return nil
++	}
++	if r.lifecycleManager != nil {
++		r.lifecycleManager.shutdown()
++	}
++	if r.endpointCache == nil {
+ 		return nil
+ 	}
+ 	return r.endpointCache.Close()
+diff --git a/spanner/replica_selector.go b/spanner/replica_selector.go
+new file mode 100644
+index 0000000000..a90d96602a
+--- /dev/null
++++ b/spanner/replica_selector.go
+@@ -0,0 +1,77 @@
++/*
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package spanner
++
++import (
++	"math"
++	"math/rand"
++)
++
++type replicaSelector interface {
++	selectReplica(candidates []channelEndpoint, scoreLookup func(channelEndpoint) float64) channelEndpoint
++}
++
++type powerOfTwoReplicaSelector struct {
++	randomIntn func(int) int
++}
++
++var _ replicaSelector = (*powerOfTwoReplicaSelector)(nil)
++
++func newPowerOfTwoReplicaSelector() *powerOfTwoReplicaSelector {
++	return newPowerOfTwoReplicaSelectorWithRandom(rand.Intn)
++}
++
++func newPowerOfTwoReplicaSelectorWithRandom(randomIntn func(int) int) *powerOfTwoReplicaSelector {
++	if randomIntn == nil {
++		randomIntn = rand.Intn
++	}
++	return &powerOfTwoReplicaSelector{randomIntn: randomIntn}
++}
++
++func (s *powerOfTwoReplicaSelector) selectReplica(candidates []channelEndpoint, scoreLookup func(channelEndpoint) float64) channelEndpoint {
++	if len(candidates) == 0 {
++		return nil
++	}
++	if len(candidates) == 1 {
++		return candidates[0]
++	}
++	if scoreLookup == nil {
++		scoreLookup = func(channelEndpoint) float64 { return math.MaxFloat64 }
++	}
++
++	index1 := s.randomIntn(len(candidates))
++	index2 := s.randomIntn(len(candidates) - 1)
++	if index2 >= index1 {
++		index2++
++	}
++
++	candidate1 := candidates[index1]
++	candidate2 := candidates[index2]
++	score1 := sanitizeReplicaScore(scoreLookup(candidate1))
++	score2 := sanitizeReplicaScore(scoreLookup(candidate2))
++	if score1 <= score2 {
++		return candidate1
++	}
++	return candidate2
++}
++
++func sanitizeReplicaScore(score float64) float64 {
++	if math.IsNaN(score) || math.IsInf(score, 0) {
++		return math.MaxFloat64
++	}
++	return score
++}
+diff --git a/spanner/request_id_header.go b/spanner/request_id_header.go
+index d25a009024..b2ada59b80 100644
+--- a/spanner/request_id_header.go
++++ b/spanner/request_id_header.go
+@@ -22,6 +22,7 @@ import (
+ 	"io"
+ 	"math"
+ 	"math/big"
++	"strings"
+ 	"sync/atomic"
+ 	"time"
+ 
+@@ -86,6 +87,15 @@ func (g *grpcSpannerClient) appendRequestIDToGRPCOptions(priors []grpc.CallOptio
+ 
+ type requestID string
+ 
++func (r requestID) logicalRequestKey() string {
++	requestIDValue := string(r)
++	lastSeparator := strings.LastIndexByte(requestIDValue, '.')
++	if lastSeparator < 0 {
++		return requestIDValue
++	}
++	return requestIDValue[:lastSeparator]
++}
++
+ // augmentErrorWithRequestID introspects error converting it to an *.Error and
+ // attaching the subject requestID, unless it is one of the following:
+ // * nil
+@@ -138,6 +148,26 @@ func gRPCCallOptionsToRequestID(opts []grpc.CallOption) (md metadata.MD, reqID r
+ 	return
+ }
+ 
++func logicalRequestKeyFromCallOptions(opts []gax.CallOption) string {
++	if len(opts) == 0 {
++		return ""
++	}
++
++	var settings gax.CallSettings
++	for _, opt := range opts {
++		if opt == nil {
++			continue
++		}
++		opt.Resolve(&settings)
++	}
++
++	_, reqID, found := gRPCCallOptionsToRequestID(settings.GRPC)
++	if !found {
++		return ""
++	}
++	return reqID.logicalRequestKey()
++}
++
+ func (wr *requestIDHeaderInjector) interceptUnary(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+ 	// It is imperative to search for the requestID before the call
+ 	// because gRPC's internals will consume the headers.
+diff --git a/spanner/testdata/location/finder_test.textproto b/spanner/testdata/location/finder_test.textproto
+index 5747c2aee0..f3b9adc68b 100644
+--- a/spanner/testdata/location/finder_test.textproto
++++ b/spanner/testdata/location/finder_test.textproto
+@@ -7283,10 +7283,6 @@ test_case {
+         tablet_uid: 195035137
+         incarnation: "\001\331"
+       }
+-      skipped_tablet_uid {
+-        tablet_uid: 195035137
+-        incarnation: "\001\331"
+-      }
+     }
+   }
+   event {
+@@ -8372,10 +8368,6 @@ test_case {
+         tablet_uid: 72351745
+         incarnation: "\001H"
+       }
+-      skipped_tablet_uid {
+-        tablet_uid: 72351745
+-        incarnation: "\001H"
+-      }
+     }
+   }
+   event {
+diff --git a/spanner/testdata/location/range_cache_test.textproto b/spanner/testdata/location/range_cache_test.textproto
+index 70a5e1151d..cb48dadfbd 100644
+--- a/spanner/testdata/location/range_cache_test.textproto
++++ b/spanner/testdata/location/range_cache_test.textproto
+@@ -1200,5 +1200,3 @@ test_case {
+     }
+   }
+ }
+-
+-
