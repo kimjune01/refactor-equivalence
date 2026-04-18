@@ -158,3 +158,17 @@ Mitigations baked into v2 design: pipeline wrapping makes single-shot training h
 **v3 decision**: Cap hunt-code at N=5. First 3-4 rounds catch real issues; rounds 5-10 oscillate. Saves ~50% of hunt-code token cost per trial with expected minimal approval-rate impact.
 
 **Provisional priority**: LOCKED for v3.
+
+### 2026-04-18 07:45 — v3 pipeline simplification: drop in-pipeline reviewer (4g)
+
+**Trigger**: v2 used Gemini both in-pipeline (4g reviewer-loop) AND as Phase 7 measurement instrument. This creates pre-approval bias — Gemini judges code it helped shape.
+
+**v2 evidence**: Hunt-code (codex, iterative) did most of the convergence work. Reviewer-loop (Gemini, 4g) was 1-2 rounds in most trials — a final check, not a shaping force. Removing it simplifies the pipeline and makes Phase 7 uncontaminated.
+
+**v3 design**: Two models converge, third reviews independently.
+- Generator pair (Opus + Codex): blind-blind, smaller-churn wins
+- Adversarial pair (Codex + Codex): hunt-code iterative N≤5, build+test every round
+- Independent reviewer (Gemini): Phase 7 only, blind forced choice, 1-2 rounds
+- Drop 4g (in-pipeline reviewer-loop) entirely
+
+**Provisional priority**: LOCKED for v3.
