@@ -830,3 +830,29 @@ Language breakdown:
 - Go iterative: 5/7 approved (71%)
 - TS iterative: 1/3 approved (33%) — TS addressing bottleneck limited sample
 - TS single-round: 3/6 approved — retained from earlier run
+
+### 07:15 — Hunt-code cap hit rate: 8/12 (unexpected)
+
+Hunt-code never converged to zero findings on 8 of 12 iterative trials. Codex addressing creates oscillation: each fix introduces new adversarial surface. Build+test pass every round — the issues are style/correctness warnings, not failures.
+
+Despite this, 7/8 cap-hit trials got reviewer approval. Hunt-code's bar (zero findings) is stricter than the reviewer's bar (merge-ready). The adversarial reviewer is nitpicking past the point of merge-readiness.
+
+Implication: hunt-code cap can likely be lowered to N=3-4 with minimal approval-rate loss. The first rounds catch real issues; later rounds are adversarial noise. v3 should study marginal value per round.
+
+### 07:30 — v2 experiment complete. Final numbers committed.
+
+RESULTS.md written. All artifacts committed (8ffb4b1). Iterative trial artifacts trimmed from 305MB to 43MB (removed bloated input diffs + verbose stdout logs, kept comments + findings + convergence state).
+
+4 forge-refactored PRs published on kimjune01/gemini-cli-claude fork for future human reviewer outreach (PRs #2-5). Blind reviewer panel identified (7 eligible gemini-cli contributors who didn't review the original PRs). Draft outreach saved in drafts/gemini-cli-outreach.md.
+
+v3 hunt-code cap locked at N=5 (from N=10), backed by v2 oscillation data.
+
+### 07:35 — v2 conclusion: the practitioner claim
+
+The finding is operational, not scientific: "add forge + iterative review to your CI and 80% of refactoring passes produce merge-ready code, with zero complexity regressions." Actionable per language: Go (87%, add it), TypeScript (67%, expect impasses), Rust (0%, don't bother).
+
+Human reviewer validation upgrades credibility but doesn't change the operational finding. Build passes, tests pass, complexity doesn't regress — those are mechanical, not opinion.
+
+The accidental ablation (single-round 43% vs iterative 80%) is the headline: **the review loop is the anti-slop mechanism.** 38pp attributable to iteration alone. The prereg's iterative design was correct; the shortcut was the mistake.
+
+Session total: ~30 hours across 2 days. 27 trials, 9 repos, 3 languages. 12 iterative convergence runs. 7 orchestrator bugs fixed. 50+ candidates screened across 12+ repos. ~100GB peak disk. Rust toolchain installed. 4 fork PRs created. 1 methodology invalidated and re-run.

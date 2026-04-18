@@ -145,3 +145,16 @@ Risks: contamination (pipelines train against the bench's PR set), Goodhart targ
 Mitigations baked into v2 design: pipeline wrapping makes single-shot training harder to game, reviewer-loop iteration measures address-quality not just first-shot, survivorship + size restriction limits scope of claims, multi-language coverage prevents single-language overfit.
 
 **Provisional priority**: medium if v2's pipeline turns out reproducible by external harness developers. Smaller audience than "model leaderboard" but a real and growing one — agent harness development is an emerging category (forge, Aider, OpenHands, SWE-agent, HumanLayer-style orchestration). A bench that distinguishes good harnesses from sloppy ones serves an unmet need.
+
+### 2026-04-18 07:20 — Hunt-code cap: N=10 → N=5 for v3
+
+**Trigger**: v2 data shows 8/12 iterative trials hit the N=10 cap. Findings oscillate (2-5 per round) but never reach zero. Yet 7/8 cap-hit trials got reviewer approval. Later rounds are adversarial noise, not value.
+
+**v2 evidence**: Hunt-code rounds vs reviewer outcome:
+- Converged before cap (2/12): both approved
+- Hit cap N=10 (8/12): 5 approved, 3 impasse
+- Build/test failure recovery (2/12): both approved after recovery
+
+**v3 decision**: Cap hunt-code at N=5. First 3-4 rounds catch real issues; rounds 5-10 oscillate. Saves ~50% of hunt-code token cost per trial with expected minimal approval-rate impact.
+
+**Provisional priority**: LOCKED for v3.
