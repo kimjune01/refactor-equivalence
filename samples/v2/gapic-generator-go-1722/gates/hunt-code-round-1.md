@@ -2,6 +2,7 @@
 Command: `go build ./...`
 Exit code: 0
 Tail 50 lines:
+
 ```text
 ```
 
@@ -9,17 +10,18 @@ Tail 50 lines:
 Command: `go test ./... -count=1 -short`
 Exit code: 0
 Tail 50 lines:
+
 ```text
 ?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
 ?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
 ?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
-ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.209s
-ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.366s
-ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.642s
+ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.308s
+ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.517s
+ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.700s
 ?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
-ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.472s
+ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	1.144s
 ?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
-ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.784s
+ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.919s
 ?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
 ?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
 ?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
@@ -28,7 +30,8 @@ ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.784s
 ## Finding F1 — Vocabulary construction is still unconditional
 **Severity**: warning
 **File**: internal/gengapic/generator.go:108
-**What**: Accepted claim C1 was not applied. The generator still scans every method and builds the heuristic vocabulary unconditionally, even when `DynamicResourceHeuristicsFeature` is disabled. Current lines:
+**What**: Accepted claim C1 says the method scan and `buildHeuristicVocabulary(methods)` assignment should be wrapped in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }`, leaving `g.vocabulary` nil when the feature is disabled. The current source still scans every proto file and builds the vocabulary unconditionally:
+
 ```go
    108		var methods []*descriptorpb.MethodDescriptorProto
    109		for _, f := range req.GetProtoFile() {
@@ -38,51 +41,53 @@ ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.784s
    113		}
    114		g.vocabulary = buildHeuristicVocabulary(methods)
 ```
-**Fix**: Wrap the method scan and `g.vocabulary = buildHeuristicVocabulary(methods)` assignment in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }`, leaving `g.vocabulary` nil when the feature is disabled.
 
-## Finding F2 — Resource-name telemetry emission remains duplicated
+**Fix**: Wrap lines 108-114 in a `DynamicResourceHeuristicsFeature` feature check so the scan and assignment only happen when that feature is enabled.
+
+## Finding F2 — Resource-name telemetry emission was not centralized
 **Severity**: warning
-**File**: internal/gengapic/gengapic.go:501
-**What**: Accepted claim C2 was not applied. The gRPC and REST branches still contain separate copies of the resource-name telemetry emission body instead of calling a shared helper from inside the existing `OpenTelemetryAttributesFeature` guards. Current gRPC lines:
+**File**: internal/gengapic/gengapic.go:512
+**What**: Accepted claim C2 says the duplicated `resTarget` formatting and emission body inside the existing gRPC and REST `OpenTelemetryAttributesFeature` branches should be extracted into one private helper. The current source still contains the duplicated body inline in both branches. In the gRPC branch:
+
 ```go
-   501				if g.featureEnabled(OpenTelemetryAttributesFeature) {
-   502					resTarget := g.resourceNameField(m)
-   503					if resTarget != nil {
-   504						p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
-   505	
-   506						// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
-   507						// the expression fieldGetter(resField) returns an accessor for the full
-   508						// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
-   509						// APIs (missing the resource_reference annotation), an empty string is returned.
-   510	
-   511						// Prepend the service host if available
    512						var getters []string
    513						for _, f := range resTarget.FieldNames {
    514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
    515						}
+   516						gettersStr := strings.Join(getters, ", ")
 ```
-Current REST lines:
+
+and in the REST branch:
+
 ```go
-   539				if g.featureEnabled(OpenTelemetryAttributesFeature) {
-   540					resTarget := g.resourceNameField(m)
-   541					if resTarget != nil {
-   542						p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
-   543						// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
-   544						// the expression fieldGetter(resField) returns an accessor for the full
-   545						// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
-   546						// APIs (missing the resource_reference annotation), an empty string is returned.
-   547	
    548						var getters []string
    549						for _, f := range resTarget.FieldNames {
    550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
    551						}
+   552						gettersStr := strings.Join(getters, ", ")
 ```
-**Fix**: Extract the duplicated `resTarget` formatting/emission body into one private helper in `gengapic.go`, keep both outer generator-time `OpenTelemetryAttributesFeature` guards, and call the helper only after `resourceNameField` returns a non-nil target.
+
+The duplicated emission/import block also remains in the REST branch:
+
+```go
+   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+   561						if host != "" {
+   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+   563						} else {
+   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+   565						}
+   566						p("}")
+   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
+```
+
+**Fix**: Extract the shared formatting/emission/import logic into one private helper in `gengapic.go`, and call it from both transport branches only after `resourceNameField` returns a non-nil target inside the existing `OpenTelemetryAttributesFeature` guard.
 
 ## Finding F3 — `resourceNameField` documentation is still stale
 **Severity**: warning
 **File**: internal/gengapic/gengapic.go:906
-**What**: Accepted claim C3 was not applied. The comment still describes the old string-returning implementation and says the function returns an empty string, but the function now returns `*heuristicTarget` or nil and can infer dynamic HTTP-path targets. Current lines:
+**What**: Accepted claim C3 says the comment should describe the current `*heuristicTarget` return value, annotated-field preference, and dynamic HTTP-path inference when `DynamicResourceHeuristicsFeature` is enabled. The current comment still describes the old string-returning implementation and says it returns an empty string:
+
 ```go
    906	// resourceNameField returns the name of the field in the input message
    907	// that carries a google.api.resource_reference annotation.
@@ -90,26 +95,23 @@ Current REST lines:
    909	// If no input type or associated attributes are found, it returns an empty string.
    910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
 ```
-**Fix**: Rewrite the comment to describe returning a `*heuristicTarget`, preferring annotated `resource_reference` fields, and falling back to dynamic HTTP-path inference only when no annotation exists and `DynamicResourceHeuristicsFeature` is enabled.
 
-## Finding F4 — Heuristic vocabulary construction still has tutorial comments
+**Fix**: Replace the comment with documentation for the `*heuristicTarget` result, annotation-first behavior, and dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
+
+## Finding F4 — Tutorial-style heuristic comments remain
 **Severity**: warning
-**File**: internal/gengapic/heuristics.go:48
-**What**: Accepted claim C4 was not applied. `buildHeuristicVocabulary` still contains step-by-step tutorial comments rather than short invariant comments. Current lines:
+**File**: internal/gengapic/heuristics.go:55
+**What**: Accepted claim C4 says the long step-by-step comments in `buildHeuristicVocabulary` should be condensed to durable invariants. The current source still has tutorial-style step comments and explanatory prose:
+
 ```go
-    48		// Step 1: Seed standard infrastructure resource collections.
-    49		resourceCollections["projects"] = true
-    50		resourceCollections["locations"] = true
-    51		resourceCollections["folders"] = true
-    52		resourceCollections["organizations"] = true
-    53		resourceCollections["billingAccounts"] = true
-    54	
     55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
     56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
     57		// often have path literals that are random verbs or actions, not resource collections.
     58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
 ```
-Additional current lines:
+
+and later:
+
 ```go
     78		// Step 3: Walk methods and learn valid resource collection nouns.
     79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
@@ -118,4 +120,5 @@ Additional current lines:
     82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
     83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
 ```
-**Fix**: Condense the comments inside `buildHeuristicVocabulary` to durable invariants: learn only from CRUD-like method names, inspect all HTTP patterns, collect literals immediately before variables, strip literal custom verbs, and ignore version segments.
+
+**Fix**: Replace these with concise invariant comments covering the intended policy: learn only from CRUD-like method names, inspect all HTTP patterns, collect literals immediately before variables, strip literal custom verbs, and ignore version segments.

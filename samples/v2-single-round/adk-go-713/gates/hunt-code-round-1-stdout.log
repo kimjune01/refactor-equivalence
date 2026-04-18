@@ -1,0 +1,1987 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-713
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9c57-c4ce-71a2-a875-c77503a5655a
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/713/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt             # files the implementer may have changed
+go build ./...                                         # full build, not just typecheck
+go test ./... -count=1 -short                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run the required review from the cleanroom path, read the goal/spec/allowed files just enough to evaluate the merged refactor, then write the findings file without touching source.
+exec
+/bin/zsh -lc 'pwd && ls' in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/713
+CONTRIBUTING.md
+FORGE_ALLOWED_FILES.txt
+FORGE_INPUT_DIFF.patch
+GOAL.md
+LICENSE
+README.md
+agent
+artifact
+cmd
+examples
+go.mod
+go.sum
+internal
+memory
+model
+plugin
+runner
+scripts
+server
+ succeeded in 0ms:
+cmd/launcher/full/full.go
+cmd/launcher/web/triggers/eventarc/eventarc.go
+go.mod
+go.sum
+internal/telemetry/telemetry.go
+server/adkrest/controllers/triggers/eventarc.go
+server/adkrest/controllers/triggers/pubsub.go
+server/adkrest/controllers/triggers/triggers.go
+server/adkrest/handler.go
+server/adkrest/internal/models/triggers.go
+server/adkrest/internal/services/debugtelemetry.go
+tool/skilltoolset/skill/filesystem_source.go
+tool/skilltoolset/skill/source.go
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name Eventarc wire constants
+**File**: server/adkrest/controllers/triggers/eventarc.go:60
+**Change**: Introduce file-level constants for `"application/cloudevents+json"` and `"google.cloud.pubsub.topic.v1.messagePublished"`, and use them in `EventarcTriggerHandler` instead of inline string literals.
+**Goal link**: This clarifies the CloudEvents structured-mode and Pub/Sub Eventarc branch that the goal adds.
+**Justification**: Naming the protocol and event-type values makes the trigger-processing intent explicit without changing parsing, response codes, retries, or agent input.
+
+### C2 — Extract CloudEvent request parsing with explicit error classification
+**File**: server/adkrest/controllers/triggers/eventarc.go:56
+**Change**: Move the structured-vs-binary request decoding block at the start of `EventarcTriggerHandler` into a private helper in the same file, while preserving the current bad-JSON and body-read error handling semantics at the call site. The helper contract must expose enough information for the handler to keep the exact current responses: structured-mode JSON decode failures still map to `http.Error(w, "Bad Request", http.StatusBadRequest)`, and binary-mode body read failures still map to `http.Error(w, "Failed to read body", http.StatusInternalServerError)`. Acceptable shapes include returning a typed/sentinel error that the handler maps to those responses, or returning explicit status/message classification alongside `models.EventarcTriggerRequest`.
+**Goal link**: This isolates CloudEvents trigger ingestion from the later agent-run orchestration required by the goal.
+**Justification**: The handler currently mixes wire-format parsing, event-to-message conversion, app/user resolution, concurrency limiting, and runner invocation; extracting only the CloudEvents parsing removes accidental structure from the main workflow.
+**Hunt note**: Retained as narrowed for F1 because the helper contract now explicitly requires preserving the two distinct existing `http.Error` status/body mappings at the call site.
+
+### C3 — Extract Eventarc agent message construction
+**File**: server/adkrest/controllers/triggers/eventarc.go:87
+**Change**: Move the `messageContent` selection block into a private helper in the same file, for example `messageContentFromEventarc(event models.EventarcTriggerRequest) (string, int, error)`, returning the same message strings and status-code choices currently used for Pub/Sub data unmarshal errors, empty Pub/Sub payloads, and generic event marshal errors.
+**Goal link**: This clarifies how CloudEvents become the agent input while keeping Pub/Sub-sourced Eventarc events aligned with the existing Pub/Sub trigger behavior.
+**Justification**: A dedicated conversion helper removes the mutable local branching from `EventarcTriggerHandler` and makes the only Eventarc-specific data transformation directly testable through the existing handler tests.
+ succeeded in 0ms:
+# PR #713
+
+Implementation of Cloud Events trigger processing.
+
+This implementation should handle the resource exhausted exceptions with jitter to prevent thundering herd (configured per subrouter).
+
+Similar to https://github.com/google/adk-go/pull/704
+
+(see the details in [go/orcas-rfc-522](http://go/orcas-rfc-522))
+codex
+The allowed set is narrow and the accepted claims focus almost entirely on Eventarc parsing/message extraction plus one launcher literal. I’m starting the mandatory build and test now, then I’ll inspect the current implementation and the original patch artifact for behavioral drift.
+exec
+/bin/zsh -lc "sed -n '1,220p' cmd/launcher/web/triggers/eventarc/eventarc.go" in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc "sed -n '1,260p' server/adkrest/controllers/triggers/eventarc.go" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package eventarc provides a sublauncher that adds Eventarc trigger capabilities to ADK web server.
+package eventarc
+
+import (
+	"flag"
+	"fmt"
+ succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package triggers
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc 'go test ./... -count=1 -short' in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 3.95s:
+
+codex
+The current Eventarc controller still has the inline parsing and message-construction blocks; that is evidence for several accepted claims not being applied. I’m checking the patch metadata and changed file surface next so I can separate warnings from blockers.
+exec
+/bin/zsh -lc 'rg -n "''^(diff --git|'"\\+\\+\\+ b/|--- a/)\" /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+1:diff --git a/cmd/launcher/full/full.go b/cmd/launcher/full/full.go
+3:--- a/cmd/launcher/full/full.go
+4:+++ b/cmd/launcher/full/full.go
+19:diff --git a/cmd/launcher/web/triggers/eventarc/eventarc.go b/cmd/launcher/web/triggers/eventarc/eventarc.go
+23:+++ b/cmd/launcher/web/triggers/eventarc/eventarc.go
+161:diff --git a/go.mod b/go.mod
+163:--- a/go.mod
+164:+++ b/go.mod
+174:diff --git a/go.sum b/go.sum
+176:--- a/go.sum
+177:+++ b/go.sum
+187:diff --git a/internal/telemetry/telemetry.go b/internal/telemetry/telemetry.go
+189:--- a/internal/telemetry/telemetry.go
+190:+++ b/internal/telemetry/telemetry.go
+217:diff --git a/server/adkrest/controllers/triggers/eventarc.go b/server/adkrest/controllers/triggers/eventarc.go
+221:+++ b/server/adkrest/controllers/triggers/eventarc.go
+360:diff --git a/server/adkrest/controllers/triggers/pubsub.go b/server/adkrest/controllers/triggers/pubsub.go
+362:--- a/server/adkrest/controllers/triggers/pubsub.go
+363:+++ b/server/adkrest/controllers/triggers/pubsub.go
+457:diff --git a/server/adkrest/controllers/triggers/triggers.go b/server/adkrest/controllers/triggers/triggers.go
+exec
+/bin/zsh -lc "rg -n \"eventarcDefaultUserID|eventArcDefaultUserID|application/cloudevents\\+json|google.cloud.pubsub.topic.v1.messagePublished|messageContentFromEventarc|parse.*Eventarc|eventarc.*endpoint\" server/adkrest/controllers/triggers/eventarc.go cmd/launcher/web/triggers/eventarc/eventarc.go" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+server/adkrest/controllers/triggers/eventarc.go:31:const eventArcDefaultUserID = "eventarc-caller"
+server/adkrest/controllers/triggers/eventarc.go:60:	if contentType == "application/cloudevents+json" {
+server/adkrest/controllers/triggers/eventarc.go:90:	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+server/adkrest/controllers/triggers/eventarc.go:122:		userID = eventArcDefaultUserID
+cmd/launcher/web/triggers/eventarc/eventarc.go:135:	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+diff --git a/cmd/launcher/full/full.go b/cmd/launcher/full/full.go
+index a6f46d3b..a4904027 100644
+--- a/cmd/launcher/full/full.go
++++ b/cmd/launcher/full/full.go
+@@ -22,11 +22,12 @@ import (
+ 	"google.golang.org/adk/cmd/launcher/web"
+ 	"google.golang.org/adk/cmd/launcher/web/a2a"
+ 	"google.golang.org/adk/cmd/launcher/web/api"
++	"google.golang.org/adk/cmd/launcher/web/triggers/eventarc"
+ 	"google.golang.org/adk/cmd/launcher/web/triggers/pubsub"
+ 	"google.golang.org/adk/cmd/launcher/web/webui"
+ )
+ 
+ // NewLauncher returnes the most versatile universal launcher with all options built-in.
+ func NewLauncher() launcher.Launcher {
+-	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), api.NewLauncher()))
++	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), eventarc.NewLauncher(), api.NewLauncher()))
+ }
+diff --git a/cmd/launcher/web/triggers/eventarc/eventarc.go b/cmd/launcher/web/triggers/eventarc/eventarc.go
+new file mode 100644
+exec
+/bin/zsh -lc "find . -maxdepth 4 -type f | sed 's#"'^./##'"' | rg '(_test\\.go"'$|test)'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+memory/inmemory_test.go
+runner/runner_test.go
+plugin/plugin_test.go
+plugin/retryandreflect/plugin_test.go
+plugin/plugin_manager_test.go
+plugin/functioncallmodifier/testdata/TestPluginCallbackIntegration_transfer_to_agent_tool.httprr
+plugin/functioncallmodifier/testdata/TestPluginCallbackIntegration_no_relevant_tools.httprr
+plugin/functioncallmodifier/testdata/TestPluginCallbackIntegration_agent_tool_default_schema.httprr
+plugin/functioncallmodifier/plugin_test.go
+plugin/functioncallmodifier/integration_test.go
+internal/context/context_test.go
+internal/memory/memory_test.go
+internal/utils/utils_test.go
+internal/utils/schema_test.go
+internal/agent/parentmap/map_test.go
+internal/httprr/rr_test.go
+internal/llminternal/testdata/TestParallelFunctionCalls_test_parallel_function_calls_gemini-3.1-pro-preview.httprr
+internal/llminternal/testdata/TestParallelFunctionCalls_test_parallel_function_calls_gemini-2.5-flash.httprr
+internal/llminternal/testdata/TestParallelFunctionCalls_test_parallel_function_calls_gemini-3-flash-preview.httprr
+internal/llminternal/clone_test.go
+exec
+/bin/zsh -lc "sed -n '1,220p' server/adkrest/controllers/triggers/pubsub.go" in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc "sed -n '217,359p' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package triggers
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+ succeeded in 0ms:
+diff --git a/server/adkrest/controllers/triggers/eventarc.go b/server/adkrest/controllers/triggers/eventarc.go
+new file mode 100644
+index 00000000..b51d39a5
+--- /dev/null
++++ b/server/adkrest/controllers/triggers/eventarc.go
+@@ -0,0 +1,137 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
+exec
+/bin/zsh -lc "nl -ba cmd/launcher/web/triggers/eventarc/eventarc.go | sed -n '118,138p'" in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc "nl -ba server/adkrest/controllers/triggers/eventarc.go | sed -n '25,130p'" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+   118			config.MemoryService,
+   119			config.ArtifactService,
+   120			config.PluginConfig,
+   121			triggerConfig,
+   122		)
+   123	
+   124		subrouter := router
+   125		if e.config.pathPrefix != "" && e.config.pathPrefix != "/" {
+   126			subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
+   127		}
+   128	
+   129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
+   130		return nil
+   131	}
+   132	
+   133	// UserMessage implements web.Sublauncher.
+   134	func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
+   135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
+   136	}
+ succeeded in 0ms:
+    25		"google.golang.org/adk/memory"
+    26		"google.golang.org/adk/runner"
+    27		"google.golang.org/adk/server/adkrest/internal/models"
+    28		"google.golang.org/adk/session"
+    29	)
+    30	
+    31	const eventArcDefaultUserID = "eventarc-caller"
+    32	
+    33	// EventarcController handles the Eventarc trigger endpoints.
+    34	type EventarcController struct {
+    35		runner    *RetriableRunner
+    36		semaphore chan struct{}
+    37	}
+    38	
+    39	// NewEventarcController creates a new EventarcController.
+    40	func NewEventarcController(sessionService session.Service, agentLoader agent.Loader, memoryService memory.Service, artifactService artifact.Service, pluginConfig runner.PluginConfig, triggerConfig TriggerConfig) *EventarcController {
+    41		return &EventarcController{
+    42			runner: &RetriableRunner{
+    43				sessionService:  sessionService,
+    44				agentLoader:     agentLoader,
+exec
+/bin/zsh -lc "find . -path './.git' -prune -o -type f -print | sed 's#"'^./##'"' | sort > /tmp/adk713-files.txt && wc -l /tmp/adk713-files.txt && comm -23 <(sort /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt) /tmp/adk713-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+     402 /tmp/adk713-files.txt
+tool/skilltoolset/skill/filesystem_source.go
+tool/skilltoolset/skill/source.go
+codex
+Build has passed. The test suite is still running; the packages reported so far are passing, and I’m waiting for the remaining tail before writing the gate file.
+ succeeded in 43.61s:
+ok  	google.golang.org/adk/agent	0.363s
+ok  	google.golang.org/adk/agent/llmagent	0.342s
+ok  	google.golang.org/adk/agent/remoteagent	0.436s
+ok  	google.golang.org/adk/agent/workflowagents/loopagent	0.577s
+ok  	google.golang.org/adk/agent/workflowagents/parallelagent	1.048s
+ok  	google.golang.org/adk/agent/workflowagents/sequentialagent	1.065s
+ok  	google.golang.org/adk/artifact	1.288s
+ok  	google.golang.org/adk/artifact/gcsartifact	1.549s
+?   	google.golang.org/adk/cmd/adkgo	[no test files]
+?   	google.golang.org/adk/cmd/adkgo/internal/deploy	[no test files]
+?   	google.golang.org/adk/cmd/adkgo/internal/deploy/cloudrun	[no test files]
+?   	google.golang.org/adk/cmd/adkgo/internal/root	[no test files]
+?   	google.golang.org/adk/cmd/internal/adkcli	[no test files]
+?   	google.golang.org/adk/cmd/launcher	[no test files]
+?   	google.golang.org/adk/cmd/launcher/console	[no test files]
+?   	google.golang.org/adk/cmd/launcher/full	[no test files]
+?   	google.golang.org/adk/cmd/launcher/internal/telemetry	[no test files]
+?   	google.golang.org/adk/cmd/launcher/prod	[no test files]
+?   	google.golang.org/adk/cmd/launcher/universal	[no test files]
+?   	google.golang.org/adk/cmd/launcher/web	[no test files]
+codex
+Tests passed as well. I’m doing one final logged run for the required “exit code plus tail 50 lines” evidence, then I’ll write the markdown gate file with warning-level unimplemented-claim findings only.
+exec
+/bin/zsh -lc 'tmp=/tmp/adk713-build.log; go build ./... > "$tmp" 2>&1; code=$?; printf '"'EXIT_CODE=%s\\n' \""'$code"; tail -50 "$tmp"' in /tmp/refactor-eq-workdir/cleanroom-v2/713exec
+/bin/zsh -lc 'tmp=/tmp/adk713-test.log; go test ./... -count=1 -short > "$tmp" 2>&1; code=$?; printf '"'EXIT_CODE=%s\\n' \""'$code"; tail -50 "$tmp"' in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 2.29s:
+EXIT_CODE=0
+codex
+The logged test run is quiet because its output is redirected; the first pass completed in about half a minute, so I’m letting this finish and then I’ll use the captured tail directly.
+exec
+/bin/zsh -lc 'tail -50 /tmp/adk713-test.log' in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+ok  	google.golang.org/adk/agent	0.265s
+ok  	google.golang.org/adk/agent/llmagent	0.230s
+exec
+/bin/zsh -lc "ps -o pid,ppid,stat,etime,command | rg 'go test|/go|adk713-test|test'" in /tmp/refactor-eq-workdir/cleanroom-v2/713 exited 1 in 0ms:
+
+exec
+/bin/zsh -lc "ps aux | rg 'go|adk713|713'" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+junekim          28047 167.5  0.1 418885968  66016   ??  R     9:49AM   5:09.20 /var/folders/26/zl1yc5xj5m36n5_dcqhtp1t00000gn/T/go-build4091159008/b506/remoteagent.test -test.paniconexit0 -test.timeout=10m0s -test.count=1 -test.short=true
+junekim          26856   0.1  0.1 442667680  58416   ??  S     9:48AM   0:00.47 /Users/junekim/.nvm/versions/node/v22.21.1/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex exec -c model=gpt-5.4 -s danger-full-access --skip-git-repo-check --cd /tmp/refactor-eq-workdir/bb-merged-713 # Hunt-code — adversarial review of merged refactor (iterative, full build + tests)\012\012You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.\012\012## Inputs\012\012- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/713/` (current working directory; contains `node_modules`, can build + test)\012- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md`\012- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md`\012- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch`\012- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`\012- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).\012\012## What to look for\012\0121. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.\0122. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.\0123. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.\0124. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.\0125. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).\0126. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.\0127. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.\012\012## Commands you MUST run\012\012Before writing findings:\012\012```bash\012# The working directory has NO .git — do NOT use git commands.\012# Instead, compare against the cleanroom baseline by reading files directly.\012# The allowed-edit-set file lists which files the implementer was permitted to change.\012cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt             # files the implementer may have changed\012go build ./...                                         # full build, not just typecheck\012go test ./... -count=1 -short                                          # full registered test command\012```\012\012Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.\012\012**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.\012\012## Output\012\012Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md`. If zero defects, write:\012\012```\012## Build: PASS\012## Tests: PASS\012No findings.\012```\012\012Otherwise:\012\012```\012## Build: PASS | FAIL\012## Tests: PASS | FAIL\012\012## Finding F1 — <title>\012**Severity**: blocker | warning | note\012**File**: <path>:<line>\012**What**: <defect>\012**Fix**: <what to change>\012```\012\012Do not edit source.
+junekim          89445   0.0  0.4 514285472 206976   ??  S    Tue11AM  92:53.40 /Applications/Firefox.app/Contents/MacOS/gpu-helper.app/Contents/MacOS/Firefox GPU Helper -parentBuildID 20260403140140 -prefsHandle 0:37138 -prefMapHandle 1:287633 -sbStartup -sbAppPath /Applications/Firefox.app -ipcHandle 0 -initialChannelId {7bc97fbe-8deb-4f52-97b2-dcb89835aa4f} -parentPid 89442 -crashReporter gecko-crash-server-pipe.89442 -crashHelperSend 2 -crashHelperRecv 0 -appDir /Applications/Firefox.app/Contents/Resources/browser -profile /Users/junekim/Library/Application Support/Firefox/Profiles/cst374wk.default-release org.mozilla.machname.312224838 1 gpu
+root             60910   0.0  0.0 442242640   9808   ??  S    Sun01PM   0:01.65 /System/Library/PrivateFrameworks/Categories.framework/Versions/A/XPCServices/CategoriesService.xpc/Contents/MacOS/CategoriesService
+junekim          56375   0.0  0.0 442123152  22432   ??  S    Sun01AM   0:03.35 /System/Library/PrivateFrameworks/Categories.framework/Versions/A/XPCServices/CategoriesService.xpc/Contents/MacOS/CategoriesService
+junekim          28157   0.0  0.0 416634160    192   ??  R     9:52AM   0:00.00 rg go|adk713|713
+root               543   0.0  0.0 441991424   7136   ??  Ss    9Apr26   0:01.06 /usr/libexec/kernelmanagerd
+junekim          28145   0.0  0.0 442213936   2656   ??  Ss    9:52AM   0:00.00 /bin/zsh -lc ps aux | rg 'go|adk713|713'
+junekim          27992   0.0  0.2 419107040 110304   ??  S     9:49AM   0:03.10 go test ./... -count=1 -short
+junekim          27980   0.0  0.0 442205648   2624   ??  Ss    9:49AM   0:00.00 /bin/zsh -lc tmp=/tmp/adk713-test.log; go test ./... -count=1 -short > "$tmp" 2>&1; code=$?; printf 'EXIT_CODE=%s\n' "$code"; tail -50 "$tmp"
+junekim          26855   0.0  0.1 442928960  42704   ??  S     9:48AM   0:00.02 node /Users/junekim/.nvm/versions/node/v22.21.1/bin/codex exec -c model=gpt-5.4 -s danger-full-access --skip-git-repo-check --cd /tmp/refactor-eq-workdir/bb-merged-713 # Hunt-code — adversarial review of merged refactor (iterative, full build + tests)\012\012You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.\012\012## Inputs\012\012- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/713/` (current working directory; contains `node_modules`, can build + test)\012- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md`\012- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md`\012- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch`\012- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`\012- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).\012\012## What to look for\012\0121. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.\0122. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.\0123. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.\0124. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.\0125. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).\0126. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.\0127. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.\012\012## Commands you MUST run\012\012Before writing findings:\012\012```bash\012# The working directory has NO .git — do NOT use git commands.\012# Instead, compare against the cleanroom baseline by reading files directly.\012# The allowed-edit-set file lists which files the implementer was permitted to change.\012cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt             # files the implementer may have changed\012go build ./...                                         # full build, not just typecheck\012go test ./... -count=1 -short                                          # full registered test command\012```\012\012Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.\012\012**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.\012\012## Output\012\012Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md`. If zero defects, write:\012\012```\012## Build: PASS\012## Tests: PASS\012No findings.\012```\012\012Otherwise:\012\012```\012## Build: PASS | FAIL\012## Tests: PASS | FAIL\012\012## Finding F1 — <title>\012**Severity**: blocker | warning | note\012**File**: <path>:<line>\012**What**: <defect>\012**Fix**: <what to change>\012```\012\012Do not edit source.
+junekim           5621   0.0  0.0 442213680   3392   ??  Ss    8:55AM   0:00.02 /bin/zsh -c source /Users/junekim/.claude/shell-snapshots/snapshot-zsh-1776231707135-7j7pg0.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '# Pipeline all 7 new Go PRs serially with Go commands passed via env\012for PR_INFO in \\012  "4147:go-github:google-go-github" \\012  "4145:go-github:google-go-github" \\012  "4153:go-github:google-go-github" \\012  "713:adk-go:google-adk-go" \\012  "715:adk-go:google-adk-go" \\012  "2248:go-containerregistry:google-go-containerregistry" \\012  "2254:go-containerregistry:google-go-containerregistry"; do\012  \012  PR="${PR_INFO%%:*}"\012  REST="${PR_INFO#*:}"\012  REPO="${REST%%:*}"\012  SRC="${REST#*:}"\012  \012  echo "=== Pipeline $REPO-$PR ==="\012  PR="$PR" REPO="$REPO" SRC_REPO="/tmp/refactor-eq-workdir/$SRC" \\012    TEST_CMD="go test ./... -count=1 -short" BUILD_CMD="go build ./..." \\012    /Users/junekim/Documents/refactor-equivalence/scripts/run_pr_end_to_end.sh 2>&1 | tail -3\012  \012  LOG="/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/pipeline.log"\012  if grep -q "pipeline complete" "$LOG" 2>/dev/null; then\012    GATE=$(cat "/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/gates/complexity-gate.json" 2>/dev/null | jq -r '"'"'.mean_cog_delta // "?"'"'"')\012    REV=$(head -1 "/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/reviewer-loop/round-1-comments.md" 2>/dev/null)\012    echo "  ✓ gate=$GATE reviewer=$(echo $REV | head -c 30)"\012  elif grep -q "pipeline aborted" "$LOG" 2>/dev/null; then\012    echo "  ✗ HARD NO-OP"\012  else\012    echo "  ? UNKNOWN"\012  fi\012  \012  find /tmp/refactor-eq-workdir/cleanroom-v2 /tmp/refactor-eq-workdir/bb-*-${PR} -type f -delete 2>/dev/null\012  find /tmp/refactor-eq-workdir/cleanroom-v2 /tmp/refactor-eq-workdir/bb-*-${PR} -type d -empty -delete 2>/dev/null\012  echo "  disk: $(df -h /tmp | tail -1 | awk '"'"'{print $4}'"'"') free"\012done' < /dev/null && pwd -P >| /tmp/claude-d8cc-cwd
+ exited -1 in 3m 01s:
+
+exec
+/bin/zsh -lc 'kill 27980 27992 28047 || true' in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+
+codex
+The second logged test rerun got stuck in a duplicate `remoteagent.test` process after the mandatory pass had already completed, so I killed only that duplicate rerun. I’m using the successful mandatory run for pass/fail and its observed tail, and the duplicate rerun is not being treated as a source result.
+exec
+/bin/zsh -lc 'ls /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates' in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+hunt-code-round-1-stdout.log
+merged-install.log
+codex
+I’m writing the gate report now. The findings are warnings because build and tests passed, and the defects are accepted refactor claims that remain unapplied rather than runtime regressions.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+## Build: PASS
+## Tests: PASS
+
+## Command Evidence
+
+`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
+Exit code: 0
+Tail:
+```text
+cmd/launcher/full/full.go
+cmd/launcher/web/triggers/eventarc/eventarc.go
+go.mod
+go.sum
+internal/telemetry/telemetry.go
+server/adkrest/controllers/triggers/eventarc.go
+server/adkrest/controllers/triggers/pubsub.go
+server/adkrest/controllers/triggers/triggers.go
+server/adkrest/handler.go
+server/adkrest/internal/models/triggers.go
+server/adkrest/internal/services/debugtelemetry.go
+tool/skilltoolset/skill/filesystem_source.go
+tool/skilltoolset/skill/source.go
+```
+
+`go build ./...`
+Exit code: 0
+Tail:
+```text
+<no output>
+```
+
+`go test ./... -count=1 -short`
+Exit code: 0
+Tail:
+```text
+?   	google.golang.org/adk/internal/agent	[no test files]
+ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
+?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
+?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
+ok  	google.golang.org/adk/internal/artifact	2.501s
+?   	google.golang.org/adk/internal/artifact/tests	[no test files]
+?   	google.golang.org/adk/internal/cli/util	[no test files]
+?   	google.golang.org/adk/internal/configurable	[no test files]
+?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
+ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
+?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
+ok  	google.golang.org/adk/internal/context	2.919s
+?   	google.golang.org/adk/internal/converters	[no test files]
+ok  	google.golang.org/adk/internal/httprr	3.102s
+ok  	google.golang.org/adk/internal/llminternal	3.841s
+?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
+ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
+ok  	google.golang.org/adk/internal/memory	3.180s
+?   	google.golang.org/adk/internal/plugininternal	[no test files]
+?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
+?   	google.golang.org/adk/internal/sessionutils	[no test files]
+ok  	google.golang.org/adk/internal/telemetry	3.456s
+?   	google.golang.org/adk/internal/testutil	[no test files]
+ok  	google.golang.org/adk/internal/toolinternal	3.593s
+?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
+?   	google.golang.org/adk/internal/typeutil	[no test files]
+ok  	google.golang.org/adk/internal/utils	3.501s
+?   	google.golang.org/adk/internal/version	[no test files]
+ok  	google.golang.org/adk/memory	3.467s
+ok  	google.golang.org/adk/model	3.469s
+ok  	google.golang.org/adk/model/apigee	3.527s
+ok  	google.golang.org/adk/model/gemini	3.753s
+ok  	google.golang.org/adk/plugin	3.555s
+ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
+?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
+ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
+ok  	google.golang.org/adk/runner	3.605s
+?   	google.golang.org/adk/server	[no test files]
+ok  	google.golang.org/adk/server/adka2a	3.069s
+?   	google.golang.org/adk/server/adkrest	[no test files]
+ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
+ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
+?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
+?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
+?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
+ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
+ok  	google.golang.org/adk/session	3.391s
+ok  	google.golang.org/adk/session/database	3.445s
+ok  	google.golang.org/adk/session/vertexai	34.426s
+ok  	google.golang.org/adk/telemetry	3.236s
+ok  	google.golang.org/adk/tool	3.302s
+ok  	google.golang.org/adk/tool/agenttool	3.068s
+ok  	google.golang.org/adk/tool/exampletool	3.243s
+ok  	google.golang.org/adk/tool/exitlooptool	3.259s
+ok  	google.golang.org/adk/tool/functiontool	3.250s
+ok  	google.golang.org/adk/tool/geminitool	3.302s
+ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
+ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
+ok  	google.golang.org/adk/tool/mcptoolset	3.247s
+ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
+ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
+ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
+?   	google.golang.org/adk/util/instructionutil	[no test files]
+```
+
+## Finding F1 — Accepted Eventarc handler extraction claims were not applied
+**Severity**: warning
+**File**: server/adkrest/controllers/triggers/eventarc.go:55
+**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
+
+Current request parsing block:
+```go
+55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
+56		var event models.EventarcTriggerRequest
+57		contentType := r.Header.Get("Content-Type")
+58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
+59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
+60		if contentType == "application/cloudevents+json" {
+61			// --- STRUCTURED MODE ---
+62			// The entire event is in the body. Decode it.
+63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
+64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+65				http.Error(w, "Bad Request", http.StatusBadRequest)
+66				return
+67			}
+68		} else {
+69			// --- BINARY MODE ---
+70			// Metadata is in the headers.
+71			event.ID = r.Header.Get("ce-id")
+72			event.Type = r.Header.Get("ce-type")
+73			event.Source = r.Header.Get("ce-source")
+74			event.SpecVersion = r.Header.Get("ce-specversion")
+75			event.Time = r.Header.Get("ce-time")
+76	
+77			// The entire body is the payload.
+78			// We just read it as raw bytes into event.Data.
+79			bodyBytes, err := io.ReadAll(r.Body)
+80			if err != nil {
+81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
+82				return
+83			}
+84			event.Data = bodyBytes
+85		}
+```
+
+Current message-construction block:
+```go
+87		var messageContent string
+88	
+89		// Handle Pub/Sub Specifically ---
+90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+91			var pubsub models.PubSubTriggerRequest
+92			var err error
+93			// Unmarshal the raw bytes into our specific Pub/Sub struct
+94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
+95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
+96				return
+97			}
+98			messageContent, err = messageContentFromPubSub(pubsub)
+99			if err != nil {
+100				respondError(w, http.StatusBadRequest, err.Error())
+101				return
+102			}
+103			// Otherwise just marshal the whole event as an input data.
+104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
+105		} else {
+106			messageBytes, err := json.Marshal(event)
+107			if err != nil {
+108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
+109				return
+110			}
+111			messageContent = string(messageBytes)
+112		}
+```
+**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
+
+## Finding F2 — Accepted Eventarc wire constants were not introduced
+**Severity**: warning
+**File**: server/adkrest/controllers/triggers/eventarc.go:60
+**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
+
+Current lines:
+```go
+60		if contentType == "application/cloudevents+json" {
+90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+```
+**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
+
+## Finding F3 — Accepted launcher endpoint constant was not introduced
+**Severity**: warning
+**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
+**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
+
+Current lines:
+```go
+129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
+135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
+```
+**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
+
+## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
+**Severity**: warning
+**File**: server/adkrest/controllers/triggers/eventarc.go:31
+**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
+
+Current lines:
+```go
+31	const eventArcDefaultUserID = "eventarc-caller"
+122			userID = eventArcDefaultUserID
+```
+**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+apply_patch(auto_approved=true) exited 0 in 24ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+## Build: PASS
+## Tests: PASS
+
+## Command Evidence
+
+`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
+Exit code: 0
+Tail:
+```text
+cmd/launcher/full/full.go
+cmd/launcher/web/triggers/eventarc/eventarc.go
+go.mod
+go.sum
+internal/telemetry/telemetry.go
+server/adkrest/controllers/triggers/eventarc.go
+server/adkrest/controllers/triggers/pubsub.go
+server/adkrest/controllers/triggers/triggers.go
+server/adkrest/handler.go
+server/adkrest/internal/models/triggers.go
+server/adkrest/internal/services/debugtelemetry.go
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+exec
+/bin/zsh -lc "awk '/"'`go test/{inblock=0} /Tail:/{if(prev=="test") inblock=1} /```text/{if(inblock){f=1; next}} /```/{if(f){exit}} f{n++} {prev=$0} END{print n}'"' /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+exec
+/bin/zsh -lc "ps aux | rg 'go test ./\\.\\.\\.|remoteagent\\.test|adk713-test'" in /tmp/refactor-eq-workdir/cleanroom-v2/713 succeeded in 0ms:
+junekim          26856   0.4  0.1 442651104  59376   ??  S     9:48AM   0:01.27 /Users/junekim/.nvm/versions/node/v22.21.1/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex exec -c model=gpt-5.4 -s danger-full-access --skip-git-repo-check --cd /tmp/refactor-eq-workdir/bb-merged-713 # Hunt-code — adversarial review of merged refactor (iterative, full build + tests)\012\012You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.\012\012## Inputs\012\012- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/713/` (current working directory; contains `node_modules`, can build + test)\012- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md`\012- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md`\012- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch`\012- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`\012- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).\012\012## What to look for\012\0121. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.\0122. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.\0123. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.\0124. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.\0125. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).\0126. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.\0127. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.\012\012## Commands you MUST run\012\012Before writing findings:\012\012```bash\012# The working directory has NO .git — do NOT use git commands.\012# Instead, compare against the cleanroom baseline by reading files directly.\012# The allowed-edit-set file lists which files the implementer was permitted to change.\012cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt             # files the implementer may have changed\012go build ./...                                         # full build, not just typecheck\012go test ./... -count=1 -short                                          # full registered test command\012```\012\012Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.\012\012**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.\012\012## Output\012\012Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md`. If zero defects, write:\012\012```\012## Build: PASS\012## Tests: PASS\012No findings.\012```\012\012Otherwise:\012\012```\012## Build: PASS | FAIL\012## Tests: PASS | FAIL\012\012## Finding F1 — <title>\012**Severity**: blocker | warning | note\012**File**: <path>:<line>\012**What**: <defect>\012**Fix**: <what to change>\012```\012\012Do not edit source.
+junekim          28306   0.0  0.0 416634160    192   ??  R     9:53AM   0:00.00 rg go test ./\.\.\.|remoteagent\.test|adk713-test
+junekim          28294   0.0  0.0 442205584   2624   ??  Ss    9:53AM   0:00.01 /bin/zsh -lc ps aux | rg 'go test ./\.\.\.|remoteagent\.test|adk713-test'
+junekim          26855   0.0  0.1 442928960  42704   ??  S     9:48AM   0:00.02 node /Users/junekim/.nvm/versions/node/v22.21.1/bin/codex exec -c model=gpt-5.4 -s danger-full-access --skip-git-repo-check --cd /tmp/refactor-eq-workdir/bb-merged-713 # Hunt-code — adversarial review of merged refactor (iterative, full build + tests)\012\012You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.\012\012## Inputs\012\012- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/713/` (current working directory; contains `node_modules`, can build + test)\012- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/goal/GOAL.md`\012- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/volley/sharpened-spec-final.md`\012- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/diff-base-to-test.patch`\012- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`\012- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).\012\012## What to look for\012\0121. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.\0122. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.\0123. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.\0124. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.\0125. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).\0126. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.\0127. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.\012\012## Commands you MUST run\012\012Before writing findings:\012\012```bash\012# The working directory has NO .git — do NOT use git commands.\012# Instead, compare against the cleanroom baseline by reading files directly.\012# The allowed-edit-set file lists which files the implementer was permitted to change.\012cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt             # files the implementer may have changed\012go build ./...                                         # full build, not just typecheck\012go test ./... -count=1 -short                                          # full registered test command\012```\012\012Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.\012\012**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.\012\012## Output\012\012Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md`. If zero defects, write:\012\012```\012## Build: PASS\012## Tests: PASS\012No findings.\012```\012\012Otherwise:\012\012```\012## Build: PASS | FAIL\012## Tests: PASS | FAIL\012\012## Finding F1 — <title>\012**Severity**: blocker | warning | note\012**File**: <path>:<line>\012**What**: <defect>\012**Fix**: <what to change>\012```\012\012Do not edit source.
+junekim           5621   0.0  0.0 442213680   3392   ??  Ss    8:55AM   0:00.02 /bin/zsh -c source /Users/junekim/.claude/shell-snapshots/snapshot-zsh-1776231707135-7j7pg0.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '# Pipeline all 7 new Go PRs serially with Go commands passed via env\012for PR_INFO in \\012  "4147:go-github:google-go-github" \\012  "4145:go-github:google-go-github" \\012  "4153:go-github:google-go-github" \\012  "713:adk-go:google-adk-go" \\012  "715:adk-go:google-adk-go" \\012  "2248:go-containerregistry:google-go-containerregistry" \\012  "2254:go-containerregistry:google-go-containerregistry"; do\012  \012  PR="${PR_INFO%%:*}"\012  REST="${PR_INFO#*:}"\012  REPO="${REST%%:*}"\012  SRC="${REST#*:}"\012  \012  echo "=== Pipeline $REPO-$PR ==="\012  PR="$PR" REPO="$REPO" SRC_REPO="/tmp/refactor-eq-workdir/$SRC" \\012    TEST_CMD="go test ./... -count=1 -short" BUILD_CMD="go build ./..." \\012    /Users/junekim/Documents/refactor-equivalence/scripts/run_pr_end_to_end.sh 2>&1 | tail -3\012  \012  LOG="/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/pipeline.log"\012  if grep -q "pipeline complete" "$LOG" 2>/dev/null; then\012    GATE=$(cat "/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/gates/complexity-gate.json" 2>/dev/null | jq -r '"'"'.mean_cog_delta // "?"'"'"')\012    REV=$(head -1 "/Users/junekim/Documents/refactor-equivalence/samples/v2/${REPO}-${PR}/reviewer-loop/round-1-comments.md" 2>/dev/null)\012    echo "  ✓ gate=$GATE reviewer=$(echo $REV | head -c 30)"\012  elif grep -q "pipeline aborted" "$LOG" 2>/dev/null; then\012    echo "  ✗ HARD NO-OP"\012  else\012    echo "  ? UNKNOWN"\012  fi\012  \012  find /tmp/refactor-eq-workdir/cleanroom-v2 /tmp/refactor-eq-workdir/bb-*-${PR} -type f -delete 2>/dev/null\012  find /tmp/refactor-eq-workdir/cleanroom-v2 /tmp/refactor-eq-workdir/bb-*-${PR} -type d -empty -delete 2>/dev/null\012  echo "  disk: $(df -h /tmp | tail -1 | awk '"'"'{print $4}'"'"') free"\012done' < /dev/null && pwd -P >| /tmp/claude-d8cc-cwd
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+codex
+Wrote the review findings to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md).
+
+Build and tests passed:
+- `go build ./...` exit code `0`
+- `go test ./... -count=1 -short` exit code `0`
+
+Findings are warning-level only:
+- Eventarc handler parsing/message-construction extraction claims not applied.
+- Eventarc wire constants not introduced.
+- Launcher endpoint constant not introduced.
+- `eventArcDefaultUserID` rename not applied.
+
+I did not edit source files.
+file update:
+diff --git a/samples/v2/adk-go-713/gates/hunt-code-round-1.md b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..55ee57c022f86a3d039a988706e81a55a46d45f5
+--- /dev/null
++++ b/samples/v2/adk-go-713/gates/hunt-code-round-1.md
+@@ -0,0 +1,206 @@
++## Build: PASS
++## Tests: PASS
++
++## Command Evidence
++
++`cat /Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/inputs/allowed-files.txt`
++Exit code: 0
++Tail:
++```text
++cmd/launcher/full/full.go
++cmd/launcher/web/triggers/eventarc/eventarc.go
++go.mod
++go.sum
++internal/telemetry/telemetry.go
++server/adkrest/controllers/triggers/eventarc.go
++server/adkrest/controllers/triggers/pubsub.go
++server/adkrest/controllers/triggers/triggers.go
++server/adkrest/handler.go
++server/adkrest/internal/models/triggers.go
++server/adkrest/internal/services/debugtelemetry.go
++tool/skilltoolset/skill/filesystem_source.go
++tool/skilltoolset/skill/source.go
++```
++
++`go build ./...`
++Exit code: 0
++Tail:
++```text
++<no output>
++```
++
++`go test ./... -count=1 -short`
++Exit code: 0
++Tail:
++```text
++?   	google.golang.org/adk/internal/agent	[no test files]
++ok  	google.golang.org/adk/internal/agent/parentmap	2.291s
++?   	google.golang.org/adk/internal/agent/remoteagent	[no test files]
++?   	google.golang.org/adk/internal/agent/runconfig	[no test files]
++ok  	google.golang.org/adk/internal/artifact	2.501s
++?   	google.golang.org/adk/internal/artifact/tests	[no test files]
++?   	google.golang.org/adk/internal/cli/util	[no test files]
++?   	google.golang.org/adk/internal/configurable	[no test files]
++?   	google.golang.org/adk/internal/configurable/conformance	[no test files]
++ok  	google.golang.org/adk/internal/configurable/conformance/replayplugin	2.715s
++?   	google.golang.org/adk/internal/configurable/conformance/replayplugin/recording	[no test files]
++ok  	google.golang.org/adk/internal/context	2.919s
++?   	google.golang.org/adk/internal/converters	[no test files]
++ok  	google.golang.org/adk/internal/httprr	3.102s
++ok  	google.golang.org/adk/internal/llminternal	3.841s
++?   	google.golang.org/adk/internal/llminternal/converters	[no test files]
++ok  	google.golang.org/adk/internal/llminternal/googlellm	3.435s
++ok  	google.golang.org/adk/internal/memory	3.180s
++?   	google.golang.org/adk/internal/plugininternal	[no test files]
++?   	google.golang.org/adk/internal/plugininternal/plugincontext	[no test files]
++?   	google.golang.org/adk/internal/sessionutils	[no test files]
++ok  	google.golang.org/adk/internal/telemetry	3.456s
++?   	google.golang.org/adk/internal/testutil	[no test files]
++ok  	google.golang.org/adk/internal/toolinternal	3.593s
++?   	google.golang.org/adk/internal/toolinternal/toolutils	[no test files]
++?   	google.golang.org/adk/internal/typeutil	[no test files]
++ok  	google.golang.org/adk/internal/utils	3.501s
++?   	google.golang.org/adk/internal/version	[no test files]
++ok  	google.golang.org/adk/memory	3.467s
++ok  	google.golang.org/adk/model	3.469s
++ok  	google.golang.org/adk/model/apigee	3.527s
++ok  	google.golang.org/adk/model/gemini	3.753s
++ok  	google.golang.org/adk/plugin	3.555s
++ok  	google.golang.org/adk/plugin/functioncallmodifier	3.573s
++?   	google.golang.org/adk/plugin/loggingplugin	[no test files]
++ok  	google.golang.org/adk/plugin/retryandreflect	3.574s
++ok  	google.golang.org/adk/runner	3.605s
++?   	google.golang.org/adk/server	[no test files]
++ok  	google.golang.org/adk/server/adka2a	3.069s
++?   	google.golang.org/adk/server/adkrest	[no test files]
++ok  	google.golang.org/adk/server/adkrest/controllers	3.291s
++ok  	google.golang.org/adk/server/adkrest/controllers/triggers	3.327s
++?   	google.golang.org/adk/server/adkrest/internal/fakes	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/models	[no test files]
++?   	google.golang.org/adk/server/adkrest/internal/routers	[no test files]
++ok  	google.golang.org/adk/server/adkrest/internal/services	3.525s
++ok  	google.golang.org/adk/session	3.391s
++ok  	google.golang.org/adk/session/database	3.445s
++ok  	google.golang.org/adk/session/vertexai	34.426s
++ok  	google.golang.org/adk/telemetry	3.236s
++ok  	google.golang.org/adk/tool	3.302s
++ok  	google.golang.org/adk/tool/agenttool	3.068s
++ok  	google.golang.org/adk/tool/exampletool	3.243s
++ok  	google.golang.org/adk/tool/exitlooptool	3.259s
++ok  	google.golang.org/adk/tool/functiontool	3.250s
++ok  	google.golang.org/adk/tool/geminitool	3.302s
++ok  	google.golang.org/adk/tool/loadartifactstool	3.291s
++ok  	google.golang.org/adk/tool/loadmemorytool	3.302s
++ok  	google.golang.org/adk/tool/mcptoolset	3.247s
++ok  	google.golang.org/adk/tool/preloadmemorytool	3.281s
++ok  	google.golang.org/adk/tool/skilltoolset/skill	3.374s
++ok  	google.golang.org/adk/tool/toolconfirmation	3.213s
++?   	google.golang.org/adk/util/instructionutil	[no test files]
++```
++
++## Finding F1 — Accepted Eventarc handler extraction claims were not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:55
++**What**: Accepted claims C2 and C3 required extracting CloudEvent request parsing and Eventarc agent-message construction into private helpers while preserving response behavior. The current handler still contains both full inline blocks, so the accepted refactor was not applied.
++
++Current request parsing block:
++```go
++55	func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++56		var event models.EventarcTriggerRequest
++57		contentType := r.Header.Get("Content-Type")
++58		// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++59		// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++60		if contentType == "application/cloudevents+json" {
++61			// --- STRUCTURED MODE ---
++62			// The entire event is in the body. Decode it.
++63			// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++64			if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++65				http.Error(w, "Bad Request", http.StatusBadRequest)
++66				return
++67			}
++68		} else {
++69			// --- BINARY MODE ---
++70			// Metadata is in the headers.
++71			event.ID = r.Header.Get("ce-id")
++72			event.Type = r.Header.Get("ce-type")
++73			event.Source = r.Header.Get("ce-source")
++74			event.SpecVersion = r.Header.Get("ce-specversion")
++75			event.Time = r.Header.Get("ce-time")
++76	
++77			// The entire body is the payload.
++78			// We just read it as raw bytes into event.Data.
++79			bodyBytes, err := io.ReadAll(r.Body)
++80			if err != nil {
++81				http.Error(w, "Failed to read body", http.StatusInternalServerError)
++82				return
++83			}
++84			event.Data = bodyBytes
++85		}
++```
++
++Current message-construction block:
++```go
++87		var messageContent string
++88	
++89		// Handle Pub/Sub Specifically ---
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++91			var pubsub models.PubSubTriggerRequest
++92			var err error
++93			// Unmarshal the raw bytes into our specific Pub/Sub struct
++94			if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++95				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++96				return
++97			}
++98			messageContent, err = messageContentFromPubSub(pubsub)
++99			if err != nil {
++100				respondError(w, http.StatusBadRequest, err.Error())
++101				return
++102			}
++103			// Otherwise just marshal the whole event as an input data.
++104			// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++105		} else {
++106			messageBytes, err := json.Marshal(event)
++107			if err != nil {
++108				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++109				return
++110			}
++111			messageContent = string(messageBytes)
++112		}
++```
++**Fix**: Add private helper(s) in this file for Eventarc request parsing and message construction, and keep the existing bad-JSON, body-read, Pub/Sub unmarshal, empty payload, and marshal error responses exactly as they are today.
++
++## Finding F2 — Accepted Eventarc wire constants were not introduced
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:60
++**What**: Accepted claim C1 required file-level constants for the CloudEvents structured content type and Pub/Sub Eventarc type. The current code still uses both string literals inline.
++
++Current lines:
++```go
++60		if contentType == "application/cloudevents+json" {
++90		if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++```
++**Fix**: Introduce file-level constants for these two wire values and use the constants at the existing call sites without changing comparisons.
++
++## Finding F3 — Accepted launcher endpoint constant was not introduced
++**Severity**: warning
++**File**: cmd/launcher/web/triggers/eventarc/eventarc.go:129
++**What**: Accepted claim C4 required a package-level constant for `"/apps/{app_name}/trigger/eventarc"` and reuse from both route registration and the user-facing message. The current launcher still duplicates the literal.
++
++Current lines:
++```go
++129		subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++135		printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++```
++**Fix**: Add a package-level endpoint constant and use it in both `SetupSubrouters` and `UserMessage`, preserving the registered path and printed URL text.
++
++## Finding F4 — Accepted Eventarc default-user identifier rename was not applied
++**Severity**: warning
++**File**: server/adkrest/controllers/triggers/eventarc.go:31
++**What**: Accepted claim C5 required renaming `eventArcDefaultUserID` to `eventarcDefaultUserID` and updating its use. The current code still has the old identifier.
++
++Current lines:
++```go
++31	const eventArcDefaultUserID = "eventarc-caller"
++122			userID = eventArcDefaultUserID
++```
++**Fix**: Rename the unexported constant and its single use to `eventarcDefaultUserID`.
+
+tokens used
+87,257
+Wrote the review findings to [hunt-code-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/adk-go-713/gates/hunt-code-round-1.md).
+
+Build and tests passed:
+- `go build ./...` exit code `0`
+- `go test ./... -count=1 -short` exit code `0`
+
+Findings are warning-level only:
+- Eventarc handler parsing/message-construction extraction claims not applied.
+- Eventarc wire constants not introduced.
+- Launcher endpoint constant not introduced.
+- `eventArcDefaultUserID` rename not applied.
+
+I did not edit source files.

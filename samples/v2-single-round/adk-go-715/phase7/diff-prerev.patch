@@ -1,0 +1,1697 @@
+diff --git a/cmd/adkgo/internal/deploy/agentengine/agentengine.go b/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+new file mode 100644
+index 00000000..e6518a55
+--- /dev/null
++++ b/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -0,0 +1,363 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++// Package agentengine handles command line parameters and execution logic for agentengine deployment.
++
++package agentengine
++
++import (
++	"context"
++	"fmt"
++	"os"
++	"os/exec"
++	"path"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"time"
++
++	aiplatform "cloud.google.com/go/aiplatform/apiv1"
++	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
++	"github.com/spf13/cobra"
++	"google.golang.org/api/option"
++
++	"google.golang.org/adk/cmd/adkgo/internal/deploy"
++	"google.golang.org/adk/internal/cli/util"
++)
++
++type gCloudFlags struct {
++	region      string
++	projectName string
++}
++
++type agentEngineServiceFlags struct {
++	name            string
++	serverPort      int
++	a2aAgentCardURL string
++	a2a             bool // enable a2a or not
++	api             bool // enable api or not
++	webui           bool // enable webui or not
++}
++
++type localProxyFlags struct {
++	port int
++}
++
++type buildFlags struct {
++	tempDir             string
++	execPath            string
++	execFile            string
++	dockerfileBuildPath string
++	archivePath         string
++}
++
++type sourceFlags struct {
++	srcBasePath    string
++	entryPointPath string
++	origEntryPointPath string
++}
++
++type deployAgentEngineFlags struct {
++	gcloud      gCloudFlags
++	agentEngine agentEngineServiceFlags
++	proxy       localProxyFlags
++	build       buildFlags
++	source      sourceFlags
++}
++
++var flags deployAgentEngineFlags
++
++// agentEngineCmd represents the agentEngine command
++var agentEngineCmd = &cobra.Command{
++	Use:   "agentengine",
++	Short: "Deploys the application to Agent Engine.",
++	// TODO(kdroste): add description
++	Long: `????????????????????????????????????????????????????????????????????????????
++	Local proxy adding authentication is started. 
++	`,
++	RunE: func(cmd *cobra.Command, args []string) error {
++		return flags.deployOnagentEngine()
++	},
++}
++
++// init creates flags and adds subcommand to parent
++func init() {
++	deploy.DeployCmd.AddCommand(agentEngineCmd)
++
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.region, "region", "r", "", "GCP Region")
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.projectName, "project_name", "p", "", "GCP Project Name")
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.name, "name", "s", "", "Agent Engine name")
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.build.tempDir, "temp_dir", "t", "", "Temp dir for build, defaults to os.TempDir() if not specified")
++	agentEngineCmd.PersistentFlags().IntVar(&flags.proxy.port, "proxy_port", 8081, "Local proxy port")
++	agentEngineCmd.PersistentFlags().IntVar(&flags.agentEngine.serverPort, "server_port", 8080, "agentEngine server port")
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.source.entryPointPath, "entry_point_path", "e", "", "Path to an entry point (go 'main')")
++	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.a2a, "a2a", true, "Enable A2A")
++	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
++	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
++	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++}
++
++// computeFlags uses command line arguments to create a full config
++func (f *deployAgentEngineFlags) computeFlags() error {
++	return util.LogStartStop("Computing flags & preparing temp",
++		func(p util.Printer) error {
++			f.source.origEntryPointPath = flags.source.entryPointPath
++			absp, err := filepath.Abs(flags.source.entryPointPath)
++			if err != nil {
++				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.source.entryPointPath, err)
++			}
++			f.source.entryPointPath = absp
++
++			if flags.build.tempDir == "" {
++				flags.build.tempDir = os.TempDir()
++			}
++			absp, err = filepath.Abs(flags.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
++			}
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			if err != nil {
++				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
++			}
++			p("Using temp dir:", f.build.tempDir)
++
++			// come up with a executable name based on entry point path
++			dir, file := path.Split(f.source.entryPointPath)
++			f.source.srcBasePath = dir
++			f.source.entryPointPath = file
++			if f.build.execPath == "" {
++				exec, err := util.StripExtension(f.source.entryPointPath, ".go")
++				if err != nil {
++					return fmt.Errorf("cannot strip '.go' extension from entry point path '%v': %w", f.source.entryPointPath, err)
++				}
++				f.build.execFile = exec
++				f.build.execPath = path.Join(f.build.tempDir, exec)
++			}
++			f.build.dockerfileBuildPath = path.Join(f.build.tempDir, "Dockerfile")
++			f.build.archivePath = path.Join(f.build.tempDir, "archive.tgz")
++
++			return nil
++		})
++}
++
++func (f *deployAgentEngineFlags) cleanTemp() error {
++	return util.LogStartStop("Cleaning temp",
++		func(p util.Printer) error {
++			p("Clean temp starting with", f.build.tempDir)
++			// err := os.RemoveAll(f.build.tempDir)
++			// if err != nil {
++			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			// }
++			return nil
++		})
++}
++
++// compileEntryPoint builds locally the server using flags and environment variables in order to be run in agentEngine containter
++func (f *deployAgentEngineFlags) compileEntryPoint() error {
++	return util.LogStartStop("Compiling server",
++		func(p util.Printer) error {
++			p("Using", f.source.entryPointPath, "as entry point")
++			// for help on ldflags you can run go build -ldflags="--help" ./examples/quickstart/main.go
++			//    -s    disable symbol table
++			//    -w    disable DWARF generation
++			//   using those flags reduces the size of an executable
++			cmd := exec.Command("go", "build", "-ldflags", "-s -w", "-o", f.build.execPath, f.source.entryPointPath)
++
++			cmd.Dir = f.source.srcBasePath
++			// build using staticallly linked libs, for linux/amd64
++			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
++			return util.LogCommand(cmd, p)
++		})
++}
++
++// prepareDockerfile creates a temporary Dockerfile which will be executed by agentEngine
++func (f *deployAgentEngineFlags) prepareDockerfile() error {
++	return util.LogStartStop("Preparing Dockerfile",
++		func(p util.Printer) error {
++			p("Writing:", f.build.dockerfileBuildPath)
++
++			var b strings.Builder
++			b.WriteString(`
++FROM golang:1.25 as builder
++WORKDIR /app
++COPY . .
++RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ` + f.build.execFile + ` ` + f.source.origEntryPointPath + `
++
++FROM gcr.io/distroless/static-debian11
++
++COPY --from=builder /app/` + f.build.execFile + `  /app/` + f.build.execFile + `
++EXPOSE ` + strconv.Itoa(flags.agentEngine.serverPort) + `
++# Command to run the executable when the container starts
++CMD ["/app/` + f.build.execFile + `", "web", "-port", "` + strconv.Itoa(flags.agentEngine.serverPort) + `"`)
++
++			if flags.agentEngine.api {
++				b.WriteString(`, "api", "-webui_address", "127.0.0.1:` + strconv.Itoa(f.proxy.port) + `"`)
++			}
++			if flags.agentEngine.a2a {
++				b.WriteString(`, "a2a", "--a2a_agent_url", "` + flags.agentEngine.a2aAgentCardURL + `"`)
++			}
++			if flags.agentEngine.webui {
++				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"]
++				`)
++			}
++			return os.WriteFile(f.build.dockerfileBuildPath, []byte(b.String()), 0o600)
++		})
++}
++
++// createArchive creates a tar archive containing the source code and Dockerfile
++func (f *deployAgentEngineFlags) createArchive() error {
++	return util.LogStartStop("Creating source archive",
++		func(p util.Printer) error {
++			workspaceRoot, err := os.Getwd()
++			if err != nil {
++				return fmt.Errorf("cannot get current working directory: %w", err)
++			}
++			p("Creating:", f.build.archivePath)
++			cmd := exec.Command("tar", "-czf", f.build.archivePath,
++				"-C", workspaceRoot, "--exclude=.git", "--exclude=adkgo", ".",
++				"-C", f.build.tempDir, "Dockerfile")
++			return util.LogCommand(cmd, p)
++		})
++}
++
++// gcloudDeployToAgentEngine invokes gcloud to deploy source on agentEngine
++func (f *deployAgentEngineFlags) gcloudDeployToAgentEngine() error {
++	return util.LogStartStop("Deploying to Agent Engine",
++		func(p util.Printer) error {
++			ctx := context.Background()
++			
++			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
++			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
++			
++			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
++			if err != nil {
++				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
++			}
++			defer client.Close()
++
++			archiveContent, err := os.ReadFile(f.build.archivePath)
++			if err != nil {
++				return fmt.Errorf("cannot read archive file: %w", err)
++			}
++
++			dateTimeString := time.Now().Format(time.RFC3339)
++			displayName := f.agentEngine.name
++			if displayName == "" {
++				displayName = "ADK Agent: " + dateTimeString
++			}
++
++			req := &aiplatformpb.CreateReasoningEngineRequest{
++				Parent: parent,
++				ReasoningEngine: &aiplatformpb.ReasoningEngine{
++					DisplayName: displayName,
++					Spec: &aiplatformpb.ReasoningEngineSpec{
++						DeploymentSource: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec_{
++							SourceCodeSpec: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec{
++								Source: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec_InlineSource_{
++									InlineSource: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec_InlineSource{
++										SourceArchive: archiveContent,
++									},
++								},
++								LanguageSpec: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec_ImageSpec_{
++									ImageSpec: &aiplatformpb.ReasoningEngineSpec_SourceCodeSpec_ImageSpec{},
++								},
++							},
++						},
++						AgentFramework: "google-adk",
++						DeploymentSpec: &aiplatformpb.ReasoningEngineSpec_DeploymentSpec{
++							Env: []*aiplatformpb.EnvVar{
++								{Name: "GOOGLE_CLOUD_REGION", Value: f.gcloud.region},
++								{Name: "NUM_WORKERS", Value: "1"},
++								{Name: "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", Value: "true"},
++								{Name: "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", Value: "true"},
++							},
++						},
++					},
++				},
++			}
++
++			if apiKey := os.Getenv("GOOGLE_API_KEY"); apiKey != "" {
++				req.ReasoningEngine.Spec.DeploymentSpec.Env = append(req.ReasoningEngine.Spec.DeploymentSpec.Env, &aiplatformpb.EnvVar{Name: "GOOGLE_API_KEY", Value: apiKey})
++			}
++
++			p("Sending CreateReasoningEngine request...")
++			op, err := client.CreateReasoningEngine(ctx, req)
++			if err != nil {
++				return fmt.Errorf("CreateReasoningEngine failed: %w", err)
++			}
++
++			p("Waiting for operation to complete...")
++			re, err := op.Wait(ctx)
++			if err != nil {
++				return fmt.Errorf("operation failed: %w", err)
++			}
++
++			p("Deployed Reasoning Engine:", re.Name)
++			p("Display Name:", re.DisplayName)
++
++			return nil
++		})
++}
++
++// runGcloudProxy invokes gcloud to create a proxy which will add authentication headers to requests
++func (f *deployAgentEngineFlags) runGcloudProxy() error {
++	return util.LogStartStop("Running local gcloud authenticating proxy",
++		func(p util.Printer) error {
++			targetWidth := 80
++
++			p(strings.Repeat("-", targetWidth))
++			p(util.CenterString("", targetWidth))
++			p(util.CenterString("Running ADK Web UI on http://127.0.0.1:"+strconv.Itoa(f.proxy.port)+"/ui/    <-- open this", targetWidth))
++			p(util.CenterString("ADK REST API on http://127.0.0.1:"+strconv.Itoa(f.proxy.port)+"/api/         ", targetWidth))
++			p(util.CenterString("", targetWidth))
++			p(util.CenterString("Press Ctrl-C to stop", targetWidth))
++			p(util.CenterString("", targetWidth))
++			p(strings.Repeat("-", targetWidth))
++
++			cmd := exec.Command("gcloud", "run", "services", "proxy", f.agentEngine.name, "--project", f.gcloud.projectName, "--port", strconv.Itoa(f.proxy.port), "--region", f.gcloud.region)
++			return util.LogCommand(cmd, p)
++		})
++}
++
++// deployOnagentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
++func (f *deployAgentEngineFlags) deployOnagentEngine() error {
++	fmt.Println(flags)
++
++	err := f.computeFlags()
++	if err != nil {
++		return err
++	}
++	err = f.prepareDockerfile()
++	if err != nil {
++		return err
++	}
++	err = f.createArchive()
++	if err != nil {
++		return err
++	}
++	err = f.gcloudDeployToAgentEngine()
++	if err != nil {
++		return err
++	}
++	err = f.cleanTemp()
++	if err != nil {
++		return err
++	}
++	err = f.runGcloudProxy()
++	if err != nil {
++		return err
++	}
++
++	return nil
++}
+diff --git a/cmd/launcher/full/full.go b/cmd/launcher/full/full.go
+index a4904027..a6f46d3b 100644
+--- a/cmd/launcher/full/full.go
++++ b/cmd/launcher/full/full.go
+@@ -22,12 +22,11 @@ import (
+ 	"google.golang.org/adk/cmd/launcher/web"
+ 	"google.golang.org/adk/cmd/launcher/web/a2a"
+ 	"google.golang.org/adk/cmd/launcher/web/api"
+-	"google.golang.org/adk/cmd/launcher/web/triggers/eventarc"
+ 	"google.golang.org/adk/cmd/launcher/web/triggers/pubsub"
+ 	"google.golang.org/adk/cmd/launcher/web/webui"
+ )
+ 
+ // NewLauncher returnes the most versatile universal launcher with all options built-in.
+ func NewLauncher() launcher.Launcher {
+-	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), eventarc.NewLauncher(), api.NewLauncher()))
++	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), api.NewLauncher()))
+ }
+diff --git a/cmd/launcher/web/triggers/eventarc/eventarc.go b/cmd/launcher/web/triggers/eventarc/eventarc.go
+deleted file mode 100644
+index abc68d23..00000000
+--- a/cmd/launcher/web/triggers/eventarc/eventarc.go
++++ /dev/null
+@@ -1,136 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-// Package eventarc provides a sublauncher that adds Eventarc trigger capabilities to ADK web server.
+-package eventarc
+-
+-import (
+-	"flag"
+-	"fmt"
+-	"net/http"
+-	"strings"
+-	"time"
+-
+-	"github.com/gorilla/mux"
+-
+-	"google.golang.org/adk/cmd/launcher"
+-	"google.golang.org/adk/cmd/launcher/web"
+-	"google.golang.org/adk/internal/cli/util"
+-	"google.golang.org/adk/server/adkrest/controllers/triggers"
+-)
+-
+-type eventarcConfig struct {
+-	pathPrefix        string
+-	triggerMaxRetries int
+-	triggerBaseDelay  time.Duration
+-	triggerMaxDelay   time.Duration
+-	triggerMaxRuns    int
+-}
+-
+-type eventarcLauncher struct {
+-	flags  *flag.FlagSet
+-	config *eventarcConfig
+-}
+-
+-// NewLauncher creates a new eventarc launcher. It extends Web launcher.
+-func NewLauncher() web.Sublauncher {
+-	config := &eventarcConfig{}
+-
+-	fs := flag.NewFlagSet("eventarc", flag.ContinueOnError)
+-	fs.StringVar(&config.pathPrefix, "path_prefix", "/api", "Path prefix for the Eventarc trigger endpoint. Default is '/api'.")
+-	fs.IntVar(&config.triggerMaxRetries, "trigger_max_retries", 3, "Maximum retries for HTTP 429 errors from triggers")
+-	fs.DurationVar(&config.triggerBaseDelay, "trigger_base_delay", 1*time.Second, "Base delay for trigger retry exponential backoff")
+-	fs.DurationVar(&config.triggerMaxDelay, "trigger_max_delay", 10*time.Second, "Maximum delay for trigger retry exponential backoff")
+-	fs.IntVar(&config.triggerMaxRuns, "trigger_max_concurrent_runs", 100, "Maximum concurrent trigger runs")
+-
+-	return &eventarcLauncher{
+-		config: config,
+-		flags:  fs,
+-	}
+-}
+-
+-// Keyword implements web.Sublauncher. Returns the command-line keyword for eventarc launcher.
+-func (e *eventarcLauncher) Keyword() string {
+-	return "eventarc"
+-}
+-
+-// Parse parses the command-line arguments for the eventarc launcher.
+-func (e *eventarcLauncher) Parse(args []string) ([]string, error) {
+-	err := e.flags.Parse(args)
+-	if err != nil || !e.flags.Parsed() {
+-		return nil, fmt.Errorf("failed to parse eventarc flags: %v", err)
+-	}
+-	if e.config.triggerMaxRetries <= 0 {
+-		return nil, fmt.Errorf("trigger_max_retries must be > 0")
+-	}
+-	if e.config.triggerBaseDelay < 0 {
+-		return nil, fmt.Errorf("trigger_base_delay must be >= 0")
+-	}
+-	if e.config.triggerMaxDelay <= 0 {
+-		return nil, fmt.Errorf("trigger_max_delay must be > 0")
+-	}
+-	if e.config.triggerMaxRuns <= 0 {
+-		return nil, fmt.Errorf("trigger_max_concurrent_runs must be > 0")
+-	}
+-
+-	prefix := e.config.pathPrefix
+-	if !strings.HasPrefix(prefix, "/") {
+-		prefix = "/" + prefix
+-	}
+-	e.config.pathPrefix = strings.TrimSuffix(prefix, "/")
+-
+-	return e.flags.Args(), nil
+-}
+-
+-// CommandLineSyntax returns the command-line syntax for the eventarc launcher.
+-func (e *eventarcLauncher) CommandLineSyntax() string {
+-	return util.FormatFlagUsage(e.flags)
+-}
+-
+-// SimpleDescription implements web.Sublauncher.
+-func (e *eventarcLauncher) SimpleDescription() string {
+-	return "starts ADK Eventarc trigger endpoint server"
+-}
+-
+-// SetupSubrouters adds the Eventarc trigger endpoint to the parent router.
+-func (e *eventarcLauncher) SetupSubrouters(router *mux.Router, config *launcher.Config) error {
+-	triggerConfig := triggers.TriggerConfig{
+-		MaxRetries:        e.config.triggerMaxRetries,
+-		BaseDelay:         e.config.triggerBaseDelay,
+-		MaxDelay:          e.config.triggerMaxDelay,
+-		MaxConcurrentRuns: e.config.triggerMaxRuns,
+-	}
+-
+-	controller := triggers.NewEventarcController(
+-		config.SessionService,
+-		config.AgentLoader,
+-		config.MemoryService,
+-		config.ArtifactService,
+-		config.PluginConfig,
+-		triggerConfig,
+-	)
+-
+-	subrouter := router
+-	if e.config.pathPrefix != "" && e.config.pathPrefix != "/" {
+-		subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
+-	}
+-
+-	subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
+-	return nil
+-}
+-
+-// UserMessage implements web.Sublauncher.
+-func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
+-	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
+-}
+diff --git a/go.mod b/go.mod
+index 37438ba7..734024e0 100644
+--- a/go.mod
++++ b/go.mod
+@@ -4,7 +4,7 @@ go 1.25.0
+ 
+ require (
+ 	cloud.google.com/go v0.123.0
+-	cloud.google.com/go/aiplatform v1.105.0
++	cloud.google.com/go/aiplatform v1.121.0
+ 	cloud.google.com/go/storage v1.56.1
+ 	github.com/a2aproject/a2a-go v0.3.13
+ 	github.com/awalterschulze/gographviz v2.0.3+incompatible
+@@ -24,9 +24,9 @@ require (
+ 	go.opentelemetry.io/otel/log v0.16.0
+ 	go.opentelemetry.io/otel/sdk v1.40.0
+ 	go.opentelemetry.io/otel/trace v1.40.0
+-	golang.org/x/oauth2 v0.34.0
+-	golang.org/x/sync v0.19.0
+-	google.golang.org/api v0.252.0
++	golang.org/x/oauth2 v0.36.0
++	golang.org/x/sync v0.20.0
++	google.golang.org/api v0.272.0
+ 	google.golang.org/genai v1.40.0
+ 	google.golang.org/grpc v1.79.3
+ 	google.golang.org/protobuf v1.36.11
+@@ -36,15 +36,13 @@ require (
+ 	rsc.io/ordered v1.1.1
+ )
+ 
+-require github.com/hashicorp/golang-lru/v2 v2.0.7
+-
+ require (
+ 	cel.dev/expr v0.25.1 // indirect
+-	cloud.google.com/go/auth v0.17.0 // indirect
++	cloud.google.com/go/auth v0.18.2 // indirect
+ 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+ 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+ 	cloud.google.com/go/iam v1.5.3 // indirect
+-	cloud.google.com/go/longrunning v0.7.0 // indirect
++	cloud.google.com/go/longrunning v0.8.0 // indirect
+ 	cloud.google.com/go/monitoring v1.24.3 // indirect
+ 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
+ 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0 // indirect
+@@ -61,8 +59,8 @@ require (
+ 	github.com/go-logr/logr v1.4.3 // indirect
+ 	github.com/go-logr/stdr v1.2.2 // indirect
+ 	github.com/google/s2a-go v0.1.9 // indirect
+-	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
+-	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
++	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
++	github.com/googleapis/gax-go/v2 v2.18.0 // indirect
+ 	github.com/gorilla/websocket v1.5.3 // indirect
+ 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect
+ 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+@@ -84,14 +82,14 @@ require (
+ 	go.opentelemetry.io/otel/sdk/log v0.16.0
+ 	go.opentelemetry.io/otel/sdk/metric v1.40.0 // indirect
+ 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
+-	golang.org/x/crypto v0.47.0 // indirect
+-	golang.org/x/net v0.49.0 // indirect
+-	golang.org/x/sys v0.41.0 // indirect
+-	golang.org/x/text v0.33.0 // indirect
+-	golang.org/x/time v0.14.0 // indirect
+-	google.golang.org/genproto v0.0.0-20251014184007-4626949a642f // indirect
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
+-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
++	golang.org/x/crypto v0.49.0 // indirect
++	golang.org/x/net v0.52.0 // indirect
++	golang.org/x/sys v0.42.0 // indirect
++	golang.org/x/text v0.35.0 // indirect
++	golang.org/x/time v0.15.0 // indirect
++	google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260316180232-0b37fe3546d5 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5 // indirect
+ 	modernc.org/libc v1.22.3 // indirect
+ 	modernc.org/mathutil v1.5.0 // indirect
+ 	modernc.org/memory v1.5.0 // indirect
+diff --git a/go.sum b/go.sum
+index 51a556ea..bafe8a2a 100644
+--- a/go.sum
++++ b/go.sum
+@@ -2,20 +2,20 @@ cel.dev/expr v0.25.1 h1:1KrZg61W6TWSxuNZ37Xy49ps13NUovb66QLprthtwi4=
+ cel.dev/expr v0.25.1/go.mod h1:hrXvqGP6G6gyx8UAHSHJ5RGk//1Oj5nXQ2NI02Nrsg4=
+ cloud.google.com/go v0.123.0 h1:2NAUJwPR47q+E35uaJeYoNhuNEM9kM8SjgRgdeOJUSE=
+ cloud.google.com/go v0.123.0/go.mod h1:xBoMV08QcqUGuPW65Qfm1o9Y4zKZBpGS+7bImXLTAZU=
+-cloud.google.com/go/aiplatform v1.105.0 h1:Tbc2iEp7vbzgk6Vs4QexfNo8/nl+E+Na+FEreRZdhcM=
+-cloud.google.com/go/aiplatform v1.105.0/go.mod h1:4rwKOMdubQOND81AlO3EckcskvEFCYSzXKfn42GMm8k=
+-cloud.google.com/go/auth v0.17.0 h1:74yCm7hCj2rUyyAocqnFzsAYXgJhrG26XCFimrc/Kz4=
+-cloud.google.com/go/auth v0.17.0/go.mod h1:6wv/t5/6rOPAX4fJiRjKkJCvswLwdet7G8+UGXt7nCQ=
++cloud.google.com/go/aiplatform v1.121.0 h1:8y8sNfVAW1DVhFbSbI7d8rrqBGGJFk6EoV6atidlyQc=
++cloud.google.com/go/aiplatform v1.121.0/go.mod h1:juMdDWeNphHV40KhWdN+563zNCOKNmLJjk5D2TA43ls=
++cloud.google.com/go/auth v0.18.2 h1:+Nbt5Ev0xEqxlNjd6c+yYUeosQ5TtEUaNcN/3FozlaM=
++cloud.google.com/go/auth v0.18.2/go.mod h1:xD+oY7gcahcu7G2SG2DsBerfFxgPAJz17zz2joOFF3M=
+ cloud.google.com/go/auth/oauth2adapt v0.2.8 h1:keo8NaayQZ6wimpNSmW5OPc283g65QNIiLpZnkHRbnc=
+ cloud.google.com/go/auth/oauth2adapt v0.2.8/go.mod h1:XQ9y31RkqZCcwJWNSx2Xvric3RrU88hAYYbjDWYDL+c=
+ cloud.google.com/go/compute/metadata v0.9.0 h1:pDUj4QMoPejqq20dK0Pg2N4yG9zIkYGdBtwLoEkH9Zs=
+ cloud.google.com/go/compute/metadata v0.9.0/go.mod h1:E0bWwX5wTnLPedCKqk3pJmVgCBSM6qQI1yTBdEb3C10=
+ cloud.google.com/go/iam v1.5.3 h1:+vMINPiDF2ognBJ97ABAYYwRgsaqxPbQDlMnbHMjolc=
+ cloud.google.com/go/iam v1.5.3/go.mod h1:MR3v9oLkZCTlaqljW6Eb2d3HGDGK5/bDv93jhfISFvU=
+-cloud.google.com/go/logging v1.13.0 h1:7j0HgAp0B94o1YRDqiqm26w4q1rDMH7XNRU34lJXHYc=
+-cloud.google.com/go/logging v1.13.0/go.mod h1:36CoKh6KA/M0PbhPKMq6/qety2DCAErbhXT62TuXALA=
+-cloud.google.com/go/longrunning v0.7.0 h1:FV0+SYF1RIj59gyoWDRi45GiYUMM3K1qO51qoboQT1E=
+-cloud.google.com/go/longrunning v0.7.0/go.mod h1:ySn2yXmjbK9Ba0zsQqunhDkYi0+9rlXIwnoAf+h+TPY=
++cloud.google.com/go/logging v1.13.2 h1:qqlHCBvieJT9Cdq4QqYx1KPadCQ2noD4FK02eNqHAjA=
++cloud.google.com/go/logging v1.13.2/go.mod h1:zaybliM3yun1J8mU2dVQ1/qDzjbOqEijZCn6hSBtKak=
++cloud.google.com/go/longrunning v0.8.0 h1:LiKK77J3bx5gDLi4SMViHixjD2ohlkwBi+mKA7EhfW8=
++cloud.google.com/go/longrunning v0.8.0/go.mod h1:UmErU2Onzi+fKDg2gR7dusz11Pe26aknR4kHmJJqIfk=
+ cloud.google.com/go/monitoring v1.24.3 h1:dde+gMNc0UhPZD1Azu6at2e79bfdztVDS5lvhOdsgaE=
+ cloud.google.com/go/monitoring v1.24.3/go.mod h1:nYP6W0tm3N9H/bOw8am7t62YTzZY+zUeQ+Bi6+2eonI=
+ cloud.google.com/go/storage v1.56.1 h1:n6gy+yLnHn0hTwBFzNn8zJ1kqWfR91wzdM8hjRF4wP0=
+@@ -84,18 +84,16 @@ github.com/google/safehtml v0.1.0 h1:EwLKo8qawTKfsi0orxcQAZzu07cICaBeFMegAU9eaT8
+ github.com/google/safehtml v0.1.0/go.mod h1:L4KWwDsUJdECRAEpZoBn3O64bQaywRscowZjJAzjHnU=
+ github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+-github.com/googleapis/enterprise-certificate-proxy v0.3.6 h1:GW/XbdyBFQ8Qe+YAmFU9uHLo7OnF5tL52HFAgMmyrf4=
+-github.com/googleapis/enterprise-certificate-proxy v0.3.6/go.mod h1:MkHOF77EYAE7qfSuSS9PU6g4Nt4e11cnsDUowfwewLA=
+-github.com/googleapis/gax-go/v2 v2.15.0 h1:SyjDc1mGgZU5LncH8gimWo9lW1DtIfPibOG81vgd/bo=
+-github.com/googleapis/gax-go/v2 v2.15.0/go.mod h1:zVVkkxAQHa1RQpg9z2AUCMnKhi0Qld9rcmyfL1OZhoc=
++github.com/googleapis/enterprise-certificate-proxy v0.3.14 h1:yh8ncqsbUY4shRD5dA6RlzjJaT4hi3kII+zYw8wmLb8=
++github.com/googleapis/enterprise-certificate-proxy v0.3.14/go.mod h1:vqVt9yG9480NtzREnTlmGSBmFrA+bzb0yl0TxoBQXOg=
++github.com/googleapis/gax-go/v2 v2.18.0 h1:jxP5Uuo3bxm3M6gGtV94P4lliVetoCB4Wk2x8QA86LI=
++github.com/googleapis/gax-go/v2 v2.18.0/go.mod h1:uSzZN4a356eRG985CzJ3WfbFSpqkLTjsnhWGJR6EwrE=
+ github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
+ github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
+ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+ github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 h1:X+2YciYSxvMQK0UZ7sg45ZVabVZBeBuvMkmuI2V3Fak=
+ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7/go.mod h1:lW34nIZuQ8UDPdkon5fmfp2l3+ZkQ2me/+oecHYLOII=
+-github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
+-github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
+ github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
+ github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
+@@ -173,37 +171,37 @@ go.opentelemetry.io/proto/otlp v1.9.0 h1:l706jCMITVouPOqEnii2fIAuO3IVGBRPV5ICjce
+ go.opentelemetry.io/proto/otlp v1.9.0/go.mod h1:xE+Cx5E/eEHw+ISFkwPLwCZefwVjY+pqKg1qcK03+/4=
+ go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+ go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
+-golang.org/x/crypto v0.47.0 h1:V6e3FRj+n4dbpw86FJ8Fv7XVOql7TEwpHapKoMJ/GO8=
+-golang.org/x/crypto v0.47.0/go.mod h1:ff3Y9VzzKbwSSEzWqJsJVBnWmRwRSHt/6Op5n9bQc4A=
+-golang.org/x/net v0.49.0 h1:eeHFmOGUTtaaPSGNmjBKpbng9MulQsJURQUAfUwY++o=
+-golang.org/x/net v0.49.0/go.mod h1:/ysNB2EvaqvesRkuLAyjI1ycPZlQHM3q01F02UY/MV8=
+-golang.org/x/oauth2 v0.34.0 h1:hqK/t4AKgbqWkdkcAeI8XLmbK+4m4G5YeQRrmiotGlw=
+-golang.org/x/oauth2 v0.34.0/go.mod h1:lzm5WQJQwKZ3nwavOZ3IS5Aulzxi68dUSgRHujetwEA=
+-golang.org/x/sync v0.19.0 h1:vV+1eWNmZ5geRlYjzm2adRgW2/mcpevXNg50YZtPCE4=
+-golang.org/x/sync v0.19.0/go.mod h1:9KTHXmSnoGruLpwFjVSX0lNNA75CykiMECbovNTZqGI=
++golang.org/x/crypto v0.49.0 h1:+Ng2ULVvLHnJ/ZFEq4KdcDd/cfjrrjjNSXNzxg0Y4U4=
++golang.org/x/crypto v0.49.0/go.mod h1:ErX4dUh2UM+CFYiXZRTcMpEcN8b/1gxEuv3nODoYtCA=
++golang.org/x/net v0.52.0 h1:He/TN1l0e4mmR3QqHMT2Xab3Aj3L9qjbhRm78/6jrW0=
++golang.org/x/net v0.52.0/go.mod h1:R1MAz7uMZxVMualyPXb+VaqGSa3LIaUqk0eEt3w36Sw=
++golang.org/x/oauth2 v0.36.0 h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs=
++golang.org/x/oauth2 v0.36.0/go.mod h1:YDBUJMTkDnJS+A4BP4eZBjCqtokkg1hODuPjwiGPO7Q=
++golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
++golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+ golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.41.0 h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=
+-golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
++golang.org/x/sys v0.42.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=
++golang.org/x/sys v0.42.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+ golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+-golang.org/x/text v0.33.0 h1:B3njUFyqtHDUI5jMn1YIr5B0IE2U0qck04r6d4KPAxE=
+-golang.org/x/text v0.33.0/go.mod h1:LuMebE6+rBincTi9+xWTY8TztLzKHc/9C1uBCG27+q8=
+-golang.org/x/time v0.14.0 h1:MRx4UaLrDotUKUdCIqzPC48t1Y9hANFKIRpNx+Te8PI=
+-golang.org/x/time v0.14.0/go.mod h1:eL/Oa2bBBK0TkX57Fyni+NgnyQQN4LitPmob2Hjnqw4=
++golang.org/x/text v0.35.0 h1:JOVx6vVDFokkpaq1AEptVzLTpDe9KGpj5tR4/X+ybL8=
++golang.org/x/text v0.35.0/go.mod h1:khi/HExzZJ2pGnjenulevKNX1W67CUy0AsXcNubPGCA=
++golang.org/x/time v0.15.0 h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=
++golang.org/x/time v0.15.0/go.mod h1:Y4YMaQmXwGQZoFaVFk4YpCt4FLQMYKZe9oeV/f4MSno=
+ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+-golang.org/x/tools v0.41.0 h1:a9b8iMweWG+S0OBnlU36rzLp20z1Rp10w+IY2czHTQc=
+-golang.org/x/tools v0.41.0/go.mod h1:XSY6eDqxVNiYgezAVqqCeihT4j1U2CCsqvH3WhQpnlg=
++golang.org/x/tools v0.42.0 h1:uNgphsn75Tdz5Ji2q36v/nsFSfR/9BRFvqhGBaJGd5k=
++golang.org/x/tools v0.42.0/go.mod h1:Ma6lCIwGZvHK6XtgbswSoWroEkhugApmsXyrUmBhfr0=
+ gonum.org/v1/gonum v0.16.0 h1:5+ul4Swaf3ESvrOnidPp4GZbzf0mxVQpDCYUQE7OJfk=
+ gonum.org/v1/gonum v0.16.0/go.mod h1:fef3am4MQ93R2HHpKnLk4/Tbh/s0+wqD5nfa6Pnwy4E=
+-google.golang.org/api v0.252.0 h1:xfKJeAJaMwb8OC9fesr369rjciQ704AjU/psjkKURSI=
+-google.golang.org/api v0.252.0/go.mod h1:dnHOv81x5RAmumZ7BWLShB/u7JZNeyalImxHmtTHxqw=
++google.golang.org/api v0.272.0 h1:eLUQZGnAS3OHn31URRf9sAmRk3w2JjMx37d2k8AjJmA=
++google.golang.org/api v0.272.0/go.mod h1:wKjowi5LNJc5qarNvDCvNQBn3rVK8nSy6jg2SwRwzIA=
+ google.golang.org/genai v1.40.0 h1:kYxyQSH+vsib8dvsgyLJzsVEIv5k3ZmHJyVqdvGncmc=
+ google.golang.org/genai v1.40.0/go.mod h1:A3kkl0nyBjyFlNjgxIwKq70julKbIxpSxqKO5gw/gmk=
+-google.golang.org/genproto v0.0.0-20251014184007-4626949a642f h1:vLd1CJuJOUgV6qijD7KT5Y2ZtC97ll4dxjTUappMnbo=
+-google.golang.org/genproto v0.0.0-20251014184007-4626949a642f/go.mod h1:PI3KrSadr00yqfv6UDvgZGFsmLqeRIwt8x4p5Oo7CdM=
+-google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 h1:merA0rdPeUV3YIIfHHcH4qBkiQAc1nfCKSI7lB4cV2M=
+-google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409/go.mod h1:fl8J1IvUjCilwZzQowmw2b7HQB2eAuYBabMXzWurF+I=
+-google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 h1:H86B94AW+VfJWDqFeEbBPhEtHzJwJfTbgE2lZa54ZAQ=
+-google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409/go.mod h1:j9x/tPzZkyxcgEFkiKEEGxfvyumM01BEtsW8xzOahRQ=
++google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d h1:vsOm753cOAMkt76efriTCDKjpCbK18XGHMJHo0JUKhc=
++google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d/go.mod h1:0oz9d7g9QLSdv9/lgbIjowW1JoxMbxmBVNe8i6tORJI=
++google.golang.org/genproto/googleapis/api v0.0.0-20260316180232-0b37fe3546d5 h1:CogIeEXn4qWYzzQU0QqvYBM8yDF9cFYzDq9ojSpv0Js=
++google.golang.org/genproto/googleapis/api v0.0.0-20260316180232-0b37fe3546d5/go.mod h1:EIQZ5bFCfRQDV4MhRle7+OgjNtZ6P1PiZBgAKuxXu/Y=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5 h1:aJmi6DVGGIStN9Mobk/tZOOQUBbj0BPjZjjnOdoZKts=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=
+ google.golang.org/grpc v1.79.3 h1:sybAEdRIEtvcD68Gx7dmnwjZKlyfuc61Dyo9pGXXkKE=
+ google.golang.org/grpc v1.79.3/go.mod h1:KmT0Kjez+0dde/v2j9vzwoAScgEPx/Bw1CYChhHLrHQ=
+ google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+diff --git a/internal/telemetry/telemetry.go b/internal/telemetry/telemetry.go
+index 68ccca91..aab356d8 100644
+--- a/internal/telemetry/telemetry.go
++++ b/internal/telemetry/telemetry.go
+@@ -42,12 +42,10 @@ const (
+ )
+ 
+ var (
+-	gcpVertexAgentToolCallArgsName        = attribute.Key("gcp.vertex.agent.tool_call_args")
+-	gcpVertexAgentEventID                 = attribute.Key("gcp.vertex.agent.event_id")
+-	gcpVertexAgentToolResponseName        = attribute.Key("gcp.vertex.agent.tool_response")
+-	gcpVertexAgentInvocationID            = attribute.Key("gcp.vertex.agent.invocation_id")
+-	genAIUsageCacheReadInputTokens        = attribute.Key("gen_ai.usage.cache_read.input_tokens")
+-	genAIUsageExperimentalReasoningTokens = attribute.Key("gen_ai.usage.experimental.reasoning_tokens")
++	gcpVertexAgentToolCallArgsName = attribute.Key("gcp.vertex.agent.tool_call_args")
++	gcpVertexAgentEventID          = attribute.Key("gcp.vertex.agent.event_id")
++	gcpVertexAgentToolResponseName = attribute.Key("gcp.vertex.agent.tool_response")
++	gcpVertexAgentInvocationID     = attribute.Key("gcp.vertex.agent.invocation_id")
+ )
+ 
+ // tracer is the tracer instance for ADK go.
+@@ -127,8 +125,6 @@ func TraceGenerateContentResult(span trace.Span, params TraceGenerateContentResu
+ 		span.SetAttributes(
+ 			semconv.GenAIUsageInputTokens(int(params.Response.UsageMetadata.PromptTokenCount)),
+ 			semconv.GenAIUsageOutputTokens(int(params.Response.UsageMetadata.CandidatesTokenCount)),
+-			genAIUsageCacheReadInputTokens.Int(int(params.Response.UsageMetadata.CachedContentTokenCount)),
+-			genAIUsageExperimentalReasoningTokens.Int(int(params.Response.UsageMetadata.ThoughtsTokenCount)),
+ 		)
+ 	}
+ }
+diff --git a/server/adkrest/controllers/triggers/eventarc.go b/server/adkrest/controllers/triggers/eventarc.go
+deleted file mode 100644
+index 65f32ecc..00000000
+--- a/server/adkrest/controllers/triggers/eventarc.go
++++ /dev/null
+@@ -1,137 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package triggers
+-
+-import (
+-	"encoding/json"
+-	"fmt"
+-	"io"
+-	"net/http"
+-
+-	"google.golang.org/adk/agent"
+-	"google.golang.org/adk/artifact"
+-	"google.golang.org/adk/memory"
+-	"google.golang.org/adk/runner"
+-	"google.golang.org/adk/server/adkrest/internal/models"
+-	"google.golang.org/adk/session"
+-)
+-
+-const eventArcDefaultUserID = "eventarc-caller"
+-
+-// EventarcController handles the Eventarc trigger endpoints.
+-type EventarcController struct {
+-	runner    *RetriableRunner
+-	semaphore chan struct{}
+-}
+-
+-// NewEventarcController creates a new EventarcController.
+-func NewEventarcController(sessionService session.Service, agentLoader agent.Loader, memoryService memory.Service, artifactService artifact.Service, pluginConfig runner.PluginConfig, triggerConfig TriggerConfig) *EventarcController {
+-	return &EventarcController{
+-		runner: &RetriableRunner{
+-			sessionService:  sessionService,
+-			agentLoader:     agentLoader,
+-			memoryService:   memoryService,
+-			artifactService: artifactService,
+-			pluginConfig:    pluginConfig,
+-			triggerConfig:   triggerConfig,
+-		},
+-		semaphore: make(chan struct{}, triggerConfig.MaxConcurrentRuns),
+-	}
+-}
+-
+-// EventarcTriggerHandler handles the Eventarc trigger endpoint.
+-func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
+-	var event models.EventarcTriggerRequest
+-	contentType := r.Header.Get("Content-Type")
+-	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
+-	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
+-	if contentType == "application/cloudevents+json" {
+-		// --- STRUCTURED MODE ---
+-		// The entire event is in the body. Decode it.
+-		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
+-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+-			respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to unmarshal eventarc request: %v", err))
+-			return
+-		}
+-	} else {
+-		// --- BINARY MODE ---
+-		// Metadata is in the headers.
+-		event.ID = r.Header.Get("ce-id")
+-		event.Type = r.Header.Get("ce-type")
+-		event.Source = r.Header.Get("ce-source")
+-		event.SpecVersion = r.Header.Get("ce-specversion")
+-		event.Time = r.Header.Get("ce-time")
+-
+-		// The entire body is the payload.
+-		// We just read it as raw bytes into event.Data.
+-		bodyBytes, err := io.ReadAll(r.Body)
+-		if err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to read body: %v", err))
+-			return
+-		}
+-		event.Data = bodyBytes
+-	}
+-
+-	var messageContent string
+-
+-	// Handle Pub/Sub Specifically ---
+-	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+-		var pubsub models.PubSubTriggerRequest
+-		var err error
+-		// Unmarshal the raw bytes into our specific Pub/Sub struct
+-		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
+-			return
+-		}
+-		messageContent, err = messageContentFromPubSub(pubsub)
+-		if err != nil {
+-			respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to retrieve message content: %v", err))
+-			return
+-		}
+-	} else {
+-		// Otherwise just marshal the whole event as an input data.
+-		// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
+-		messageBytes, err := json.Marshal(event)
+-		if err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
+-			return
+-		}
+-		messageContent = string(messageBytes)
+-	}
+-
+-	appName, err := appName(r)
+-	if err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to retrieve app name: %v", err))
+-		return
+-	}
+-
+-	userID := event.Source
+-	if userID == "" {
+-		userID = eventArcDefaultUserID
+-	}
+-
+-	// Semaphore limits concurrent agent calls based on the TriggerConfig.
+-	if c.semaphore != nil {
+-		c.semaphore <- struct{}{}
+-		defer func() { <-c.semaphore }()
+-	}
+-
+-	if _, err := c.runner.RunAgent(r.Context(), appName, userID, messageContent); err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
+-		return
+-	}
+-
+-	respondSuccess(w)
+-}
+diff --git a/server/adkrest/controllers/triggers/pubsub.go b/server/adkrest/controllers/triggers/pubsub.go
+index b1338a05..fea0912c 100644
+--- a/server/adkrest/controllers/triggers/pubsub.go
++++ b/server/adkrest/controllers/triggers/pubsub.go
+@@ -27,7 +27,7 @@ import (
+ 	"google.golang.org/adk/session"
+ )
+ 
+-const pubSubDefaultUserID = "pubsub-caller"
++const defaultUserID = "pubsub-caller"
+ 
+ // PubSubController handles the PubSub trigger endpoints.
+ type PubSubController struct {
+@@ -52,47 +52,22 @@ func NewPubSubController(sessionService session.Service, agentLoader agent.Loade
+ 
+ // PubSubTriggerHandler handles the PubSub trigger endpoint.
+ func (c *PubSubController) PubSubTriggerHandler(w http.ResponseWriter, r *http.Request) {
+-	// Parse the request to the request model.
+-	var req models.PubSubTriggerRequest
+-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+-		respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to decode request: %v", err))
+-		return
+-	}
+-
+-	agentMessage, err := messageContentFromPubSub(req)
+-	if err != nil {
+-		respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to retrieve message content: %v", err))
+-		return
+-	}
+-
+-	appName, err := appName(r)
+-	if err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to retrieve app name: %v", err))
+-		return
+-	}
+-
+-	userID := req.Subscription
+-	if userID == "" {
+-		userID = pubSubDefaultUserID
+-	}
+-
+-	// Semaphore limits concurrent agent calls based on the TriggerConfig.
+ 	if c.semaphore != nil {
+ 		c.semaphore <- struct{}{}
+ 		defer func() { <-c.semaphore }()
+ 	}
+ 
+-	if _, err := c.runner.RunAgent(r.Context(), appName, userID, agentMessage); err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
++	// Parse the request to the request model.
++	var req models.PubSubTriggerRequest
++	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
++		respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to decode request: %v", err))
+ 		return
+ 	}
+ 
+-	respondSuccess(w)
+-}
+-
+-func messageContentFromPubSub(req models.PubSubTriggerRequest) (string, error) {
++	// Decode base64 message data.
+ 	messageContent := make(map[string]any)
+ 	if len(req.Message.Data) > 0 {
++		// Avoids encoding the data twice later with json.Marshal.
+ 		messageContent["data"] = string(req.Message.Data)
+ 	}
+ 	// Add attributes to the messageContent if present
+@@ -101,12 +76,26 @@ func messageContentFromPubSub(req models.PubSubTriggerRequest) (string, error) {
+ 	}
+ 
+ 	if len(messageContent) == 0 {
+-		return "", fmt.Errorf("empty message data and attributes")
++		respondError(w, http.StatusBadRequest, "empty message data and attributes")
++		return
+ 	}
+ 
+ 	agentMessage, err := json.Marshal(messageContent)
+ 	if err != nil {
+-		return "", fmt.Errorf("failed to marshal agent message: %v", err)
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++		return
+ 	}
+-	return string(agentMessage), nil
++
++	appName, err := appName(r)
++	if err != nil {
++		respondError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++
++	if _, err := c.runner.RunAgent(r.Context(), appName, req.Subscription, string(agentMessage)); err != nil {
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
++		return
++	}
++
++	respondSuccess(w)
+ }
+diff --git a/server/adkrest/controllers/triggers/triggers.go b/server/adkrest/controllers/triggers/triggers.go
+index 32beaa50..6bf6e9ac 100644
+--- a/server/adkrest/controllers/triggers/triggers.go
++++ b/server/adkrest/controllers/triggers/triggers.go
+@@ -45,6 +45,10 @@ type RetriableRunner struct {
+ }
+ 
+ func (r *RetriableRunner) RunAgent(ctx context.Context, appName, userID, messageContent string) ([]*session.Event, error) {
++	if userID == "" {
++		userID = defaultUserID
++	}
++
+ 	// Each retry = new session
+ 	sessReq := &session.CreateRequest{
+ 		AppName: appName,
+diff --git a/server/adkrest/handler.go b/server/adkrest/handler.go
+index b0dc54a6..01ece477 100644
+--- a/server/adkrest/handler.go
++++ b/server/adkrest/handler.go
+@@ -15,7 +15,6 @@
+ package adkrest
+ 
+ import (
+-	"fmt"
+ 	"net/http"
+ 	"time"
+ 
+@@ -35,12 +34,7 @@ import (
+ 
+ // NewServer creates a new ADK REST API server which implements [http.Handler] interface.
+ func NewServer(cfg ServerConfig) (*Server, error) {
+-	debugTelemetry, err := services.NewDebugTelemetryWithConfig(&services.DebugTelemetryConfig{
+-		TraceCapacity: cfg.DebugConfig.TraceCapacity,
+-	})
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create debug telemetry service: %w", err)
+-	}
++	debugTelemetry := services.NewDebugTelemetry()
+ 
+ 	router := mux.NewRouter().StrictSlash(true)
+ 	// TODO: Allow taking a prefix to allow customizing the path
+@@ -67,14 +61,6 @@ type ServerConfig struct {
+ 	ArtifactService artifact.Service
+ 	SSEWriteTimeout time.Duration
+ 	PluginConfig    runner.PluginConfig
+-	DebugConfig     *DebugTelemetryConfig
+-}
+-
+-// DebugTelemetryConfig contains parameters for the debug telemetry.
+-type DebugTelemetryConfig struct {
+-	// Maximum number of traces to keep in memory.
+-	// If <= 0, the default capacity 10_000 is used.
+-	TraceCapacity int
+ }
+ 
+ // Server is an HTTP server that serves the ADK REST API.
+diff --git a/server/adkrest/internal/models/triggers.go b/server/adkrest/internal/models/triggers.go
+index be6bc05c..08e6e5a1 100644
+--- a/server/adkrest/internal/models/triggers.go
++++ b/server/adkrest/internal/models/triggers.go
+@@ -14,8 +14,6 @@
+ 
+ package models
+ 
+-import "encoding/json"
+-
+ // PubSubTriggerRequest represents the request for the PubSub trigger.
+ // See: https://cloud.google.com/pubsub/docs/push#receive_push
+ type PubSubTriggerRequest struct {
+@@ -39,37 +37,6 @@ type PubSubMessage struct {
+ 	OrderingKey string `json:"orderingKey,omitempty"`
+ }
+ 
+-// EventarcTriggerRequest represents the request for the Eventarc trigger.
+-// Eventarc / CloudEvents request format.
+-//
+-// Eventarc delivers events as CloudEvents over HTTP in two modes:
+-//
+-//  1. **Structured content mode** (JSON body): All CloudEvents attributes
+-//     and the event data are in the JSON body.  Used by direct HTTP callers.
+-//  2. **Binary content mode** (Eventarc default): CloudEvents attributes are
+-//     sent as “ce-*“ HTTP headers, and the body contains only the event
+-//     data — typically a Pub/Sub message wrapper for Pub/Sub-sourced events:
+-//     “{"message": {"data": "<base64>", ...}, "subscription": "..."}“.
+-//
+-// See: https://cloud.google.com/eventarc/docs/cloudevents
+-type EventarcTriggerRequest struct {
+-	// Unique identifier for the event
+-	ID string `json:"id"`
+-	// Identifies the source of the event
+-	Source string `json:"source"`
+-	// The type of event data
+-	Type string `json:"type"`
+-	// The CloudEvents specification version used for this event
+-	SpecVersion string `json:"specversion"`
+-	// Event generation time, in RFC 3339 format (optional)
+-	Time string `json:"time,omitempty"`
+-	// In structured mode, ``data`` is always present.
+-	// In binary mode, the entire body is the data (often a Pub/Sub wrapper).
+-	// But sometimes it can be just a JSON object.
+-	// E.g. https://googleapis.github.io/google-cloudevents/examples/binary/firestore/DocumentEventData-simple.json
+-	Data json.RawMessage `json:"data,omitempty"`
+-}
+-
+ // TriggerResponse represents the standard response for Pub/Sub and Eventarc triggers.
+ type TriggerResponse struct {
+ 	// Processing status: 'success' or error message.
+diff --git a/server/adkrest/internal/services/debugtelemetry.go b/server/adkrest/internal/services/debugtelemetry.go
+index b2823a72..affafc5d 100644
+--- a/server/adkrest/internal/services/debugtelemetry.go
++++ b/server/adkrest/internal/services/debugtelemetry.go
+@@ -15,15 +15,11 @@
+ package services
+ 
+ import (
+-	"cmp"
+ 	"context"
+-	"fmt"
+ 	"slices"
+ 	"sync"
+ 	"time"
+ 
+-	lru "github.com/hashicorp/golang-lru/v2"
+-
+ 	"go.opentelemetry.io/otel/attribute"
+ 	sdklog "go.opentelemetry.io/otel/sdk/log"
+ 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+@@ -33,35 +29,18 @@ import (
+ 	"google.golang.org/adk/internal/telemetry"
+ )
+ 
+-const (
+-	defaultTraceCapacity = 10_000
+-	eventIDKey           = "gcp.vertex.agent.event_id"
+-)
++const eventIDKey = "gcp.vertex.agent.event_id"
+ 
+ // DebugTelemetry stores the in memory spans and logs, grouped by session and event.
+ type DebugTelemetry struct {
+ 	store *spanStore
+ }
+ 
+-type DebugTelemetryConfig struct {
+-	// Maximum number of traces to keep in memory.
+-	// If <= 0, default capacity (10_000) is used.
+-	TraceCapacity int
+-}
+-
+-// NewDebugTelemetryWithConfig returns a new DebugTelemetry instance with custom capacity.
+-func NewDebugTelemetryWithConfig(cfg *DebugTelemetryConfig) (*DebugTelemetry, error) {
+-	capacity := defaultTraceCapacity
+-	if cfg != nil && cfg.TraceCapacity > 0 {
+-		capacity = cfg.TraceCapacity
+-	}
+-	store, err := newSpanStore(capacity)
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create span store: %w", err)
+-	}
++// NewDebugTelemetry returns a new DebugTelemetry instance.
++func NewDebugTelemetry() *DebugTelemetry {
+ 	return &DebugTelemetry{
+-		store: store,
+-	}, nil
++		store: newSpanStore(),
++	}
+ }
+ 
+ func (d *DebugTelemetry) SpanProcessor() sdktrace.SpanProcessor {
+@@ -85,7 +64,7 @@ func (d *DebugTelemetry) GetSpansBySessionID(sessionID string) []DebugSpan {
+ }
+ 
+ func convertAttrs(in []attribute.KeyValue) map[string]string {
+-	out := make(map[string]string, len(in))
++	out := make(map[string]string)
+ 	for _, attr := range in {
+ 		out[string(attr.Key)] = attr.Value.Emit()
+ 	}
+@@ -115,40 +94,40 @@ type DebugLog struct {
+ 
+ // spanRecord stores a span and its associated logs.
+ type spanRecord struct {
++	Span *inMemorySpan
++	Logs []DebugLog
++}
++
++// inMemorySpan stores spans in memory for debug telemetry.
++type inMemorySpan struct {
+ 	Name         string
+ 	StartTime    time.Time
+ 	EndTime      time.Time
+ 	Context      trace.SpanContext
+ 	ParentSpanID trace.SpanID
+ 	Attributes   map[string]string
+-	Logs         []DebugLog
+ }
+ 
+ // spanStore stores spans and logs in memory for debug telemetry.
+ type spanStore struct {
+ 	mu sync.RWMutex
+-	// recordsByTraceID is the main store for spans, indexed by trace id.
+-	recordsByTraceID *lru.Cache[string, []*spanRecord]
+ 	// recordsBySpanID stores spans indexed by span id.
+ 	recordsBySpanID map[string]*spanRecord
+ 	// traceIDsBySessionID stores trace ids indexed by session id for easy lookup.
+ 	traceIDsBySessionID map[string]map[string]struct{}
+ 	// recordsByEventID stores spans indexed by event id for easy lookup.
+ 	recordsByEventID map[string][]*spanRecord
++	// recordsByTraceID stores spans indexed by trace id for easy lookup.
++	recordsByTraceID map[string][]*spanRecord
+ }
+ 
+-func newSpanStore(capacity int) (*spanStore, error) {
+-	store := &spanStore{
++func newSpanStore() *spanStore {
++	return &spanStore{
+ 		recordsBySpanID:     make(map[string]*spanRecord),
+ 		traceIDsBySessionID: make(map[string]map[string]struct{}),
+ 		recordsByEventID:    make(map[string][]*spanRecord),
++		recordsByTraceID:    make(map[string][]*spanRecord),
+ 	}
+-	var err error
+-	store.recordsByTraceID, err = lru.NewWithEvict(capacity, store.evict)
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
+-	}
+-	return store, nil
+ }
+ 
+ func (s *spanStore) getSpansByEventID(id string) []DebugSpan {
+@@ -156,65 +135,50 @@ func (s *spanStore) getSpansByEventID(id string) []DebugSpan {
+ 	defer s.mu.RUnlock()
+ 	// Create a copy of the slice to avoid race conditions.
+ 	records := slices.Clone(s.recordsByEventID[id])
+-	s.touchTraces(records)
+ 	return convertRecords(records)
+ }
+ 
+-// touchTraces marks traces as recently used. Required because fetching by event ID bypasses the trace LRU cache.
+-func (s *spanStore) touchTraces(records []*spanRecord) {
+-	// touchedTraces is used to avoid touching the same trace multiple times.
+-	touchedTraces := make(map[string]bool)
+-	for _, r := range records {
+-		traceIDStr := r.Context.TraceID().String()
+-		if traceIDStr != "" && !touchedTraces[traceIDStr] {
+-			touchedTraces[traceIDStr] = true
+-			// Get the trace to update its access time in the LRU cache, ignore the result.
+-			s.recordsByTraceID.Get(traceIDStr)
+-		}
+-	}
+-}
+-
+ func (s *spanStore) getSpansBySessionID(sessionID string) []DebugSpan {
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+ 	traces := s.traceIDsBySessionID[sessionID]
+ 	var records []*spanRecord
+ 	for traceID := range traces {
+-		if traceRecords, ok := s.recordsByTraceID.Get(traceID); ok {
+-			records = append(records, traceRecords...)
++		if r, ok := s.recordsByTraceID[traceID]; ok {
++			records = append(records, r...)
+ 		}
+ 	}
+ 	return convertRecords(records)
+ }
+ 
+ func convertRecords(records []*spanRecord) []DebugSpan {
+-	records = filterUnclosedAndSort(records)
++	records = filterNilsAndSort(records)
+ 	debugSpans := make([]DebugSpan, len(records))
+ 	for i, r := range records {
+ 		// Clone the logs to avoid race conditions.
+ 		logs := slices.Clone(r.Logs)
+ 		debugSpans[i] = DebugSpan{
+-			Name:         r.Name,
+-			StartTime:    r.StartTime.UnixNano(),
+-			EndTime:      r.EndTime.UnixNano(),
+-			SpanID:       r.Context.SpanID().String(),
+-			TraceID:      r.Context.TraceID().String(),
+-			ParentSpanID: r.ParentSpanID.String(),
+-			Attributes:   r.Attributes,
++			Name:         r.Span.Name,
++			StartTime:    r.Span.StartTime.UnixNano(),
++			EndTime:      r.Span.EndTime.UnixNano(),
++			TraceID:      r.Span.Context.TraceID().String(),
++			SpanID:       r.Span.Context.SpanID().String(),
++			ParentSpanID: r.Span.ParentSpanID.String(),
++			Attributes:   r.Span.Attributes,
+ 			Logs:         logs,
+ 		}
+ 	}
+ 	return debugSpans
+ }
+ 
+-func filterUnclosedAndSort(records []*spanRecord) []*spanRecord {
++func filterNilsAndSort(records []*spanRecord) []*spanRecord {
+ 	filtered := slices.DeleteFunc(records, func(s *spanRecord) bool {
+ 		// Logs are emitted before the span is closed and sent to the processor.
+ 		// Skip them in the response.
+-		return s == nil || !s.Context.TraceID().IsValid()
++		return s == nil || s.Span == nil
+ 	})
+-	slices.SortStableFunc(filtered, func(a, b *spanRecord) int {
+-		return cmp.Compare(a.StartTime.UnixNano(), b.StartTime.UnixNano())
++	slices.SortFunc(filtered, func(a, b *spanRecord) int {
++		return a.Span.StartTime.Compare(b.Span.StartTime)
+ 	})
+ 	return filtered
+ }
+@@ -258,20 +222,21 @@ func (s *spanStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySp
+ 			s.recordsBySpanID[spanID] = record
+ 		}
+ 
+-		record.Name = span.Name()
+-		record.StartTime = span.StartTime()
+-		record.EndTime = span.EndTime()
+-		record.Context = span.SpanContext()
+-		record.ParentSpanID = span.Parent().SpanID()
+-		record.Attributes = attrs
++		record.Span = &inMemorySpan{
++			Name:         span.Name(),
++			StartTime:    span.StartTime(),
++			EndTime:      span.EndTime(),
++			Context:      span.SpanContext(),
++			ParentSpanID: span.Parent().SpanID(),
++			Attributes:   attrs,
++		}
+ 
+-		s.updateSpanIndexes(record)
++		s.updateSpanIndexes(record.Span, record)
+ 	}
+ 	return nil
+ }
+ 
+-func (s *spanStore) updateSpanIndexes(span *spanRecord) {
+-	traceIDStr := span.Context.TraceID().String()
++func (s *spanStore) updateSpanIndexes(span *inMemorySpan, record *spanRecord) {
+ 	// Update session id -> trace id mapping.
+ 	sessionIDKey := string(semconv.GenAIConversationIDKey)
+ 	if sessionID, ok := span.Attributes[sessionIDKey]; ok {
+@@ -280,54 +245,16 @@ func (s *spanStore) updateSpanIndexes(span *spanRecord) {
+ 			traces = make(map[string]struct{})
+ 			s.traceIDsBySessionID[sessionID] = traces
+ 		}
+-		traces[traceIDStr] = struct{}{}
++		traceID := span.Context.TraceID().String()
++		traces[traceID] = struct{}{}
+ 	}
+ 	// Update event id -> span id mapping.
+ 	if eventID, ok := span.Attributes[eventIDKey]; ok {
+-		s.recordsByEventID[eventID] = append(s.recordsByEventID[eventID], span)
+-	}
+-
+-	// Update trace id -> span id mapping (LRU).
+-	records, _ := s.recordsByTraceID.Get(traceIDStr)
+-	s.recordsByTraceID.Add(traceIDStr, append(records, span))
+-}
+-
+-func (s *spanStore) evict(traceID string, spans []*spanRecord) {
+-	for _, span := range spans {
+-		if span.Context.TraceID().IsValid() {
+-			delete(s.recordsBySpanID, span.Context.SpanID().String())
+-
+-			if eventID, ok := span.Attributes[eventIDKey]; ok {
+-				s.evictRecordsByEventID(eventID, span)
+-			}
+-
+-			if sessionID, ok := span.Attributes[string(semconv.GenAIConversationIDKey)]; ok {
+-				s.evictTraceIDsBySessionID(sessionID, traceID)
+-			}
+-		}
+-	}
+-}
+-
+-func (s *spanStore) evictRecordsByEventID(eventID string, span *spanRecord) {
+-	records := s.recordsByEventID[eventID]
+-	records = slices.DeleteFunc(records, func(r *spanRecord) bool {
+-		return r.Context.SpanID() == span.Context.SpanID()
+-	})
+-	if len(records) == 0 {
+-		delete(s.recordsByEventID, eventID)
+-	} else {
+-		s.recordsByEventID[eventID] = records
+-	}
+-}
+-
+-func (s *spanStore) evictTraceIDsBySessionID(sessionID, traceID string) {
+-	traces := s.traceIDsBySessionID[sessionID]
+-	if traces != nil {
+-		delete(traces, traceID)
+-		if len(traces) == 0 {
+-			delete(s.traceIDsBySessionID, sessionID)
+-		}
++		s.recordsByEventID[eventID] = append(s.recordsByEventID[eventID], record)
+ 	}
++	// Update trace id -> span id mapping.
++	traceID := span.Context.TraceID().String()
++	s.recordsByTraceID[traceID] = append(s.recordsByTraceID[traceID], record)
+ }
+ 
+ // ForceFlush implements sdklog.Exporter and sdktrace.SpanProcessor.
+diff --git a/tool/skilltoolset/skill/filesystem_source.go b/tool/skilltoolset/skill/filesystem_source.go
+deleted file mode 100644
+index 77341a0b..00000000
+--- a/tool/skilltoolset/skill/filesystem_source.go
++++ /dev/null
+@@ -1,228 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package skill
+-
+-import (
+-	"bufio"
+-	"context"
+-	"errors"
+-	"fmt"
+-	"io"
+-	"io/fs"
+-	"path"
+-	"strings"
+-)
+-
+-// NewFileSystemSource creates a Source implementation backed by an fs.FS.
+-//
+-// The provided filesystem is expected to have skills organized as immediate
+-// subdirectories. A valid skill directory MUST contain a "SKILL.md" file
+-// with valid YAML frontmatter, and the directory name must exactly match
+-// the name defined in that frontmatter.
+-//
+-// Expected layout example:
+-//
+-//	  skill-1/
+-//		   SKILL.md
+-//		   assets/
+-//	  skill-2/
+-//		   SKILL.md
+-//		   references/
+-//		   scripts/
+-func NewFileSystemSource(filesystem fs.FS) Source {
+-	return &fileSystemSource{filesystem: filesystem}
+-}
+-
+-type fileSystemSource struct {
+-	filesystem fs.FS
+-}
+-
+-// ListFrontmatters scans the immediate subdirectories of the root filesystem.
+-// It does not traverse recursively. Directories without a valid SKILL.md
+-// are silently ignored.
+-func (f *fileSystemSource) ListFrontmatters(ctx context.Context) ([]*Frontmatter, error) {
+-	var frontmatters []*Frontmatter
+-
+-	entries, err := fs.ReadDir(f.filesystem, ".")
+-	if err != nil {
+-		return nil, fmt.Errorf("read root directory: %w", err)
+-	}
+-
+-	for _, entry := range entries {
+-		if !entry.IsDir() {
+-			continue // Skills must be directories
+-		}
+-		frontmatter, _, closer, err := f.readSkill(entry.Name())
+-		if err != nil {
+-			if errors.Is(err, ErrSkillNotFound) {
+-				continue // Directory doesn't contain SKILL.md - not a skill.
+-			}
+-			return nil, err
+-		}
+-		// Avoid holding files open in the loop by closing without defer.
+-		_ = closer.Close() // Ignore error as read success is what matters.
+-		frontmatters = append(frontmatters, frontmatter)
+-	}
+-	return frontmatters, nil
+-}
+-
+-// LoadFrontmatter opens and parses the SKILL.md file located at the root
+-// of the specified skill directory.
+-func (f *fileSystemSource) LoadFrontmatter(ctx context.Context, name string) (*Frontmatter, error) {
+-	frontmatter, _, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return nil, err
+-	}
+-	_ = closer.Close() // Ignore error as read success is what matters.
+-	return frontmatter, nil
+-}
+-
+-// LoadInstructions parses the SKILL.md file and returns the markdown content
+-// immediately following the frontmatter delimiter.
+-func (f *fileSystemSource) LoadInstructions(ctx context.Context, name string) (string, error) {
+-	_, reader, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return "", err
+-	}
+-	defer func() {
+-		_ = closer.Close() // Ignore error as read success is what matters.
+-	}()
+-
+-	instructions, err := io.ReadAll(reader)
+-	if err != nil {
+-		return "", fmt.Errorf("read instructions: %w", err)
+-	}
+-	return string(instructions), nil
+-}
+-
+-// LoadResource reads a specific file from the skill's directory.
+-//
+-// For security, the resourcePath is sanitized using path.Clean. Access is
+-// strictly limited to files within the 'references/', 'assets/', or
+-// 'scripts/' subdirectories to prevent path traversal attacks.
+-func (f *fileSystemSource) LoadResource(ctx context.Context, name, resourcePath string) (io.ReadCloser, error) {
+-	if err := f.validateSkill(name); err != nil {
+-		return nil, err
+-	}
+-
+-	cleanPath := path.Clean(resourcePath)
+-	if !strings.HasPrefix(cleanPath, "references/") && !strings.HasPrefix(cleanPath, "assets/") && !strings.HasPrefix(cleanPath, "scripts/") {
+-		return nil, fmt.Errorf("%w: %q must be within 'references/', 'assets/', or 'scripts/' (relative to skill directory)", ErrInvalidResourcePath, resourcePath)
+-	}
+-
+-	fullPath := path.Join(name, cleanPath)
+-	file, err := f.filesystem.Open(fullPath)
+-	if err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, cleanPath)
+-		}
+-		return nil, fmt.Errorf("open resource file %q: %w", fullPath, err)
+-	}
+-	return file, nil
+-}
+-
+-// ListResources walks the specified resource directory within the skill.
+-//
+-// If resourceDirectoryPath is empty or ".", it walks the 'references/',
+-// 'assets/', and 'scripts/' directories. It restricts traversal to these
+-// approved directories and returns sanitized paths relative to the skill root.
+-func (f *fileSystemSource) ListResources(ctx context.Context, name, resourceDirectoryPath string) ([]string, error) {
+-	if err := f.validateSkill(name); err != nil {
+-		return nil, err
+-	}
+-
+-	cleanPath := path.Clean(resourceDirectoryPath)
+-	isRoot := cleanPath == "." || cleanPath == ""
+-
+-	if !isRoot {
+-		switch strings.SplitN(cleanPath, "/", 2)[0] {
+-		case "references", "assets", "scripts": // Valid top level directories.
+-		default:
+-			return nil, fmt.Errorf("%w: %q must be empty, root (.), or within 'references/', 'assets/', or 'scripts/'", ErrInvalidResourcePath, resourceDirectoryPath)
+-		}
+-	}
+-
+-	skillFS, err := fs.Sub(f.filesystem, name)
+-	if err != nil {
+-		return nil, fmt.Errorf("create sub-filesystem for %q: %w", name, err)
+-	}
+-
+-	if _, err := fs.Stat(skillFS, cleanPath); err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, cleanPath)
+-		}
+-		return nil, fmt.Errorf("stat %q: %w", cleanPath, err)
+-	}
+-
+-	targets := []string{cleanPath}
+-	if isRoot { // Limit the walk to these top-level directories.
+-		targets = []string{"references", "assets", "scripts"}
+-	}
+-
+-	var resources []string
+-	for _, target := range targets {
+-		err := fs.WalkDir(skillFS, target, func(p string, d fs.DirEntry, err error) error {
+-			if err != nil {
+-				if errors.Is(err, fs.ErrNotExist) {
+-					return nil
+-				}
+-				return err
+-			}
+-			if !d.IsDir() {
+-				resources = append(resources, p)
+-			}
+-			return nil
+-		})
+-		if err != nil {
+-			return nil, fmt.Errorf("walk target %q: %w", target, err)
+-		}
+-	}
+-
+-	return resources, nil
+-}
+-
+-func (f *fileSystemSource) validateSkill(name string) error {
+-	_, _, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return err
+-	}
+-	_ = closer.Close() // Ignore error as read success is what matters.
+-	return nil
+-}
+-
+-// readSkill reads and validates the frontmatter from the SKILL.md file and
+-// returns the frontmatter, a buffered reader for the rest of the file, and a
+-// closer for the file.
+-func (f *fileSystemSource) readSkill(name string) (*Frontmatter, *bufio.Reader, io.Closer, error) {
+-	skillFilePath := path.Join(name, "SKILL.md")
+-	file, err := f.filesystem.Open(skillFilePath)
+-	if err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, nil, nil, fmt.Errorf("%w: %q", ErrSkillNotFound, name)
+-		}
+-		return nil, nil, nil, fmt.Errorf("open %q: %w", skillFilePath, err)
+-	}
+-	reader := bufio.NewReader(file)
+-	frontmatter, err := Parse(reader)
+-	if err != nil {
+-		_ = file.Close()
+-		return nil, nil, nil, fmt.Errorf("%w: parse frontmatter: %w", ErrInvalidFrontmatter, err)
+-	}
+-	if frontmatter.Name != name {
+-		_ = file.Close()
+-		return nil, nil, nil, fmt.Errorf("%w: name in SKILL.md (%q) does not match directory name (%q)", ErrInvalidSkillName, frontmatter.Name, name)
+-	}
+-	return frontmatter, reader, file, nil
+-}
+diff --git a/tool/skilltoolset/skill/source.go b/tool/skilltoolset/skill/source.go
+deleted file mode 100644
+index 154c59ed..00000000
+--- a/tool/skilltoolset/skill/source.go
++++ /dev/null
+@@ -1,61 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package skill
+-
+-import (
+-	"context"
+-	"errors"
+-	"io"
+-)
+-
+-// Common errors returned by Source implementations.
+-var (
+-	ErrInvalidSkillName    = errors.New("invalid skill name")
+-	ErrInvalidFrontmatter  = errors.New("invalid frontmatter")
+-	ErrSkillNotFound       = errors.New("skill not found")
+-	ErrDuplicateSkill      = errors.New("duplicate skill")
+-	ErrInvalidResourcePath = errors.New("invalid resource path")
+-	ErrResourceNotFound    = errors.New("resource not found")
+-)
+-
+-// Source is the interface for accessing skill components.
+-//
+-// Implementations must:
+-//   - be safe for concurrent use.
+-//   - return the sentinel error values defined in this package
+-//     (ErrInvalidSkillName, ErrInvalidFrontmatter, ErrSkillNotFound,
+-//     ErrDuplicateSkill, ErrInvalidResourcePath, ErrResourceNotFound, etc.)
+-//     when appropriate.
+-type Source interface {
+-	// ListFrontmatters returns frontmatters for all available skills.
+-	ListFrontmatters(ctx context.Context) ([]*Frontmatter, error)
+-
+-	// ListResources returns resource paths for a given skill and subpath.
+-	// subpath is a relative path to the skill, as are the returned resource
+-	// paths.
+-	ListResources(ctx context.Context, name, subpath string) ([]string, error)
+-
+-	// LoadFrontmatter returns the frontmatter for a single skill by name.
+-	LoadFrontmatter(ctx context.Context, name string) (*Frontmatter, error)
+-
+-	// LoadInstructions returns the instruction body for a single skill by name.
+-	LoadInstructions(ctx context.Context, name string) (string, error)
+-
+-	// LoadResource returns a stream for a specific resource within a given skill.
+-	// resourcePath is a relative path to the skill.
+-	//
+-	// NOTE: The caller is responsible for closing the returned io.ReadCloser.
+-	LoadResource(ctx context.Context, name, resourcePath string) (io.ReadCloser, error)
+-}

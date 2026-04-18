@@ -1,0 +1,1410 @@
+diff --git a/internal/gengapic/BUILD.bazel b/internal/gengapic/BUILD.bazel
+index 50eea7e8..8f47db4b 100644
+--- a/internal/gengapic/BUILD.bazel
++++ b/internal/gengapic/BUILD.bazel
+@@ -14,6 +14,7 @@ go_library(
+         "gengrpc.go",
+         "genrest.go",
+         "helpers.go",
++        "heuristics.go",
+         "imports.go",
+         "lro.go",
+         "markdown.go",
+@@ -74,6 +75,7 @@ go_test(
+         "gengapic_test.go",
+         "genrest_test.go",
+         "helpers_test.go",
++        "heuristics_test.go",
+         "imports_test.go",
+         "markdown_test.go",
+         "metadata_test.go",
+diff --git a/internal/gengapic/feature.go b/internal/gengapic/feature.go
+index 353750d1..9f0bcbd0 100644
+--- a/internal/gengapic/feature.go
++++ b/internal/gengapic/feature.go
+@@ -29,12 +29,11 @@ type featureInfo struct {
+ 
+ // Define feature ID strings here.  More details about features are kept in the featureRegistry map.
+ const (
+-	WrapperTypesForPageSizeFeature featureID = "wrapper_types_for_page_size"
+-	OrderedRoutingHeadersFeature   featureID = "ordered_routing_headers"
+-	MTLSHardBoundTokensFeature     featureID = "mtls_hard_bound_tokens"
+-	OpenTelemetryTracingFeature    featureID = "open_telemetry_tracing"
+-	OpenTelemetryLoggingFeature    featureID = "open_telemetry_logging"
+-	OpenTelemetryMetricsFeature    featureID = "open_telemetry_metrics"
++	WrapperTypesForPageSizeFeature   featureID = "wrapper_types_for_page_size"
++	OrderedRoutingHeadersFeature     featureID = "ordered_routing_headers"
++	MTLSHardBoundTokensFeature       featureID = "mtls_hard_bound_tokens"
++	OpenTelemetryAttributesFeature   featureID = "open_telemetry_attributes"
++	DynamicResourceHeuristicsFeature featureID = "dynamic_resource_heuristics"
+ )
+ 
+ // featureRegistry contains the registry of defined features.
+@@ -43,16 +42,13 @@ const (
+ // who attempt to do so will be given a stern talking to.
+ var featureRegistry = map[featureID]*featureInfo{
+ 
+-	OpenTelemetryTracingFeature: {
+-		Description: "Enable OpenTelemetry tracing support (Service Identity, Resource Names, URL Templates).",
++	OpenTelemetryAttributesFeature: {
++		Description: "Enable OpenTelemetry attributes support (Service Identity, Resource Names, URL Templates).",
+ 		TrackingID:  "b/467342602,b/467403185",
+ 	},
+-	OpenTelemetryLoggingFeature: {
+-		Description: "Enable OpenTelemetry logging support (Service Identity, Resource Names, URL Templates).",
+-		TrackingID:  "b/476980971",
+-	},
+-	OpenTelemetryMetricsFeature: {
+-		Description: "Enable OpenTelemetry M1 metrics support (Duration, RPC Method, URL Template, Error Mapping).",
++	DynamicResourceHeuristicsFeature: {
++		Description: "Enable dynamic resource name heuristics for unannotated legacy services.",
++		TrackingID:  "b/476980139",
+ 	},
+ 	MTLSHardBoundTokensFeature: {
+ 		Description: "support MTLS hard bound tokens",
+diff --git a/internal/gengapic/generator.go b/internal/gengapic/generator.go
+index 11352a11..3c8876a2 100644
+--- a/internal/gengapic/generator.go
++++ b/internal/gengapic/generator.go
+@@ -72,6 +72,9 @@ type generator struct {
+ 	// customOpServices is a map of service descriptors with methods that create custom operations
+ 	// to the service descriptors of the custom operation services that manage those custom operation instances.
+ 	customOpServices map[*descriptorpb.ServiceDescriptorProto]*descriptorpb.ServiceDescriptorProto
++
++	// learned vocabulary for heuristic path templates
++	vocabulary map[string]bool
+ }
+ 
+ func newGenerator(req *pluginpb.CodeGeneratorRequest) (*generator, error) {
+@@ -102,6 +105,14 @@ func newGenerator(req *pluginpb.CodeGeneratorRequest) (*generator, error) {
+ 	// attach config to generator.
+ 	g.cfg = cfg
+ 
++	var methods []*descriptorpb.MethodDescriptorProto
++	for _, f := range req.GetProtoFile() {
++		for _, s := range f.GetService() {
++			methods = append(methods, s.GetMethod()...)
++		}
++	}
++	g.vocabulary = buildHeuristicVocabulary(methods)
++
+ 	files := req.GetProtoFile()
+ 	files = append(files, wellKnownTypeFiles...)
+ 
+diff --git a/internal/gengapic/gengapic.go b/internal/gengapic/gengapic.go
+index e91a234c..b5407606 100644
+--- a/internal/gengapic/gengapic.go
++++ b/internal/gengapic/gengapic.go
+@@ -498,29 +498,37 @@ func (g *generator) insertRequestHeaders(m *descriptorpb.MethodDescriptorProto,
+ 		case grpc:
+ 			p("hds = append(c.xGoogHeaders, hds...)")
+ 			p("ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)")
+-			if g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature) {
+-				resField := g.resourceNameField(m)
+-				if resField != "" {
++			if g.featureEnabled(OpenTelemetryAttributesFeature) {
++				resTarget := g.resourceNameField(m)
++				if resTarget != nil {
+ 					p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
++
+ 					// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
+ 					// the expression fieldGetter(resField) returns an accessor for the full
+ 					// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
+ 					// APIs (missing the resource_reference annotation), an empty string is returned.
+ 
+ 					// Prepend the service host if available
++					var getters []string
++					for _, f := range resTarget.FieldNames {
++						getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++					}
++					gettersStr := strings.Join(getters, ", ")
++
+ 					serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
+ 					host := ""
+ 					if proto.HasExtension(serv.Options, annotations.E_DefaultHost) {
+ 						host = proto.GetExtension(serv.Options, annotations.E_DefaultHost).(string)
+ 					}
+ 
++					escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+ 					if host != "" {
+-						p(`  ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//%s/%%v", req%s))`, host, fieldGetter(resField))
++						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+ 					} else {
+-						p(`  ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("%%v", req%s))`, fieldGetter(resField))
++						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+ 					}
+ 					p("}")
+-					g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
++					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+ 					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
+ 				}
+ 			}
+@@ -528,29 +536,35 @@ func (g *generator) insertRequestHeaders(m *descriptorpb.MethodDescriptorProto,
+ 			p(`hds = append(c.xGoogHeaders, hds...)`)
+ 			p(`hds = append(hds, "Content-Type", "application/json")`)
+ 			p(`headers := gax.BuildHeaders(ctx, hds...)`)
+-			if g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature) {
+-				resField := g.resourceNameField(m)
+-				if resField != "" {
++			if g.featureEnabled(OpenTelemetryAttributesFeature) {
++				resTarget := g.resourceNameField(m)
++				if resTarget != nil {
+ 					p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+ 					// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
+ 					// the expression fieldGetter(resField) returns an accessor for the full
+ 					// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
+ 					// APIs (missing the resource_reference annotation), an empty string is returned.
+ 
+-					// Prepend the service host if available
++					var getters []string
++					for _, f := range resTarget.FieldNames {
++						getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++					}
++					gettersStr := strings.Join(getters, ", ")
++
+ 					serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
+ 					host := ""
+ 					if proto.HasExtension(serv.Options, annotations.E_DefaultHost) {
+ 						host = proto.GetExtension(serv.Options, annotations.E_DefaultHost).(string)
+ 					}
+ 
++					escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+ 					if host != "" {
+-						p(`  ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//%s/%%v", req%s))`, host, fieldGetter(resField))
++						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+ 					} else {
+-						p(`  ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("%%v", req%s))`, fieldGetter(resField))
++						p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+ 					}
+ 					p("}")
+-					g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
++					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+ 					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
+ 				}
+ 			}
+@@ -685,12 +699,14 @@ func (g *generator) injectTelemetryContext(m *descriptorpb.MethodDescriptorProto
+ 	if m == nil {
+ 		return
+ 	}
+-	if g.featureEnabled(OpenTelemetryMetricsFeature) || g.featureEnabled(OpenTelemetryTracingFeature) {
++	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 		g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+ 		g.imports[pbinfo.ImportSpec{Name: "gax", Path: "github.com/googleapis/gax-go/v2"}] = true
++
+ 		serv := g.descInfo.ParentElement[m].(*descriptorpb.ServiceDescriptorProto)
+ 		fqn := fmt.Sprintf("%s.%s/%s", g.descInfo.ParentFile[serv].GetPackage(), serv.GetName(), m.GetName())
+-		g.printf("if gax.IsFeatureEnabled(\"METRICS\") || gax.IsFeatureEnabled(\"TRACING\") {")
++
++		g.printf("if gax.IsFeatureEnabled(\"METRICS\") || gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+ 		g.printf("  ctx = callctx.WithTelemetryContext(ctx, \"rpc_method\", %q)", fqn)
+ 		if info != nil && info.url != "" {
+ 			g.printf("  ctx = callctx.WithTelemetryContext(ctx, \"url_template\", %q)", info.url)
+@@ -891,17 +907,17 @@ func parseDynamicRequestHeaders(m *descriptorpb.MethodDescriptorProto) [][]strin
+ // that carries a google.api.resource_reference annotation.
+ // If multiple fields match, it prioritizes the one that also appears in the HTTP path.
+ // If no input type or associated attributes are found, it returns an empty string.
+-func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) string {
++func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
+ 	if m.GetInputType() == "" {
+-		return ""
++		return nil
+ 	}
+ 	inType := g.descInfo.Type[m.GetInputType()]
+ 	if inType == nil {
+-		return ""
++		return nil
+ 	}
+ 	msg, ok := inType.(*descriptorpb.DescriptorProto)
+ 	if !ok {
+-		return ""
++		return nil
+ 	}
+ 
+ 	var candidates []string
+@@ -912,29 +928,47 @@ func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) str
+ 	}
+ 
+ 	if len(candidates) == 0 {
+-		return ""
+-	}
+-	if len(candidates) == 1 {
+-		return candidates[0]
++		if !g.featureEnabled(DynamicResourceHeuristicsFeature) {
++			return nil
++		}
++		if m.GetOptions() == nil {
++			return nil
++		}
++		eHTTP := proto.GetExtension(m.GetOptions(), annotations.E_Http)
++		if eHTTP == nil {
++			return nil
++		}
++		h, ok := eHTTP.(*annotations.HttpRule)
++		if !ok || h == nil {
++			return nil
++		}
++		target, err := identifyHeuristicTarget(m, h, g.vocabulary)
++		if err != nil || target == nil {
++			return nil
++		}
++		return target
+ 	}
+ 
+-	// Tie-breaking: check against HTTP path variables.
+-	// parseImplicitRequestHeaders uses headerParamRegexp (which has one capturing
+-	// group) to find variables in the path. h[1] corresponds to that capturing group
+-	// and contains the variable's string name (e.g., "name", "parent" or "project").
+-	pathParams := make(map[string]bool)
+-	headers := parseImplicitRequestHeaders(m)
+-	for _, h := range headers {
+-		if len(h) > 1 {
+-			pathParams[h[1]] = true
++	selected := candidates[0]
++	if len(candidates) > 1 {
++		pathParams := make(map[string]bool)
++		headers := parseImplicitRequestHeaders(m)
++		for _, h := range headers {
++			if len(h) > 1 {
++				pathParams[h[1]] = true
++			}
+ 		}
+-	}
+ 
+-	for _, c := range candidates {
+-		if pathParams[c] {
+-			return c
++		for _, c := range candidates {
++			if pathParams[c] {
++				selected = c
++				break
++			}
+ 		}
+ 	}
+ 
+-	return candidates[0]
++	return &heuristicTarget{
++		Format:     "%v",
++		FieldNames: []string{selected},
++	}
+ }
+diff --git a/internal/gengapic/gengrpc.go b/internal/gengapic/gengrpc.go
+index a9cabc05..3bcee157 100644
+--- a/internal/gengapic/gengrpc.go
++++ b/internal/gengapic/gengrpc.go
+@@ -330,7 +330,7 @@ func (g *generator) grpcClientUtilities(serv *descriptorpb.ServiceDescriptorProt
+ 	g.serviceDoc(serv, false) // exclude API version docs
+ 	p("func New%[1]sClient(ctx context.Context, opts ...option.ClientOption) (*%[1]sClient, error) {", servName)
+ 	p("  clientOpts := default%[1]sGRPCClientOptions()", servName)
+-	if g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature) {
++	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 		p("    if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+ 		p("    clientOpts = append(clientOpts, internaloption.WithTelemetryAttributes(map[string]string{")
+ 		p("      \"gcp.client.service\": %q,", strings.Split(g.cfg.APIServiceConfig.GetName(), ".")[0])
+@@ -366,7 +366,7 @@ func (g *generator) grpcClientUtilities(serv *descriptorpb.ServiceDescriptorProt
+ 	p("")
+ 	p("  }")
+ 	p("  c.setGoogleClientInfo()")
+-	if g.featureEnabled(OpenTelemetryMetricsFeature) {
++	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 		p("  if gax.IsFeatureEnabled(\"METRICS\") {")
+ 		p("    metrics := gax.NewClientMetrics(")
+ 		p("      gax.WithTelemetryLogger(c.logger),")
+diff --git a/internal/gengapic/genrest.go b/internal/gengapic/genrest.go
+index 6624d486..83d0d705 100644
+--- a/internal/gengapic/genrest.go
++++ b/internal/gengapic/genrest.go
+@@ -162,7 +162,7 @@ func (g *generator) restClientUtilities(serv *descriptorpb.ServiceDescriptorProt
+ 	g.serviceDoc(serv, false) // exclude API version docs
+ 	p("func New%[1]sRESTClient(ctx context.Context, opts ...option.ClientOption) (*%[1]sClient, error) {", servName)
+ 	p("    clientOpts := append(default%sRESTClientOptions(), opts...)", servName)
+-	if g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature) {
++	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 		p("    if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+ 		p("        clientOpts = append(clientOpts, internaloption.WithTelemetryAttributes(map[string]string{")
+ 		p("          \"gcp.client.service\": %q,", strings.Split(g.cfg.APIServiceConfig.GetName(), ".")[0])
+@@ -188,7 +188,7 @@ func (g *generator) restClientUtilities(serv *descriptorpb.ServiceDescriptorProt
+ 	p("    }")
+ 	p("    c.setGoogleClientInfo()")
+ 	p("")
+-	if g.featureEnabled(OpenTelemetryMetricsFeature) {
++	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 		p("    if gax.IsFeatureEnabled(\"METRICS\") {")
+ 		p("        metrics := gax.NewClientMetrics(")
+ 		p("            gax.WithTelemetryLogger(c.logger),")
+@@ -690,12 +690,7 @@ func (g *generator) serverStreamRESTCall(servName string, s *descriptorpb.Servic
+ 	p("// Build HTTP headers from client and context metadata.")
+ 	g.insertRequestHeaders(m, rest)
+ 	g.injectTelemetryContext(m, info)
+-	if info != nil && (g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature)) {
+-		p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-		p("  ctx = metadata.AppendToOutgoingContext(ctx, \"url.template\", %q)", info.url)
+-		p("}")
+-		g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
+-	}
++
+ 	p("var streamClient *%s", streamClient)
+ 	p("e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {")
+ 	p(`  if settings.Path != "" {`)
+@@ -979,12 +974,7 @@ func (g *generator) lroRESTCall(servName string, m *descriptorpb.MethodDescripto
+ 	p("// Build HTTP headers from client and context metadata.")
+ 	g.insertRequestHeaders(m, rest)
+ 	g.injectTelemetryContext(m, info)
+-	if info != nil && (g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature)) {
+-		p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-		p("  ctx = metadata.AppendToOutgoingContext(ctx, \"url.template\", %q)", info.url)
+-		p("}")
+-		g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
+-	}
++
+ 	p("unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}")
+ 	p("resp := &%s.%s{}", outSpec.Name, outType.GetName())
+ 	p("e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {")
+@@ -1082,12 +1072,7 @@ func (g *generator) emptyUnaryRESTCall(servName string, m *descriptorpb.MethodDe
+ 	p("// Build HTTP headers from client and context metadata.")
+ 	g.insertRequestHeaders(m, rest)
+ 	g.injectTelemetryContext(m, info)
+-	if info != nil && (g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature)) {
+-		p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-		p("  ctx = metadata.AppendToOutgoingContext(ctx, \"url.template\", %q)", info.url)
+-		p("}")
+-		g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
+-	}
++
+ 	p("return gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {")
+ 	p(`  if settings.Path != "" {`)
+ 	p("    baseUrl.Path = settings.Path")
+@@ -1178,12 +1163,7 @@ func (g *generator) unaryRESTCall(servName string, m *descriptorpb.MethodDescrip
+ 	p("// Build HTTP headers from client and context metadata.")
+ 	g.insertRequestHeaders(m, rest)
+ 	g.injectTelemetryContext(m, info)
+-	if info != nil && (g.featureEnabled(OpenTelemetryTracingFeature) || g.featureEnabled(OpenTelemetryLoggingFeature)) {
+-		p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
+-		p("  ctx = metadata.AppendToOutgoingContext(ctx, \"url.template\", %q)", info.url)
+-		p("}")
+-		g.imports[pbinfo.ImportSpec{Path: "google.golang.org/grpc/metadata"}] = true
+-	}
++
+ 	g.appendCallOpts(m)
+ 	if !isHTTPBodyMessage {
+ 		p("unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}")
+diff --git a/internal/gengapic/heuristics.go b/internal/gengapic/heuristics.go
+new file mode 100644
+index 00000000..3a0ee329
+--- /dev/null
++++ b/internal/gengapic/heuristics.go
+@@ -0,0 +1,388 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     https://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gengapic
++
++import (
++	"regexp"
++	"strings"
++
++	"google.golang.org/genproto/googleapis/api/annotations"
++	"google.golang.org/protobuf/proto"
++	"google.golang.org/protobuf/types/descriptorpb"
++)
++
++// literalVarRegex matches a path segment literal followed immediately
++// by a curly-brace variable ({...}).
++var literalVarRegex = regexp.MustCompile(`([^/]+)/{[^}]+\}`)
++
++// varNameRegex matches a variable name (`project`) in a
++// path segment (`projects/{project}).
++var varNameRegex = regexp.MustCompile(`{([^=}\s]+)`)
++
++// heuristicTarget represents a resolved resource name template pattern and its
++// associated variable field names.
++type heuristicTarget struct {
++	// Format is the resource template string (e.g. projects/%v/topics/%v).
++	Format string
++	// FieldNames are the names of variables extracted from the template.
++	FieldNames []string
++}
++
++// buildHeuristicVocabulary builds a map of valid resource collections
++// by examining standard CRUD-like patterns in routes.
++func buildHeuristicVocabulary(methods []*descriptorpb.MethodDescriptorProto) map[string]bool {
++	resourceCollections := make(map[string]bool)
++
++	// Step 1: Seed standard infrastructure resource collections.
++	resourceCollections["projects"] = true
++	resourceCollections["locations"] = true
++	resourceCollections["folders"] = true
++	resourceCollections["organizations"] = true
++	resourceCollections["billingAccounts"] = true
++
++	// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++	// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++	// often have path literals that are random verbs or actions, not resource collections.
++	// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++	discoveryExactVerbs := map[string]struct{}{
++		"get":  {},
++		"list": {},
++		// aggregatedlist is used in Compute Engine to list across zones in a project.
++		"aggregatedlist": {},
++		"create":         {},
++		"update":         {},
++		"delete":         {},
++		"patch":          {},
++		"insert":         {},
++	}
++	discoverySuffixes := []string{
++		".get", ".list", ".create", ".update", ".delete", ".patch", ".insert",
++	}
++
++	crudPrefixes := []string{
++		"get", "list", "create", "update", "delete", "patch", "insert",
++	}
++
++	// Step 3: Walk methods and learn valid resource collection nouns.
++	// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
++	// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
++	// extracting the static literal nouns that sit immediately before a `{variable}`
++	// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
++	// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++	for _, m := range methods {
++		nameLower := strings.ToLower(m.GetName())
++
++		var isCRUDPrefix bool
++		for _, prefix := range crudPrefixes {
++			if strings.HasPrefix(nameLower, prefix) {
++				isCRUDPrefix = true
++				break
++			}
++		}
++
++		_, isDiscoveryExact := discoveryExactVerbs[nameLower]
++
++		var isDiscoverySuffix bool
++		for _, suffix := range discoverySuffixes {
++			if strings.HasSuffix(nameLower, suffix) {
++				isDiscoverySuffix = true
++				break
++			}
++		}
++
++		// We only learn from standard verbs.
++		if !isCRUDPrefix && !isDiscoveryExact && !isDiscoverySuffix {
++			continue
++		}
++
++		// m.GetOptions() retrieves protobuf options
++		// (e.g. `(google.api.http) = { get: "/v1/..." }` attached to the method).
++		if m.GetOptions() == nil {
++			continue
++		}
++
++		// proto.GetExtension extracts standard Protobuf Option Extensions. In this case,
++		// we ask for the HTTP mapping rule (annotations.E_Http / google.api.http).
++		// If we have unannotated methods, we skip them as they are probably either:
++		// - Pure gRPC (no REST binding).
++		// - Legacy REST using custom non-standard transports.
++		eHTTP := proto.GetExtension(m.GetOptions(), annotations.E_Http)
++		if eHTTP == nil {
++			continue
++		}
++
++		// Cast to HttpRule for use in getHTTPPatterns, below.
++		h, ok := eHTTP.(*annotations.HttpRule)
++		if !ok || h == nil {
++			continue
++		}
++
++		// Step 4: Extract literals that appear before variables.
++		patterns := getHTTPPatterns(h)
++		for _, pattern := range patterns {
++			// Find all instances of a literal right before a variable `{...}`
++			// Trace example: `/v1/projects/{project}/topics/{topic}`
++			// Matches:
++			//   match[0] = "projects/{project}" (with groups [ projects ])
++			//   match[1] = "topics/{topic}" (with groups [ topics ])
++			matches := literalVarRegex.FindAllStringSubmatch(pattern, -1)
++			for _, match := range matches {
++				if len(match) < 2 {
++					continue
++				}
++				literal := match[1]
++
++				// We should discard verbs (anything after and including the ':' character)
++				// so we do not learn generic collection nouns like "projects:cancel".
++				if idx := strings.Index(literal, ":"); idx != -1 {
++					literal = literal[:idx]
++				}
++
++				if isVersionString(literal) {
++					continue
++				}
++				resourceCollections[literal] = true
++			}
++		}
++	}
++
++	return resourceCollections
++}
++
++// getHTTPPatterns flattens an HttpRule (and any recursive AdditionalBindings)
++// into a flat slice of string patterns.
++//
++// We use standard method name verbs (Get, List, Create) to filter for where to look.
++// But the actual vocabulary we want to learn is the collection nouns (literals)
++// in those method's URI paths. An HTTP rule can define a primary path but often
++// has secondary endpoints via `additional_bindings` to support legacy paths or
++// alternative styles. To learn the full set of valid collection nouns for an API,
++// we must process all possible paths.
++func getHTTPPatterns(h *annotations.HttpRule) []string {
++	var patterns []string
++
++	extract := func(pattern string) {
++		if pattern != "" {
++			patterns = append(patterns, pattern)
++		}
++	}
++
++	// Step 1: Extract the primary verb's pattern.
++	switch p := h.GetPattern().(type) {
++	case *annotations.HttpRule_Get:
++		extract(p.Get)
++	case *annotations.HttpRule_Put:
++		extract(p.Put)
++	case *annotations.HttpRule_Post:
++		extract(p.Post)
++	case *annotations.HttpRule_Delete:
++		extract(p.Delete)
++	case *annotations.HttpRule_Patch:
++		extract(p.Patch)
++	}
++
++	// Step 2: Recursively process any additional bindings attached to this rule.
++	for _, rule := range h.GetAdditionalBindings() {
++		patterns = append(patterns, getHTTPPatterns(rule)...)
++	}
++
++	return patterns
++}
++
++func isVersionString(s string) bool {
++	if !strings.HasPrefix(s, "v") {
++		return false
++	}
++	if len(s) < 2 {
++		return false
++	}
++	if s[1] >= '0' && s[1] <= '9' {
++		return true
++	}
++	return false
++}
++
++// identifyHeuristicTarget reconstructs a canonical resource name template for an
++// unannotated API endpoint.
++//
++// It parses a single HTTP rule and attempts to infer its method's resource format
++// (and request field parameters) using standard literal/variable pairs. The vocabulary
++// param is a map of known valid collection nouns (e.g., "topics", "subscriptions")
++// learned by BuildHeuristicVocabulary. It is used to validate whether a literal
++// sitting before a variable is a true resource collection, or just an interstitial
++// literal (like "global" in `v1/global/firewalls`).
++//
++// This should only be used if `google.api.resource` or `google.api.resource_reference`
++// are not present. Modern services define resources using proto annotations:
++// - `google.api.resource` on Message types
++// - `google.api.resource_reference` on Field types
++//
++// For unannotated legacy services (like Compute), these annotations are missing.
++// However, if the HTTP path follows standard conventions (like `projects/{project}/topics/{topic}`),
++// we can still deduce the vocabulary.
++func identifyHeuristicTarget(m *descriptorpb.MethodDescriptorProto, h *annotations.HttpRule, vocabulary map[string]bool) (*heuristicTarget, error) {
++	patterns := getHTTPPatterns(h)
++	if len(patterns) == 0 {
++		return nil, nil
++	}
++
++	pattern := patterns[0]
++
++	// Step 1: Split the path into atomic segments.
++	segments := splitPathSegments(pattern)
++
++	// Step 2: Walk BACKWARDS from the end of the HTTP path in order to find the most
++	// specific resource (the child) at the end of the URI.
++	for i := len(segments) - 1; i >= 0; i-- {
++		seg := segments[i]
++
++		// If it's a leading slash segment or cannot be a child variable segment, skip.
++		if !strings.Contains(seg, "{") || i == 0 || strings.Contains(segments[i-1], "{") {
++			continue
++		}
++
++		token := segments[i-1]
++		if strings.Contains(token, ":") {
++			// Wes: Custom verbs in a literal path indicate an action, not a collection noun.
++			// Skip this segment to fall back to the parent resource.
++			continue
++		}
++
++		// The segment immediately preceding our variable must be a known vocabulary token
++		// (e.g., learned from CRUD or standard seeds) or a version string. Discard verbs
++		// attached to collections (e.g. `projects/{project}/topics/{topic}:publish`)
++		// when checking against the vocabulary.
++		if !vocabulary[token] && !isVersionString(token) {
++			continue
++		}
++
++		firstIndex := i
++		if vocabulary[token] {
++			// Known collection literal. Walk backward to find the root of the chain.
++			firstIndex = i - 1
++			for firstIndex > 0 {
++				prevSeg := segments[firstIndex-1]
++				if !strings.Contains(prevSeg, "{") {
++					// Skip standalone literals (e.g., "global").
++					if isVersionString(prevSeg) {
++						break // Version strings bound the chain
++					}
++					firstIndex--
++					continue
++				}
++
++				// If it's a variable segment preceded by a known literal,
++				// we pair them up and keep walking.
++				if firstIndex < 2 || strings.Contains(segments[firstIndex-2], "{") {
++					break // No preceding literal to pair with the variable, broken chain.
++				}
++				prevLiteralVal := segments[firstIndex-2]
++				if vocabulary[prevLiteralVal] {
++					firstIndex -= 2 // pair consumed
++					continue
++				}
++				if isVersionString(prevLiteralVal) {
++					firstIndex--
++				}
++				break
++			}
++		}
++
++		// Step 3: Reject partial matches with unhandled variables on the left.
++		//
++		// Example: `/v1/users/{user}/topics/{topic}`
++		//
++		// We have unhandled variables if `{user}` is missing from our vocabulary.
++		// If this API package doesn't define a standard `GetUser` or `ListUsers`,
++		// we never learn `users` as a valid collection noun.
++		//
++		// We discard these partial matches to avoid returning an incomplete or
++		// disconnected resource name.
++		disconnected := false
++		for k := 0; k < firstIndex; k++ {
++			if strings.Contains(segments[k], "{") {
++				disconnected = true
++				break
++			}
++		}
++		if disconnected {
++			continue
++		}
++
++		var fields []string
++		var formatSegments []string
++
++		// Step 4: Extract fields and build the format template from the validated sub-path.
++		//
++		// Example: For `projects/{project}/topics/{topic}`, the template will be
++		// `projects/%v/topics/%v` and the field names will be `["project", "topic"]`.
++		targetSegments := segments[firstIndex : i+1]
++		for _, s := range targetSegments {
++			if strings.Contains(s, "{") {
++				match := varNameRegex.FindStringSubmatch(s)
++				if len(match) > 1 {
++					fields = append(fields, match[1])
++				}
++				formatSegments = append(formatSegments, "%v")
++			} else {
++				token := s
++				if idx := strings.Index(token, ":"); idx != -1 {
++					token = token[:idx]
++				}
++				if !isVersionString(token) {
++					formatSegments = append(formatSegments, token)
++				}
++			}
++		}
++
++		return &heuristicTarget{
++			Format:     strings.Join(formatSegments, "/"),
++			FieldNames: fields,
++		}, nil
++	}
++
++	return nil, nil
++}
++
++// splitPathSegments is a custom character-by-character scanner for splitting
++// a path by `/` while ignoring slashes inside curly braces like `{name=projects/*/locations/*/topics/*}`.
++func splitPathSegments(pattern string) []string {
++	var segments []string
++	var current strings.Builder
++	inVar := false
++
++	for _, r := range pattern {
++		switch r {
++		case '{':
++			inVar = true
++			current.WriteRune(r)
++		case '}':
++			inVar = false
++			current.WriteRune(r)
++		case '/':
++			if !inVar {
++				// We've hit a true segment boundary. Yield the segment.
++				segments = append(segments, current.String())
++				current.Reset()
++			} else {
++				current.WriteRune(r)
++			}
++		default:
++			current.WriteRune(r)
++		}
++	}
++	segments = append(segments, current.String())
++	return segments
++}
+diff --git a/internal/gengapic/testdata/custom_op_init.want b/internal/gengapic/testdata/custom_op_init.want
+index e93fef27..00669d81 100644
+--- a/internal/gengapic/testdata/custom_op_init.want
++++ b/internal/gengapic/testdata/custom_op_init.want
+@@ -96,6 +96,21 @@ func NewRESTClient(ctx context.Context, opts ...option.ClientOption) (*Client, e
+ 	}
+ 	c.setGoogleClientInfo()
+ 
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "http",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		callOpts.Zip = append(callOpts.Zip, gax.WithClientMetrics(metrics))
++	}
++
+ 	o := []option.ClientOption{
+ 		option.WithHTTPClient(httpClient),
+ 		option.WithEndpoint(endpoint),
+diff --git a/internal/gengapic/testdata/deprecated_client_init.want b/internal/gengapic/testdata/deprecated_client_init.want
+index 3f351dc8..e5add568 100644
+--- a/internal/gengapic/testdata/deprecated_client_init.want
++++ b/internal/gengapic/testdata/deprecated_client_init.want
+@@ -108,6 +108,20 @@ func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+@@ -187,6 +201,21 @@ func NewRESTClient(ctx context.Context, opts ...option.ClientOption) (*Client, e
+ 	}
+ 	c.setGoogleClientInfo()
+ 
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "http",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		callOpts.Zip = append(callOpts.Zip, gax.WithClientMetrics(metrics))
++	}
++
+ 	return &Client{internalClient: c, CallOptions: callOpts}, nil
+ }
+ 
+diff --git a/internal/gengapic/testdata/empty_client_init.want b/internal/gengapic/testdata/empty_client_init.want
+index ac34fa66..9c4793ff 100644
+--- a/internal/gengapic/testdata/empty_client_init.want
++++ b/internal/gengapic/testdata/empty_client_init.want
+@@ -106,6 +106,20 @@ func NewClient(ctx context.Context, opts ...option.ClientOption) (*Client, error
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+@@ -184,6 +198,21 @@ func NewRESTClient(ctx context.Context, opts ...option.ClientOption) (*Client, e
+ 	}
+ 	c.setGoogleClientInfo()
+ 
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "http",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		callOpts.Zip = append(callOpts.Zip, gax.WithClientMetrics(metrics))
++	}
++
+ 	return &Client{internalClient: c, CallOptions: callOpts}, nil
+ }
+ 
+diff --git a/internal/gengapic/testdata/foo_client_init.want b/internal/gengapic/testdata/foo_client_init.want
+index ce38d2a2..fff8175c 100644
+--- a/internal/gengapic/testdata/foo_client_init.want
++++ b/internal/gengapic/testdata/foo_client_init.want
+@@ -137,6 +137,25 @@ func NewFooClient(ctx context.Context, opts ...option.ClientOption) (*FooClient,
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++		client.CallOptions.ListLocations = append(client.CallOptions.ListLocations, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetLocation = append(client.CallOptions.GetLocation, gax.WithClientMetrics(metrics))
++		client.CallOptions.SetIamPolicy = append(client.CallOptions.SetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetIamPolicy = append(client.CallOptions.GetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.TestIamPermissions = append(client.CallOptions.TestIamPermissions, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+diff --git a/internal/gengapic/testdata/foo_client_init_default.want b/internal/gengapic/testdata/foo_client_init_default.want
+index ce38d2a2..fff8175c 100644
+--- a/internal/gengapic/testdata/foo_client_init_default.want
++++ b/internal/gengapic/testdata/foo_client_init_default.want
+@@ -137,6 +137,25 @@ func NewFooClient(ctx context.Context, opts ...option.ClientOption) (*FooClient,
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++		client.CallOptions.ListLocations = append(client.CallOptions.ListLocations, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetLocation = append(client.CallOptions.GetLocation, gax.WithClientMetrics(metrics))
++		client.CallOptions.SetIamPolicy = append(client.CallOptions.SetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetIamPolicy = append(client.CallOptions.GetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.TestIamPermissions = append(client.CallOptions.TestIamPermissions, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+diff --git a/internal/gengapic/testdata/foo_client_init_logging.want b/internal/gengapic/testdata/foo_client_init_logging.want
+index ce38d2a2..fff8175c 100644
+--- a/internal/gengapic/testdata/foo_client_init_logging.want
++++ b/internal/gengapic/testdata/foo_client_init_logging.want
+@@ -137,6 +137,25 @@ func NewFooClient(ctx context.Context, opts ...option.ClientOption) (*FooClient,
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++		client.CallOptions.ListLocations = append(client.CallOptions.ListLocations, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetLocation = append(client.CallOptions.GetLocation, gax.WithClientMetrics(metrics))
++		client.CallOptions.SetIamPolicy = append(client.CallOptions.SetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetIamPolicy = append(client.CallOptions.GetIamPolicy, gax.WithClientMetrics(metrics))
++		client.CallOptions.TestIamPermissions = append(client.CallOptions.TestIamPermissions, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+diff --git a/internal/gengapic/testdata/foo_client_init_metrics.want b/internal/gengapic/testdata/foo_client_init_metrics.want
+index 5710fabb..fff8175c 100644
+--- a/internal/gengapic/testdata/foo_client_init_metrics.want
++++ b/internal/gengapic/testdata/foo_client_init_metrics.want
+@@ -103,6 +103,16 @@ type fooGRPCClient struct {
+ // Foo service does stuff.
+ func NewFooClient(ctx context.Context, opts ...option.ClientOption) (*FooClient, error) {
+ 	clientOpts := defaultFooGRPCClientOptions()
++	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
++		clientOpts = append(clientOpts, internaloption.WithTelemetryAttributes(map[string]string{
++			"gcp.client.service": "foo",
++			"gcp.client.version": getVersionClient(),
++			"gcp.client.repo":    "googleapis/google-cloud-go",
++			"gcp.client.artifact": "path",
++			"gcp.client.language": "go",
++			"url.domain":         "foo.googleapis.com",
++		}))
++	}
+ 	if newFooClientHook != nil {
+ 		hookOpts, err := newFooClientHook(ctx, clientHookParams{})
+ 		if err != nil {
+diff --git a/internal/gengapic/testdata/foo_rest_client_init.want b/internal/gengapic/testdata/foo_rest_client_init.want
+index e6228004..a0c57e45 100644
+--- a/internal/gengapic/testdata/foo_rest_client_init.want
++++ b/internal/gengapic/testdata/foo_rest_client_init.want
+@@ -120,6 +120,26 @@ func NewFooRESTClient(ctx context.Context, opts ...option.ClientOption) (*FooCli
+ 	}
+ 	c.setGoogleClientInfo()
+ 
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "http",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		callOpts.Zip = append(callOpts.Zip, gax.WithClientMetrics(metrics))
++		callOpts.ListLocations = append(callOpts.ListLocations, gax.WithClientMetrics(metrics))
++		callOpts.GetLocation = append(callOpts.GetLocation, gax.WithClientMetrics(metrics))
++		callOpts.SetIamPolicy = append(callOpts.SetIamPolicy, gax.WithClientMetrics(metrics))
++		callOpts.GetIamPolicy = append(callOpts.GetIamPolicy, gax.WithClientMetrics(metrics))
++		callOpts.TestIamPermissions = append(callOpts.TestIamPermissions, gax.WithClientMetrics(metrics))
++	}
++
+ 	return &FooClient{internalClient: c, CallOptions: callOpts}, nil
+ }
+ 
+diff --git a/internal/gengapic/testdata/lro_client_init.want b/internal/gengapic/testdata/lro_client_init.want
+index c804f38b..983297c2 100644
+--- a/internal/gengapic/testdata/lro_client_init.want
++++ b/internal/gengapic/testdata/lro_client_init.want
+@@ -151,6 +151,25 @@ func NewFooClient(ctx context.Context, opts ...option.ClientOption) (*FooClient,
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "path",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Zip = append(client.CallOptions.Zip, gax.WithClientMetrics(metrics))
++		client.CallOptions.ListOperations = append(client.CallOptions.ListOperations, gax.WithClientMetrics(metrics))
++		client.CallOptions.GetOperation = append(client.CallOptions.GetOperation, gax.WithClientMetrics(metrics))
++		client.CallOptions.DeleteOperation = append(client.CallOptions.DeleteOperation, gax.WithClientMetrics(metrics))
++		client.CallOptions.CancelOperation = append(client.CallOptions.CancelOperation, gax.WithClientMetrics(metrics))
++		client.CallOptions.WaitOperation = append(client.CallOptions.WaitOperation, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+diff --git a/internal/gengapic/testdata/method_BidiThings.want b/internal/gengapic/testdata/method_BidiThings.want
+index 50e42c43..283b1175 100644
+--- a/internal/gengapic/testdata/method_BidiThings.want
++++ b/internal/gengapic/testdata/method_BidiThings.want
+@@ -1,6 +1,6 @@
+ func (c *fooGRPCClient) BidiThings(ctx context.Context, opts ...gax.CallOption) (mypackagepb.Foo_BidiThingsClient, error) {
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, c.xGoogHeaders...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/BidiThings")
+ 	}
+ 	var resp mypackagepb.Foo_BidiThingsClient
+diff --git a/internal/gengapic/testdata/method_ClientThings.want b/internal/gengapic/testdata/method_ClientThings.want
+index cf9c4af2..36114883 100644
+--- a/internal/gengapic/testdata/method_ClientThings.want
++++ b/internal/gengapic/testdata/method_ClientThings.want
+@@ -1,6 +1,6 @@
+ func (c *fooGRPCClient) ClientThings(ctx context.Context, opts ...gax.CallOption) (mypackagepb.Foo_ClientThingsClient, error) {
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, c.xGoogHeaders...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/ClientThings")
+ 	}
+ 	var resp mypackagepb.Foo_ClientThingsClient
+diff --git a/internal/gengapic/testdata/method_GetAnotherThing.want b/internal/gengapic/testdata/method_GetAnotherThing.want
+index ac45d368..9af21352 100644
+--- a/internal/gengapic/testdata/method_GetAnotherThing.want
++++ b/internal/gengapic/testdata/method_GetAnotherThing.want
+@@ -31,9 +31,9 @@ func (c *fooGRPCClient) GetAnotherThing(ctx context.Context, req *mypackagepb.In
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetAnotherThing")
+ 	}
+ 	opts = append((*c.CallOptions).GetAnotherThing[0:len((*c.CallOptions).GetAnotherThing):len((*c.CallOptions).GetAnotherThing)], opts...)
+diff --git a/internal/gengapic/testdata/method_GetEmptyThing.want b/internal/gengapic/testdata/method_GetEmptyThing.want
+index e63c07d3..333261d6 100644
+--- a/internal/gengapic/testdata/method_GetEmptyThing.want
++++ b/internal/gengapic/testdata/method_GetEmptyThing.want
+@@ -4,9 +4,9 @@ func (c *fooGRPCClient) GetEmptyThing(ctx context.Context, req *mypackagepb.Inpu
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetEmptyThing")
+ 	}
+ 	if req != nil && req.RequestId == nil {
+diff --git a/internal/gengapic/testdata/method_GetManyOtherThings.want b/internal/gengapic/testdata/method_GetManyOtherThings.want
+index ba1b0d5b..66cba0a8 100644
+--- a/internal/gengapic/testdata/method_GetManyOtherThings.want
++++ b/internal/gengapic/testdata/method_GetManyOtherThings.want
+@@ -1,6 +1,6 @@
+ func (c *fooGRPCClient) GetManyOtherThings(ctx context.Context, req *mypackagepb.PageInputType, opts ...gax.CallOption) *StringIterator {
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, c.xGoogHeaders...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetManyOtherThings")
+ 	}
+ 	opts = append((*c.CallOptions).GetManyOtherThings[0:len((*c.CallOptions).GetManyOtherThings):len((*c.CallOptions).GetManyOtherThings)], opts...)
+diff --git a/internal/gengapic/testdata/method_GetManyThings.want b/internal/gengapic/testdata/method_GetManyThings.want
+index ffaa4b47..a6fd4b59 100644
+--- a/internal/gengapic/testdata/method_GetManyThings.want
++++ b/internal/gengapic/testdata/method_GetManyThings.want
+@@ -4,9 +4,9 @@ func (c *fooGRPCClient) GetManyThings(ctx context.Context, req *mypackagepb.Page
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetManyThings")
+ 	}
+ 	opts = append((*c.CallOptions).GetManyThings[0:len((*c.CallOptions).GetManyThings):len((*c.CallOptions).GetManyThings)], opts...)
+diff --git a/internal/gengapic/testdata/method_GetManyThingsOptional.want b/internal/gengapic/testdata/method_GetManyThingsOptional.want
+index 3bcbd51e..ca5ad102 100644
+--- a/internal/gengapic/testdata/method_GetManyThingsOptional.want
++++ b/internal/gengapic/testdata/method_GetManyThingsOptional.want
+@@ -4,9 +4,9 @@ func (c *fooGRPCClient) GetManyThingsOptional(ctx context.Context, req *mypackag
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetManyThingsOptional")
+ 	}
+ 	opts = append((*c.CallOptions).GetManyThingsOptional[0:len((*c.CallOptions).GetManyThingsOptional):len((*c.CallOptions).GetManyThingsOptional)], opts...)
+diff --git a/internal/gengapic/testdata/method_GetOneThing.want b/internal/gengapic/testdata/method_GetOneThing.want
+index 72fae0c6..61d3dfb5 100644
+--- a/internal/gengapic/testdata/method_GetOneThing.want
++++ b/internal/gengapic/testdata/method_GetOneThing.want
+@@ -4,9 +4,9 @@ func (c *fooGRPCClient) GetOneThing(ctx context.Context, req *mypackagepb.InputT
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/GetOneThing")
+ 	}
+ 	if req != nil && req.RequestId == nil {
+diff --git a/internal/gengapic/testdata/method_ServerThings.want b/internal/gengapic/testdata/method_ServerThings.want
+index 66149259..406fb437 100644
+--- a/internal/gengapic/testdata/method_ServerThings.want
++++ b/internal/gengapic/testdata/method_ServerThings.want
+@@ -4,9 +4,9 @@ func (c *fooGRPCClient) ServerThings(ctx context.Context, req *mypackagepb.Input
+ 	hds = append(c.xGoogHeaders, hds...)
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/ServerThings")
+ 	}
+ 	opts = append((*c.CallOptions).ServerThings[0:len((*c.CallOptions).ServerThings):len((*c.CallOptions).ServerThings)], opts...)
+diff --git a/internal/gengapic/testdata/metrics_instrumentation.want b/internal/gengapic/testdata/metrics_instrumentation.want
+index fd1614c9..7abf05e3 100644
+--- a/internal/gengapic/testdata/metrics_instrumentation.want
++++ b/internal/gengapic/testdata/metrics_instrumentation.want
+@@ -1,6 +1,6 @@
+ func (c *fooGRPCClient) Baz(ctx context.Context, req *mypackagepb.InputType, opts ...gax.CallOption) error {
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, c.xGoogHeaders...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/Baz")
+ 	}
+ 	opts = append((*c.CallOptions).Baz[0:len((*c.CallOptions).Baz):len((*c.CallOptions).Baz)], opts...)
+diff --git a/internal/gengapic/testdata/rest_CustomOp.want b/internal/gengapic/testdata/rest_CustomOp.want
+index 3149a121..57fc4bd7 100644
+--- a/internal/gengapic/testdata/rest_CustomOp.want
++++ b/internal/gengapic/testdata/rest_CustomOp.want
+@@ -19,13 +19,10 @@ func (c *fooRESTClient) CustomOp(ctx context.Context, req *foopb.Foo, opts ...ga
+ 	// Build HTTP headers from client and context metadata.
+ 	hds := append(c.xGoogHeaders, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/CustomOp")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	opts = append((*c.CallOptions).CustomOp[0:len((*c.CallOptions).CustomOp):len((*c.CallOptions).CustomOp)], opts...)
+ 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+ 	resp := &foopb.Operation{}
+diff --git a/internal/gengapic/testdata/rest_EmptyRPC.want b/internal/gengapic/testdata/rest_EmptyRPC.want
+index 0a416929..d4fb7db5 100644
+--- a/internal/gengapic/testdata/rest_EmptyRPC.want
++++ b/internal/gengapic/testdata/rest_EmptyRPC.want
+@@ -23,15 +23,12 @@ func (c *fooRESTClient) EmptyRPC(ctx context.Context, req *foopb.Foo, opts ...ga
+ 	hds = append(hds, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/EmptyRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo/{other=*}")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo/{other=*}")
+-	}
+ 	return gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+ 		if settings.Path != "" {
+ 			baseUrl.Path = settings.Path
+diff --git a/internal/gengapic/testdata/rest_HttpBodyRPC.want b/internal/gengapic/testdata/rest_HttpBodyRPC.want
+index 6da8c0df..f38bd335 100644
+--- a/internal/gengapic/testdata/rest_HttpBodyRPC.want
++++ b/internal/gengapic/testdata/rest_HttpBodyRPC.want
+@@ -27,15 +27,12 @@ func (c *fooRESTClient) HttpBodyRPC(ctx context.Context, req *foopb.Foo, opts ..
+ 	hds = append(hds, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/HttpBodyRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	opts = append((*c.CallOptions).HttpBodyRPC[0:len((*c.CallOptions).HttpBodyRPC):len((*c.CallOptions).HttpBodyRPC)], opts...)
+ 	resp := &httpbodypb.HttpBody{}
+ 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+diff --git a/internal/gengapic/testdata/rest_LongrunningRPC.want b/internal/gengapic/testdata/rest_LongrunningRPC.want
+index 14ef6fd7..813308e4 100644
+--- a/internal/gengapic/testdata/rest_LongrunningRPC.want
++++ b/internal/gengapic/testdata/rest_LongrunningRPC.want
+@@ -17,13 +17,10 @@ func (c *fooRESTClient) LongrunningRPC(ctx context.Context, req *foopb.Foo, opts
+ 	// Build HTTP headers from client and context metadata.
+ 	hds := append(c.xGoogHeaders, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/LongrunningRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+ 	resp := &longrunningpb.Operation{}
+ 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+diff --git a/internal/gengapic/testdata/rest_ServerStreamRPC.want b/internal/gengapic/testdata/rest_ServerStreamRPC.want
+index a5e22dce..8fa51b19 100644
+--- a/internal/gengapic/testdata/rest_ServerStreamRPC.want
++++ b/internal/gengapic/testdata/rest_ServerStreamRPC.want
+@@ -27,15 +27,12 @@ func (c *fooRESTClient) ServerStreamRPC(ctx context.Context, req *foopb.Foo, opt
+ 	hds = append(hds, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/ServerStreamRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	var streamClient *serverStreamRPCRESTStreamClient
+ 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+ 		if settings.Path != "" {
+diff --git a/internal/gengapic/testdata/rest_UnaryRPC.want b/internal/gengapic/testdata/rest_UnaryRPC.want
+index 4704ff2b..56ba3370 100644
+--- a/internal/gengapic/testdata/rest_UnaryRPC.want
++++ b/internal/gengapic/testdata/rest_UnaryRPC.want
+@@ -35,15 +35,12 @@ func (c *fooRESTClient) UnaryRPC(ctx context.Context, req *foopb.Foo, opts ...ga
+ 	hds = append(hds, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+ 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "gcp.resource.name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
++		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//foo.googleapis.com/%v", req.GetOther()))
+ 	}
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/UnaryRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	opts = append((*c.CallOptions).UnaryRPC[0:len((*c.CallOptions).UnaryRPC):len((*c.CallOptions).UnaryRPC)], opts...)
+ 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+ 	resp := &foopb.Foo{}
+diff --git a/internal/gengapic/testdata/rest_UpdateRPC.want b/internal/gengapic/testdata/rest_UpdateRPC.want
+index f0e1deed..29e9f4b5 100644
+--- a/internal/gengapic/testdata/rest_UpdateRPC.want
++++ b/internal/gengapic/testdata/rest_UpdateRPC.want
+@@ -39,13 +39,10 @@ func (c *fooRESTClient) UpdateRPC(ctx context.Context, req *foopb.UpdateRequest,
+ 	// Build HTTP headers from client and context metadata.
+ 	hds := append(c.xGoogHeaders, "Content-Type", "application/json")
+ 	headers := gax.BuildHeaders(ctx, hds...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.foo.v1.FooService/UpdateRPC")
+ 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/v1/foo")
+ 	}
+-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+-		ctx = metadata.AppendToOutgoingContext(ctx, "url.template", "/v1/foo")
+-	}
+ 	opts = append((*c.CallOptions).UpdateRPC[0:len((*c.CallOptions).UpdateRPC):len((*c.CallOptions).UpdateRPC)], opts...)
+ 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+ 	resp := &foopb.Foo{}
+diff --git a/internal/gengapic/testdata/service_rename.want b/internal/gengapic/testdata/service_rename.want
+index 82685d7d..e37ab969 100644
+--- a/internal/gengapic/testdata/service_rename.want
++++ b/internal/gengapic/testdata/service_rename.want
+@@ -53,6 +53,20 @@ func NewBarClient(ctx context.Context, opts ...option.ClientOption) (*BarClient,
+ 
+ 	}
+ 	c.setGoogleClientInfo()
++	if gax.IsFeatureEnabled("METRICS") {
++		metrics := gax.NewClientMetrics(
++		gax.WithTelemetryLogger(c.logger),
++		gax.WithTelemetryAttributes(map[string]string{
++			gax.ClientService: "foo",
++			gax.ClientVersion: getVersionClient(),
++			gax.ClientArtifact: "",
++			gax.RPCSystem: "grpc",
++			gax.URLDomain: "foo.googleapis.com",
++		}),
++		)
++
++		client.CallOptions.Baz = append(client.CallOptions.Baz, gax.WithClientMetrics(metrics))
++	}
+ 
+ 	client.internalClient = c
+ 
+@@ -86,7 +100,7 @@ func (c *barGRPCClient) Close() error {
+ 
+ func (c *barGRPCClient) Baz(ctx context.Context, req *mypackagepb.InputType, opts ...gax.CallOption) error {
+ 	ctx = gax.InsertMetadataIntoOutgoingContext(ctx, c.xGoogHeaders...)
+-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") {
++	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+ 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "my.pkg.Foo/Baz")
+ 	}
+ 	opts = append((*c.CallOptions).Baz[0:len((*c.CallOptions).Baz):len((*c.CallOptions).Baz)], opts...)
+diff --git a/showcase/showcase.bash b/showcase/showcase.bash
+index b5efe824..5d6b25ac 100755
+--- a/showcase/showcase.bash
++++ b/showcase/showcase.bash
+@@ -51,6 +51,7 @@ protoc \
+ 	--go_gapic_out ./gen \
+ 	--go_gapic_opt 'transport=rest+grpc' \
+ 	--go_gapic_opt 'rest-numeric-enums' \
++	--go_gapic_opt 'F_open_telemetry_attributes' \
+ 	--go_gapic_opt 'go-gapic-package=github.com/googleapis/gapic-showcase/client;client' \
+ 	--go_gapic_opt 'grpc-service-config=showcase_grpc_service_config.json' \
+ 	--go_gapic_opt 'api-service-config=showcase_v1beta1.yaml' \

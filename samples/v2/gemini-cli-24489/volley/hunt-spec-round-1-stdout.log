@@ -7,7 +7,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: none
 reasoning summaries: none
-session id: 019d9780-2339-70b2-a9c6-438c2f5651ab
+session id: 019d9de4-2be8-71d0-af52-fc1a381eb44e
 --------
 user
 # Hunt-spec — adversarial review of refactor claims (iterative)
@@ -65,10 +65,9 @@ Otherwise:
 Do not edit any source file. Do not propose new refactor claims.
 mcp startup: no servers
 codex
-I’ll inspect the goal, latest claims, allowed files, patch, and relevant source/tests, then write only the hunt-spec findings file.
+I’ll inspect the goal, claims, allowed file list, patch, and relevant source/tests, then write only the requested hunt-spec file. No source edits.
 exec
-/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
-/bin/zsh -lc "sed -n '1,200p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
 # PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
 
 ## PR body
@@ -89,7 +88,30 @@ Refactors specialized subagent tools into a single, unified `invoke_agent` tool 
 
 Related to the effort of simplifying the main agent's toolset and improving context efficiency.
 
- succeeded in 0ms:
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name used AgentTool override parameters directly
+**File**: packages/core/src/agents/agent-tool.ts:76
+**Change**: In `AgentTool.createInvocation` and the `DelegateInvocation` constructor, rename `_toolName` and `_toolDisplayName` to `toolName` and `toolDisplayName`, and pass those names through to `BaseToolInvocation`.
+**Goal link**: This clarifies the unified `invoke_agent` tool's delegated display-name path.
+**Justification**: The parameters are not unused, so removing the underscore convention reduces misleading first-pass scaffolding without changing the invocation values or behavior.
+
+### C2 — Share single-property schema probing in AgentTool
+**File**: packages/core/src/agents/agent-tool.ts:106
+**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name from an object schema, when one exists, and use it from both `mapParams` and `DelegateInvocation.withUserHints` instead of repeating `isRecord(properties)` and `Object.keys(properties)` logic.
+**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+**Justification**: The same schema-key decision currently appears in two blocks, and centralizing that one decision removes duplication while preserving the existing fallback to `prompt` or no hint injection.
+
+### C3 — Inline policy virtual-call construction
+**File**: packages/core/src/policy/policy-engine.ts:560
+**Change**: Replace the separate `toolCallsToTry` array construction with a direct `.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` over `toolNamesToTry`.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone at the match site makes the alias matching path more direct without changing rule ordering or match semantics.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
 .github/workflows/chained_e2e.yml
 .github/workflows/evals-nightly.yml
 .github/workflows/perf-nightly.yml
@@ -111,29 +133,7 @@ evals/gitRepo.eval.ts
 evals/grep_search_functionality.eval.ts
 evals/hierarchical_memory.eval.ts
 exec
-/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-1-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
 /bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
-## Accepted Claims
-
-### C1 — Centralize Agent Input Key Selection
-**File**: packages/core/src/agents/agent-tool.ts:106
-**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior.
-**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
-**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
-
-### C2 — Reuse Hinted Child Invocation Construction
-**File**: packages/core/src/agents/agent-tool.ts:180
-**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
-**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
-**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
-
-## Rejected
-
-- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
-- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
-- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
-- Replace all string literals for `agent_name` with a new exported constant across agent, policy, prompt, and TOML files: this crosses several surfaces for a single parameter name and adds indirection where the current literal is part of user-visible tool schema and documentation.
- succeeded in 0ms:
 diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
 index 94215e4795..fe87fb1d5d 100644
 --- a/.github/workflows/chained_e2e.yml
@@ -155,9 +155,9 @@ index fbb770ac84..9acc1de050 100644
      - cron: '0 1 * * *' # Runs at 1 AM every day
    workflow_dispatch:
 codex
-The accepted claims are both limited to `packages/core/src/agents/agent-tool.ts`, so I’m narrowing the review to that implementation surface plus tests that assert its behavior.
+The claimed refactor is narrow and focused on three core files. I’m checking the actual current symbols and tests around those lines now, because most defects here will be API-shape or subtle behavior assertions.
 exec
-/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '1,280p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '1,240p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
      1	/**
      2	 * @license
      3	 * Copyright 2026 Google LLC
@@ -179,53 +179,117 @@ exec
     19	import { LocalSubagentInvocation } from './local-invocation.js';
     20	import { RemoteAgentInvocation } from './remote-invocation.js';
 exec
-/bin/zsh -lc "rg --files packages/core/src | rg 'agent.*test|agents/.+\\.test|policy-engine.test|subagents'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
-packages/core/src/policy/policy-engine.test.ts
-packages/core/src/utils/agent-sanitization-utils.test.ts
-packages/core/src/config/config-agents-reload.test.ts
-packages/core/src/agents/agent-scheduler.test.ts
-packages/core/src/agents/local-invocation.test.ts
-packages/core/src/agents/local-executor.test.ts
-packages/core/src/agents/generalist-agent.test.ts
-packages/core/src/agents/memory-manager-agent.test.ts
-packages/core/src/agents/acknowledgedAgents.test.ts
-packages/core/src/agents/registry.test.ts
-packages/core/src/agents/a2a-client-manager.test.ts
-packages/core/src/agents/agentLoader.test.ts
-packages/core/src/agents/registry_acknowledgement.test.ts
-packages/core/src/agents/a2a-errors.test.ts
-packages/core/src/agents/utils.test.ts
-packages/core/src/agents/remote-invocation.test.ts
-packages/core/src/agents/a2aUtils.test.ts
-packages/core/src/agents/agent-tool.test.ts
-packages/core/src/agents/subagent-tool.test.ts
-packages/core/src/agents/codebase-investigator.test.ts
+/bin/zsh -lc "nl -ba packages/core/src/config/config.ts | sed -n '3590,3650p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  3590	        registry.registerTool(new WriteTodosTool(this.messageBus)),
+  3591	      );
+  3592	    }
+  3593	    if (this.isPlanEnabled()) {
+  3594	      maybeRegister(ExitPlanModeTool, () =>
+  3595	        registry.registerTool(new ExitPlanModeTool(this, this.messageBus)),
+  3596	      );
+  3597	      maybeRegister(EnterPlanModeTool, () =>
+  3598	        registry.registerTool(new EnterPlanModeTool(this, this.messageBus)),
+  3599	      );
+  3600	    }
+  3601	
+  3602	    if (this.isTrackerEnabled()) {
+  3603	      maybeRegister(TrackerCreateTaskTool, () =>
+  3604	        registry.registerTool(new TrackerCreateTaskTool(this, this.messageBus)),
+  3605	      );
+  3606	      maybeRegister(TrackerUpdateTaskTool, () =>
+  3607	        registry.registerTool(new TrackerUpdateTaskTool(this, this.messageBus)),
+  3608	      );
+  3609	      maybeRegister(TrackerGetTaskTool, () =>
 exec
-/bin/zsh -lc "rg -n \"AgentTool|DelegateInvocation|invoke_agent|withUserHints|buildChildInvocation|agent-tool\" packages/core/src evals -g '*.{ts,tsx}'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
-evals/app-test-helper.ts:30:  /** Restricting tools via mainAgentTools in evals is forbidden. */
-evals/app-test-helper.ts:31:  mainAgentTools?: never;
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '500,620p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   500	    if (!serverName && isMcpToolAnnotation(toolAnnotations)) {
+   501	      serverName = toolAnnotations._serverName;
+   502	    }
+   503	
+   504	    // Case 2: Fallback for static FQN strings (e.g. from TOML policies or allowed/excluded settings strings).
+   505	    // These strings don't have active metadata objects associated with them during policy generation,
+   506	    // so we must extract the server name from the qualified `mcp_{server}_{tool}` format.
+   507	    if (!serverName && toolCall.name) {
+   508	      const parsed = parseMcpToolName(toolCall.name);
+   509	      if (parsed.serverName) {
+   510	        serverName = parsed.serverName;
+   511	      }
+   512	    }
+   513	
+   514	    let stringifiedArgs: string | undefined;
+   515	    // Compute stringified args once before the loop
+   516	    if (
+   517	      toolCall.args &&
+   518	      (this.rules.some((rule) => rule.argsPattern) ||
+   519	        this.checkers.some((checker) => checker.argsPattern))
+exec
+/bin/zsh -lc "rg -n \"AgentTool|invoke_agent|toolCallsToTry|_toolName|_toolDisplayName|Register Subagent|Register unified\" packages/core/src -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-engine.ts:560:    const toolCallsToTry: FunctionCall[] = [];
+packages/core/src/policy/policy-engine.ts:562:      toolCallsToTry.push({ ...toolCall, name });
+packages/core/src/policy/policy-engine.ts:570:      const match = toolCallsToTry.some((tc) =>
 packages/core/src/policy/toml-loader.test.ts:1010:          toolName: 'invoke_agent',
 packages/core/src/policy/toml-loader.test.ts:1021:          { name: 'invoke_agent', args: { agent_name: 'unknown_subagent' } },
 packages/core/src/policy/toml-loader.test.ts:1042:            name: 'invoke_agent',
 packages/core/src/policy/toml-loader.test.ts:1053:          { name: 'invoke_agent', args: { agent_name: 'cli_help' } },
 packages/core/src/policy/policy-engine.test.ts:276:    it('should match subagent name as alias for invoke_agent', async () => {
 packages/core/src/policy/policy-engine.test.ts:284:        name: 'invoke_agent',
-packages/core/src/tools/tool-registry.ts:641:    const mainAgentTools = this.isMainRegistry
-packages/core/src/tools/tool-registry.ts:642:      ? this.config.getMainAgentTools()
-packages/core/src/tools/tool-registry.ts:656:        mainAgentTools &&
-packages/core/src/tools/tool-registry.ts:657:        !mainAgentTools.includes(toolName) &&
-packages/core/src/tools/tool-registry.ts:658:        !mainAgentTools.includes(tool.constructor.name) &&
-packages/core/src/tools/tool-registry.ts:659:        !mainAgentTools.some((t) => t.startsWith(`${tool.constructor.name}(`))
-packages/core/src/tools/tool-names.ts:191:export const AGENT_TOOL_NAME = 'invoke_agent';
-packages/core/src/core/prompts.test.ts:89:        .mockReturnValue(['grep_search', 'glob', 'invoke_agent']),
-packages/core/src/core/prompts.test.ts:201:  it('should include sub-agents in XML for preview models when invoke_agent tool is enabled', () => {
-packages/core/src/core/prompts.test.ts:230:  it('should NOT include sub-agents when the invoke_agent tool is disabled', () => {
-packages/core/src/agents/agent-scheduler.test.ts:8:import { scheduleAgentTools } from './agent-scheduler.js';
-packages/core/src/agents/agent-scheduler.test.ts:69:    const results = await scheduleAgentTools(
+packages/core/src/test-utils/mock-tool.ts:132:    _toolName?: string,
+packages/core/src/test-utils/mock-tool.ts:133:    _toolDisplayName?: string,
+packages/core/src/test-utils/mock-tool.ts:245:    _toolName?: string,
+packages/core/src/test-utils/mock-tool.ts:246:    _toolDisplayName?: string,
+packages/core/src/config/config.test.ts:51:import { AgentTool } from '../agents/agent-tool.js';
+packages/core/src/config/config.test.ts:1349:    it('should register AgentTool', async () => {
+packages/core/src/config/config.test.ts:1360:        (call) => call[0] instanceof vi.mocked(AgentTool),
+packages/core/src/config/config.ts:46:import { AgentTool } from '../agents/agent-tool.js';
+packages/core/src/config/config.ts:591:  mainAgentTools?: string[];
+packages/core/src/config/config.ts:764:  private readonly mainAgentTools: string[] | undefined;
+packages/core/src/config/config.ts:1032:    this.mainAgentTools = params.mainAgentTools;
 exec
-/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.test.ts | sed -n '1,340p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
-/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.ts | sed -n '130,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
-/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.test.ts | sed -n '200,360p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.test.ts | sed -n '250,310p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/browser/browserAgentInvocation.ts | sed -n '55,90p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.test.ts | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   250	        { toolName: currentName, decision: PolicyDecision.ALLOW },
+   251	      ];
+   252	
+   253	      engine = new PolicyEngine({ rules });
+   254	
+   255	      // Call using the LEGACY name (from a skill), should be allowed because of current rule
+   256	      const { decision } = await engine.check({ name: legacyName }, undefined);
+   257	      expect(decision).toBe(PolicyDecision.ALLOW);
+   258	    });
+   259	
+   260	    it('should match tool call using one legacy name against policy for another legacy name (same canonical tool)', async () => {
+   261	      const legacyName1 = 'legacy_test_tool';
+   262	      const legacyName2 = 'another_legacy_test_tool';
+   263	
+   264	      const rules: PolicyRule[] = [
+   265	        { toolName: legacyName2, decision: PolicyDecision.DENY },
+   266	      ];
+   267	
+   268	      engine = new PolicyEngine({ rules });
+   269	
+ succeeded in 0ms:
+    55	 * - MCP connection and tool wrapping at invocation time
+    56	 * - Browser cleanup after execution
+    57	 */
+    58	export class BrowserAgentInvocation extends BaseToolInvocation<
+    59	  AgentInputs,
+    60	  ToolResult
+    61	> {
+    62	  private readonly agentName: string;
+    63	
+    64	  constructor(
+    65	    private readonly context: AgentLoopContext,
+    66	    params: AgentInputs,
+    67	    messageBus: MessageBus,
+    68	    _toolName?: string,
+    69	    _toolDisplayName?: string,
+    70	  ) {
+    71	    const resolvedName = _toolName ?? 'browser_agent';
+    72	    // Note: BrowserAgentDefinition is a factory function, so we use hardcoded names
+    73	    super(
+    74	      params,
+ succeeded in 0ms:
      1	/**
      2	 * @license
      3	 * Copyright 2026 Google LLC
@@ -246,38 +310,96 @@ exec
     18	import type { LocalAgentDefinition, RemoteAgentDefinition } from './types.js';
     19	
     20	vi.mock('./local-invocation.js');
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '240,320p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   240	      }
+   241	
+   242	      return {
+   243	        ...agentArgs,
+   244	        [primaryKey]: `${formattedHints}\n\n${value}`,
+   245	      };
+   246	    }
+   247	
+   248	    return agentArgs;
+   249	  }
+   250	}
+exec
+/bin/zsh -lc 'rg -n "function ruleMatches|const ruleMatches|export function ruleMatches|toolNamesToTry|getToolAliases" packages/core/src/policy/policy-engine.ts packages/core/src/tools/tool-names.ts' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/tools/tool-names.ts:219:export function getToolAliases(name: string): string[] {
+packages/core/src/policy/policy-engine.ts:32:import { getToolAliases, AGENT_TOOL_NAME } from '../tools/tool-names.js';
+packages/core/src/policy/policy-engine.ts:83:function ruleMatches(
+packages/core/src/policy/policy-engine.ts:548:    const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+packages/core/src/policy/policy-engine.ts:555:          toolNamesToTry.push(subagentName);
+packages/core/src/policy/policy-engine.ts:561:    for (const name of toolNamesToTry) {
+exec
+/bin/zsh -lc "rg -n \"withUserHints|user_steering|getInjectionsAfter|formatUserHints|prompt.*hint|injection\" packages/core/src/agents packages/core/src -g '*.test.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/agents/local-executor.test.ts:2864:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:2866:          'user_steering',
+packages/core/src/agents/local-executor.test.ts:2913:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:2915:          'user_steering',
+packages/core/src/agents/local-executor.test.ts:2983:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:2985:          'user_steering',
+packages/core/src/agents/local-executor.test.ts:3073:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:3153:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:3157:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:3159:          'user_steering',
+packages/core/src/agents/local-executor.test.ts:3214:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:3216:          'user_steering',
+packages/core/src/agents/local-executor.test.ts:3218:        configWithHints.injectionService.addInjection(
+packages/core/src/agents/local-executor.test.ts:3224:          configWithHints.injectionService.getInjections('user_steering'),
+packages/core/src/agents/local-executor.test.ts:3227:          configWithHints.injectionService.getInjections(
+packages/core/src/policy/shell-safety.test.ts:263:  it('SHOULD NOT allow argument injection via --arg=$(rm -rf /)', async () => {
+packages/core/src/agents/browser/browserManager.test.ts:1105:  describe('overlay re-injection in callTool', () => {
+packages/core/src/agents/browser/inputBlocker.test.ts:88:    it('should be safe to call multiple times (idempotent injection)', async () => {
+packages/core/src/agents/subagent-tool.test.ts:213:  describe('withUserHints', () => {
+packages/core/src/agents/subagent-tool.test.ts:216:      mockConfig.injectionService.addInjection('Test Hint', 'user_steering');
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-registry.ts | sed -n '200,230p' && nl -ba packages/core/src/tools/tools.ts | sed -n '150,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   200	      prefixedName,
+   201	      prefixedName,
+   202	      fullDescription,
+   203	      Kind.Other,
+   204	      parameterSchema,
+   205	      messageBus,
+   206	      false, // isOutputMarkdown
+   207	      false, // canUpdateOutput
+   208	    );
+   209	    this.originalName = originalName;
+   210	  }
+   211	
+   212	  protected createInvocation(
+   213	    params: ToolParams,
+   214	    messageBus: MessageBus,
+   215	    _toolName?: string,
+   216	    _displayName?: string,
+   217	  ): ToolInvocation<ToolParams, ToolResult> {
+   218	    return new DiscoveredToolInvocation(
+   219	      this.config,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.test.ts | sed -n '210,340p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '70,125p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-names.ts | sed -n '185,240p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+    70	    // 1. Must be an MCP tool call (has serverName)
+    71	    // 2. Server name must match
+    72	    // 3. Tool name must be properly qualified by that server
+    73	    if (serverName === undefined || serverName !== expectedServerName) {
+    74	      return false;
+    75	    }
+    76	    return toolName.startsWith(`${MCP_TOOL_PREFIX}${expectedServerName}_`);
+    77	  }
+    78	
+    79	  // Not a recognized wildcard pattern, fallback to exact match just in case
+    80	  return toolName === pattern;
+    81	}
+    82	
+    83	function ruleMatches(
+    84	  rule: PolicyRule | SafetyCheckerRule,
+    85	  toolCall: FunctionCall,
+    86	  stringifiedArgs: string | undefined,
+    87	  serverName: string | undefined,
+    88	  currentApprovalMode: ApprovalMode,
+    89	  nonInteractive: boolean,
  succeeded in 0ms:
-   130	    messageBus: MessageBus,
-   131	    _toolName?: string,
-   132	    _toolDisplayName?: string,
-   133	  ) {
-   134	    super(
-   135	      params,
-   136	      messageBus,
-   137	      _toolName ?? definition.name,
-   138	      _toolDisplayName ?? definition.displayName ?? definition.name,
-   139	    );
-   140	    this.startIndex = context.config.injectionService.getLatestInjectionIndex();
-   141	  }
-   142	
-   143	  private get config(): Config {
-   144	    return this.context.config;
-   145	  }
-   146	
-   147	  getDescription(): string {
-   148	    return `Delegating to agent '${this.definition.name}'`;
-   149	  }
- succeeded in 0ms:
-   200	      }),
-   201	      expect.any(Function),
-   202	    );
-   203	
-   204	    // Verify metadata was set on the span
-   205	    const spanCallback = vi.mocked(runInDevTraceSpan).mock.calls[0][1];
-   206	    const mockMetadata = { input: undefined, output: undefined };
-   207	    const mockSpan = { metadata: mockMetadata };
-   208	    await spanCallback(mockSpan as Parameters<typeof spanCallback>[0]);
-   209	    expect(mockMetadata.input).toBe(params);
    210	    expect(mockMetadata.output).toBe(mockResult);
    211	  });
    212	
@@ -288,24 +410,115 @@ exec
    217	
    218	      const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
    219	      const params = { query: 'original query' };
+   220	      // @ts-expect-error - accessing private method for testing
+   221	      const invocation = tool.createInvocation(params, mockMessageBus);
+   222	
+   223	      // @ts-expect-error - accessing private method for testing
+   224	      const hintedParams = invocation.withUserHints(params);
+   225	
+   226	      expect(hintedParams.query).toBe('original query');
+   227	    });
+   228	
+   229	    it('should NOT modify query for remote agents if model steering is disabled', async () => {
+ succeeded in 0ms:
+   185	export const TRACKER_UPDATE_TASK_TOOL_NAME = 'tracker_update_task';
+   186	export const TRACKER_GET_TASK_TOOL_NAME = 'tracker_get_task';
+   187	export const TRACKER_LIST_TASKS_TOOL_NAME = 'tracker_list_tasks';
+   188	export const TRACKER_ADD_DEPENDENCY_TOOL_NAME = 'tracker_add_dependency';
+   189	export const TRACKER_VISUALIZE_TOOL_NAME = 'tracker_visualize';
+   190	
+   191	export const AGENT_TOOL_NAME = 'invoke_agent';
+   192	
+   193	// Tool Display Names
+   194	export const WRITE_FILE_DISPLAY_NAME = 'WriteFile';
+   195	export const EDIT_DISPLAY_NAME = 'Edit';
+   196	export const ASK_USER_DISPLAY_NAME = 'Ask User';
+   197	export const READ_FILE_DISPLAY_NAME = 'ReadFile';
+   198	export const GLOB_DISPLAY_NAME = 'FindFiles';
+   199	export const LS_DISPLAY_NAME = 'ReadFolder';
+   200	export const GREP_DISPLAY_NAME = 'SearchText';
+   201	export const WEB_SEARCH_DISPLAY_NAME = 'GoogleSearch';
+   202	export const WEB_FETCH_DISPLAY_NAME = 'WebFetch';
+   203	export const READ_MANY_FILES_DISPLAY_NAME = 'ReadManyFiles';
+   204	
 exec
-/bin/zsh -lc 'rg -n "diff --git a/packages/core/src/agents/agent-tool.ts|agent-tool.ts|withUserHints|mapParams|DelegateInvocation" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+/bin/zsh -lc "nl -ba packages/core/src/agents/local-executor.test.ts | sed -n '2840,3005p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/local-executor.test.ts | sed -n '3050,3240p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  2840	        // We use a manual promise to ensure the hint is added WHILE Turn 1 is "running"
+  2841	        let resolveToolCall: (value: unknown) => void;
+  2842	        const toolCallPromise = new Promise((resolve) => {
+  2843	          resolveToolCall = resolve;
+  2844	        });
+  2845	        mockScheduleAgentTools.mockReturnValueOnce(toolCallPromise);
+  2846	
+  2847	        // Turn 2: Model calls complete_task
+  2848	        mockModelResponse(
+  2849	          [
+  2850	            {
+  2851	              name: COMPLETE_TASK_TOOL_NAME,
+  2852	              args: { finalResult: 'Done' },
+  2853	              id: 'call2',
+  2854	            },
+  2855	          ],
+  2856	          'T2: Done',
+  2857	        );
+  2858	
+  2859	        const runPromise = executor.run({ goal: 'Hint test' }, signal);
+ succeeded in 0ms:
+  3050	
+  3051	        mockModelResponse(
+  3052	          [{ name: LS_TOOL_NAME, args: { path: '.' }, id: 'call1' }],
+  3053	          'T1: Listing',
+  3054	        );
+  3055	
+  3056	        let resolveToolCall: (value: unknown) => void;
+  3057	        const toolCallPromise = new Promise((resolve) => {
+  3058	          resolveToolCall = resolve;
+  3059	        });
+  3060	        mockScheduleAgentTools.mockReturnValueOnce(toolCallPromise);
+  3061	
+  3062	        mockModelResponse([
+  3063	          {
+  3064	            name: COMPLETE_TASK_TOOL_NAME,
+  3065	            args: { finalResult: 'Done' },
+  3066	            id: 'call2',
+  3067	          },
+  3068	        ]);
+  3069	
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+codex
+C1, C3, and C4 line up with existing code and allowed scope. C2 is the only claim that looks shaky: it asks for a shared helper across two classes but does not pin down the current “no hint injection” edge for malformed/non-object schemas.
+exec
+/bin/zsh -lc 'rg -n "diff --git a/packages/core/src/(agents/agent-tool|policy/policy-engine|config/config|agents/agent-tool.test|policy/policy-engine.test)" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc 'rg -n "agent-tool|invoke_agent|policy-engine|Subagent Tool|AgentTool" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+3102:diff --git a/packages/core/src/agents/agent-tool.ts b/packages/core/src/agents/agent-tool.ts
+3484:diff --git a/packages/core/src/config/config.ts b/packages/core/src/config/config.ts
+3691:diff --git a/packages/core/src/policy/policy-engine.ts b/packages/core/src/policy/policy-engine.ts
+ succeeded in 0ms:
+207:   /** Restricting tools via mainAgentTools in evals is forbidden. */
+208:   mainAgentTools?: never;
+1713:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll check the dynamic content page on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/dynamic.html, wait for the dynamic content to load, then capture the accessibility tree and report what content appeared"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1723:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll fill out the contact form on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/form.html, fill in the name field with 'Test User', the email field with 'test@example.com', the message field with 'Hello World', and submit the form"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1733:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll go through the multi-step flow on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/multi-step/step1.html, fill in 'testuser' as the username, click Next, then on step 2 select 'Option B' and click Finish. Report the final result page content."}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1743:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to the localhost page and read its content using the browser agent."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/index.html and tell me the page title and list all links on the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1753:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll take a screenshot of the localhost test page."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/index.html and take a screenshot of the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":35,"totalTokenCount":135}}]}
+1763:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll open https://example.com and check the page title for you."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Open https://example.com and get the page title"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":35,"totalTokenCount":135}}]}
+1773:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll launch two browser agents concurrently to check both repositories."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and get the page title"}}},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and get the page title"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1783:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to https://example.com and analyze the links on the page."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Go to https://example.com and find all links on the page, then describe them"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1793:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll help you open https://example.com and analyze the page. Let me use the browser agent to navigate and capture the page information."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and capture the accessibility tree to get the page title and main content"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1810:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I will invoke the browser agent to get the page title of example.com."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":16,"totalTokenCount":10587,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"thoughtsTokenCount":80}},{"candidates":[{"content":{"parts":[{"functionCall":{"name":"invoke_agent","args":{"prompt":"Navigate to example.com and return the page title.","agent_name":"browser_agent"},"id":"1zgnzmz8"},"thoughtSignature":"EpgDCpUDAb4+9vtATVUpO7R/Du3cyW+qLtXqHV5MxjoY/uOyN6tesv96PEfcvXarQ/u24REH9DCw2AIG00h9WM2jRtfgbU544f4lEQn0dLEkAJCQaiBcxx8yPND+qKmwq8PFHo6ESQs3nssi3XOqfiA7YMxxY2vEx4GDZfieEeS/nyTe3F7A7dEoMnE2VnMWRVdAAW1F2K2ZeDQZSDrJxtelkn0dGd/MS0R6iNDENWg9QWJQlok4xttspRJFLS5BvkvnkBcUWQFQlo60AQb1Vbo8MQvV8WHUPORRePj4iW3IyxOohmb7uMfDo7UiRyv3Li8AAga7+oSUU9HSf5XZrjSL0juzJpYxxCqnIuj1/ZIY5SBSwGAWKuLQwmbo433bKij9HnY8n/MeNiDgwMiBX56mNlAOIqVLR9Qskod14H4hB+xAbvFy8j8hwf3hksLGjhM9BTBlcBQ2dbor5OUmZ/C7XsnLZvnhw+in7ji2tHz/68/4gmIN08khU1BRvfZdxtX8eQoVLcCfvwkGX7/drD9bM0TrjZuWXh9o"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":52,"totalTokenCount":10623,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"thoughtsTokenCount":80}},{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":52,"totalTokenCount":10623,"cachedContentTokenCount":8126,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"cacheTokensDetails":[{"modality":"TEXT","tokenCount":8126}],"thoughtsTokenCount":80}}]}
+1821:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I will invoke the browser agent a"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":7,"totalTokenCount":10649,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"text":" second time to check for links on example.com."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":19,"totalTokenCount":10661,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"functionCall":{"name":"invoke_agent","args":{"prompt":"Navigate to example.com and list all the links on the page.","agent_name":"browser_agent"},"id":"rn9rpbw6"},"thoughtSignature":"EosCCogCAb4+9vt0QmjCmkrGoIi1HLtLRARGxmKpP3a2ZF8HrZLv4bfHC1a7d5a1BlPllShIkkAjL1RZmTe9tjpulNV7xsavrWINRdkfrNqC/on1h+F3nhQAa3HBbf4AWWH/AHmVPlUsVDr19hq4NLLL3hxFg04Fb1YEgRDHrjWOs3Oy9SmzdG+MiWv5GFVUM6spjOujO76dKzHZGe7chmMsmE8NhjQ9c/lbWUoXBxJ/72Qs+mRQHpd3p1ufkL0UV8bFtfyJdLTF4iJ/R5kJiqsEN1FtS3PpQaQHsmby7ytEjPX29ps7xp6NO1i/je9p3u+tGXEpnomqdJJ4SvdDJm4XyqO9HTIQxC3jg7mi"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":58,"totalTokenCount":10700,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10683,"candidatesTokenCount":58,"totalTokenCount":10780,"cachedContentTokenCount":8119,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10683}],"cacheTokensDetails":[{"modality":"TEXT","tokenCount":8119}],"thoughtsTokenCount":39}}]}
+1842:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to https://example.com and take a screenshot for you."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and take a screenshot of the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1852:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll help you navigate to https://example.com and perform both operations - capturing the accessibility tree and taking a screenshot."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com, take a snapshot of the accessibility tree, then take a screenshot"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":45,"totalTokenCount":145}}]}
+1862:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll help you with that."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Open https://example.com and check if there is a heading"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
 3102:diff --git a/packages/core/src/agents/agent-tool.ts b/packages/core/src/agents/agent-tool.ts
 3106:+++ b/packages/core/src/agents/agent-tool.ts
-3197:+    const mappedInputs = this.mapParams(
-3202:+    return new DelegateInvocation(
-3213:+  private mapParams(prompt: string, schema: unknown): AgentInputs {
-3229:+class DelegateInvocation extends BaseToolInvocation<
-3290:+    const hintedParams = this.withUserHints(this.mappedInputs);
-3299:+    const hintedParams = this.withUserHints(this.mappedInputs);
-3320:+  private withUserHints(agentArgs: AgentInputs): AgentInputs {
-3472:diff --git a/packages/core/src/agents/subagent-tool.ts b/packages/core/src/agents/subagent-tool.ts
-3474:--- a/packages/core/src/agents/subagent-tool.ts
-3475:+++ b/packages/core/src/agents/subagent-tool.ts
+3147:+export class AgentTool extends BaseDeclarativeTool<
+3398:+import { AgentTool } from './agent-tool.js';
 exec
-/bin/zsh -lc "sed -n '3100,3345p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
- 
-   if (sessions.length === 0) {
+/bin/zsh -lc "sed -n '3102,3248p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch && sed -n '3691,3735p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
 diff --git a/packages/core/src/agents/agent-tool.ts b/packages/core/src/agents/agent-tool.ts
 new file mode 100644
 index 0000000000..0d4c85a599
@@ -324,118 +537,72 @@ index 0000000000..0d4c85a599
 +  type ToolInvocation,
 +  type ToolResult,
 +  BaseToolInvocation,
++  type ToolCallConfirmationDetails,
++  type ToolLiveOutput,
 exec
-/bin/zsh -lc "sed -n '3345,3425p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
-+      if (typeof value !== 'string' || value.trim().length === 0) {
-+        return agentArgs;
-+      }
-+
-+      return {
-+        ...agentArgs,
-+        [primaryKey]: `${formattedHints}\n\n${value}`,
-+      };
-+    }
-+
-+    return agentArgs;
-+  }
-+}
-diff --git a/packages/core/src/agents/local-executor.ts b/packages/core/src/agents/local-executor.ts
-index 81cd27abee..f257018b1b 100644
---- a/packages/core/src/agents/local-executor.ts
-+++ b/packages/core/src/agents/local-executor.ts
-@@ -19,6 +19,7 @@ import { ResourceRegistry } from '../resources/resource-registry.js';
- import {
-   type AnyDeclarativeTool,
-exec
-/bin/zsh -lc "rg -n \"inputSchema:\\s*\\{|properties:\\s*\\{\\s*\\}\" packages/core/src packages/test-utils/src -g '*.{ts,tsx}'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
-packages/core/src/tools/tool-registry.test.ts:588:          properties: {},
-packages/core/src/tools/tool-registry.test.ts:624:        parametersJsonSchema: { type: 'object', properties: {} },
-packages/core/src/tools/mcp-client.ts:1309:          toolDef.inputSchema ?? { type: 'object', properties: {} },
-packages/core/src/tools/definitions/trackerTools.ts:160:      properties: {},
-packages/core/src/tools/shellBackgroundTools.ts:86:        properties: {},
-packages/core/src/agents/local-invocation.test.ts:45:    inputSchema: {
-packages/core/src/agents/local-executor.test.ts:345:      inputSchema: {
-packages/core/src/agents/local-executor.test.ts:3546:          inputSchema: {
-packages/core/src/agents/local-executor.test.ts:3641:          inputSchema: {
-packages/core/src/agents/codebase-investigator.ts:74:      inputSchema: {
-packages/core/src/tools/mcp-client.test.ts:125:              inputSchema: {
-packages/core/src/tools/mcp-client.test.ts:127:                properties: {},
-packages/core/src/tools/mcp-client.test.ts:199:              inputSchema: {
-packages/core/src/tools/mcp-client.test.ts:208:              inputSchema: {
-packages/core/src/tools/mcp-client.test.ts:393:              inputSchema: { type: 'object', properties: {} },
-packages/core/src/tools/mcp-client.test.ts:456:              inputSchema: { type: 'object', properties: {} },
-packages/core/src/tools/mcp-client.test.ts:538:              inputSchema: { type: 'object', properties: {} },
-packages/core/src/tools/mcp-client.test.ts:616:              inputSchema: { type: 'object', properties: {} },
-packages/core/src/tools/mcp-client.test.ts:698:              inputSchema: {
-packages/core/src/tools/mcp-client.test.ts:1066:              inputSchema: { type: 'object', properties: {} },
-codex
-I found one spec-level ambiguity around the helper’s fallback semantics. It is not a source edit; I’m writing the required review artifact now.
-exec
-/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md 2>/dev/null || true' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md && nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md | sed -n '1,120p' || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
 
+codex
+I found one warning-level spec defect. I’m writing the hunt output file now; it will contain only that finding in the requested format.
 file update
 A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
-## Finding F1 — Empty `properties` fallback is not specified
+## Finding F1 — Shared schema helper loses the no-injection edge
 **Severity**: warning
-**Claim**: C1
-**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
-**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
-**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.
-apply_patch(auto_approved=true) exited 0 in 25ms:
+**Claim**: C2
+**What**: The claim says to add one helper that "returns the sole property name from an object schema, when one exists" and use it from both `mapParams` and `DelegateInvocation.withUserHints`, but those two call sites currently have different fallback behavior. `mapParams` falls back to `{ prompt }` when the schema is not a record or has no single property. `withUserHints` only falls back to `prompt` when `properties` is a record with zero or multiple keys; if the schema itself is not a record, or `properties` is missing/non-record, it returns the original args without injecting hints. A helper that only returns `string | undefined` makes it ambiguous whether `undefined` means "use prompt" or "do not inject hints", so an implementer must guess and may accidentally inject hints into malformed/non-object remote schemas.
+**Evidence**: `packages/core/src/agents/agent-tool.ts:106` returns `{ prompt }` for non-record schemas and for schemas without exactly one property; `packages/core/src/agents/agent-tool.ts:227` through `packages/core/src/agents/agent-tool.ts:248` returns `agentArgs` without injection when the schema or `properties` is not a record, but uses `prompt` only when `properties` is a record and does not have exactly one key.
+**Fix**: Clarify C2 so the shared helper either preserves two distinct outcomes for `withUserHints` (`single property`, `prompt fallback`, `no hint injection`) or narrow the claim to share only the `isRecord(properties)`/`Object.keys(properties)` extraction while explicitly keeping `withUserHints`' non-record/missing-`properties` no-op behavior.
+apply_patch(auto_approved=true) exited 0 in 24ms:
 Success. Updated the following files:
 A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 file update:
 diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..0ecd707fd041cbe6c92fd4db0858923455d63032
+index 0000000000000000000000000000000000000000..56ce89fd7fe549de0ce2e28fe5cfa93889dd3bb8
 --- /dev/null
 +++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 @@ -0,0 +1,6 @@
-+## Finding F1 — Empty `properties` fallback is not specified
++## Finding F1 — Shared schema helper loses the no-injection edge
 +**Severity**: warning
-+**Claim**: C1
-+**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
-+**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
-+**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.
++**Claim**: C2
++**What**: The claim says to add one helper that "returns the sole property name from an object schema, when one exists" and use it from both `mapParams` and `DelegateInvocation.withUserHints`, but those two call sites currently have different fallback behavior. `mapParams` falls back to `{ prompt }` when the schema is not a record or has no single property. `withUserHints` only falls back to `prompt` when `properties` is a record with zero or multiple keys; if the schema itself is not a record, or `properties` is missing/non-record, it returns the original args without injecting hints. A helper that only returns `string | undefined` makes it ambiguous whether `undefined` means "use prompt" or "do not inject hints", so an implementer must guess and may accidentally inject hints into malformed/non-object remote schemas.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:106` returns `{ prompt }` for non-record schemas and for schemas without exactly one property; `packages/core/src/agents/agent-tool.ts:227` through `packages/core/src/agents/agent-tool.ts:248` returns `agentArgs` without injection when the schema or `properties` is not a record, but uses `prompt` only when `properties` is a record and does not have exactly one key.
++**Fix**: Clarify C2 so the shared helper either preserves two distinct outcomes for `withUserHints` (`single property`, `prompt fallback`, `no hint injection`) or narrow the claim to share only the `isRecord(properties)`/`Object.keys(properties)` extraction while explicitly keeping `withUserHints`' non-record/missing-`properties` no-op behavior.
 
 file update:
 diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..0ecd707fd041cbe6c92fd4db0858923455d63032
+index 0000000000000000000000000000000000000000..56ce89fd7fe549de0ce2e28fe5cfa93889dd3bb8
 --- /dev/null
 +++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 @@ -0,0 +1,6 @@
-+## Finding F1 — Empty `properties` fallback is not specified
++## Finding F1 — Shared schema helper loses the no-injection edge
 +**Severity**: warning
-+**Claim**: C1
-+**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
-+**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
-+**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.
++**Claim**: C2
++**What**: The claim says to add one helper that "returns the sole property name from an object schema, when one exists" and use it from both `mapParams` and `DelegateInvocation.withUserHints`, but those two call sites currently have different fallback behavior. `mapParams` falls back to `{ prompt }` when the schema is not a record or has no single property. `withUserHints` only falls back to `prompt` when `properties` is a record with zero or multiple keys; if the schema itself is not a record, or `properties` is missing/non-record, it returns the original args without injecting hints. A helper that only returns `string | undefined` makes it ambiguous whether `undefined` means "use prompt" or "do not inject hints", so an implementer must guess and may accidentally inject hints into malformed/non-object remote schemas.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:106` returns `{ prompt }` for non-record schemas and for schemas without exactly one property; `packages/core/src/agents/agent-tool.ts:227` through `packages/core/src/agents/agent-tool.ts:248` returns `agentArgs` without injection when the schema or `properties` is not a record, but uses `prompt` only when `properties` is a record and does not have exactly one key.
++**Fix**: Clarify C2 so the shared helper either preserves two distinct outcomes for `withUserHints` (`single property`, `prompt fallback`, `no hint injection`) or narrow the claim to share only the `isRecord(properties)`/`Object.keys(properties)` extraction while explicitly keeping `withUserHints`' non-record/missing-`properties` no-op behavior.
 
 codex
-Wrote the hunt-spec review to:
+Wrote the adversarial review to [/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md).
 
-[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md)
-
-It contains one `warning` finding for C1: the spec does not clarify how an object schema with empty `properties: {}` should behave, even though current code treats it as a `prompt` fallback case for both mapping and hint injection.
+I found one `warning` against C2: the shared schema helper is underspecified because `mapParams` and `withUserHints` currently have different fallback behavior for malformed or non-object schemas, so an implementer could accidentally change hint injection behavior. No source files were edited.
 file update:
 diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..0ecd707fd041cbe6c92fd4db0858923455d63032
+index 0000000000000000000000000000000000000000..56ce89fd7fe549de0ce2e28fe5cfa93889dd3bb8
 --- /dev/null
 +++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md
 @@ -0,0 +1,6 @@
-+## Finding F1 — Empty `properties` fallback is not specified
++## Finding F1 — Shared schema helper loses the no-injection edge
 +**Severity**: warning
-+**Claim**: C1
-+**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
-+**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
-+**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.
++**Claim**: C2
++**What**: The claim says to add one helper that "returns the sole property name from an object schema, when one exists" and use it from both `mapParams` and `DelegateInvocation.withUserHints`, but those two call sites currently have different fallback behavior. `mapParams` falls back to `{ prompt }` when the schema is not a record or has no single property. `withUserHints` only falls back to `prompt` when `properties` is a record with zero or multiple keys; if the schema itself is not a record, or `properties` is missing/non-record, it returns the original args without injecting hints. A helper that only returns `string | undefined` makes it ambiguous whether `undefined` means "use prompt" or "do not inject hints", so an implementer must guess and may accidentally inject hints into malformed/non-object remote schemas.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:106` returns `{ prompt }` for non-record schemas and for schemas without exactly one property; `packages/core/src/agents/agent-tool.ts:227` through `packages/core/src/agents/agent-tool.ts:248` returns `agentArgs` without injection when the schema or `properties` is not a record, but uses `prompt` only when `properties` is a record and does not have exactly one key.
++**Fix**: Clarify C2 so the shared helper either preserves two distinct outcomes for `withUserHints` (`single property`, `prompt fallback`, `no hint injection`) or narrow the claim to share only the `isRecord(properties)`/`Object.keys(properties)` extraction while explicitly keeping `withUserHints`' non-record/missing-`properties` no-op behavior.
 
 tokens used
-32,355
-Wrote the hunt-spec review to:
+46,884
+Wrote the adversarial review to [/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md).
 
-[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-1.md)
-
-It contains one `warning` finding for C1: the spec does not clarify how an object schema with empty `properties: {}` should behave, even though current code treats it as a `prompt` fallback case for both mapping and hint injection.
+I found one `warning` against C2: the shared schema helper is underspecified because `mapParams` and `withUserHints` currently have different fallback behavior for malformed or non-object schemas, so an implementer could accidentally change hint injection behavior. No source files were edited.

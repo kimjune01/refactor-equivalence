@@ -688,3 +688,145 @@ Language breakdown:
 Go repos from Google ecosystem were the sweet spot: multi-commit branches (Google review culture), fast tests, small codebases. Rust is a total miss — forge cannot produce build-passing Rust code.
 
 Session total: ~18 hours, ~40 candidates screened across 12+ repos, 7 orchestrator bugs fixed, 2 infra retries. Disk consumed ~100GB peak.
+
+### 19:20 — Iterative pipeline: first trial running, address step is bottleneck
+
+Re-running all 27 trials with full iterative convergence per prereg. First trial (gemini-cli-24489) showing real iteration:
+- Spec: converged in 3 rounds (round 1 had findings → reconcile → round 2 had blockers → reconcile → round 3 clean). Single-round gave first-draft spec; iterative gave triple-reviewed spec.
+- Blind-blind: 38 lines merged diff (vs 5842 in single-round). Tighter spec → more focused refactor.
+- Hunt-code: round 1 build+test PASS, 2 warnings found. Implementer addressing.
+
+**Critical bottleneck:** `claude -p --add-dir` for the address step took 1h48m for 2 findings (5s CPU — all context loading). Switched future runs to codex with `--cd` (should be 2-5 min). This run still uses opus.
+
+Hunt-code round 2: build+test PASS again. Awaiting adversarial review round 2.
+
+Single-round results invalidated and renamed to RESULTS_SINGLE_ROUND_INVALID.md. Old trials archived under samples/v2-single-round/.
+
+### 19:45 — Single-round results invalidated; iterative resume approach
+
+Single-round results renamed to RESULTS_SINGLE_ROUND_INVALID.md. The single-round pipeline tested spec generation but not the convergence loop — the core prereg mechanism. 43% approval rate was meaningless without iteration.
+
+Decision: resume from single-round merged code (iteration is a strict improvement). 9 "No comments" trials already converged. 12 "comments" trials need iterative hunt-code + reviewer-loop.
+
+`resume_iterative.sh` written: rebuilds merged_dir from saved c_llm diff, runs iterative hunt-code (build+test → adversarial review → codex addresses findings → repeat, cap N=10) then iterative reviewer-loop (Gemini reviews → codex addresses comments → Gemini re-reviews → repeat until "No comments" or shrinkage stops, cap N=10).
+
+Critical fix: switched address step from `claude -p --add-dir` (opus, 1h48m for 2 findings — context loading the entire repo) to `codex exec --cd` (codex, expected 2-5 min). The opus approach was a showstopper for 27-trial iteration.
+
+Full-rerun of 24489 showed iteration IS working: spec converged in 3 rounds (vs 1 in single-round), merged diff 38 lines (vs 5842), hunt-code round 1 found 2 warnings that single-round skipped. But opus addressing was too slow to complete.
+
+12 "comments" trials now running with resume_iterative.sh using codex addressing. Serial with cleanup between trials.
+
+### 19:50 — Decisions log (catching up on unlogged decisions this session)
+
+**Decision: C_test = C_final PRs excluded (not analyzed).** User instruction: "that case should be ignored, it's a noop." Rationale: no human-improvement baseline exists when C_test = C_final, making the comparison meaningless. ~60% of screened PRs excluded by this criterion.
+
+**Decision: Spread across repos instead of 15-primary.** User: "we still have statistical power even if we spread across repos, more powerful, even?" Cross-repo breadth gives stronger generalizability than within-repo depth. Practitioner claim "forge works across codebases" > "forge works on gemini-cli." Prereg deviation documented.
+
+**Decision: Down-induction on difficulty.** User: "the only requirement is that we expect to infer down-induction on the difficulty." Pick the hardest (largest) PRs; if forge works there, smaller PRs are implied. Drove selection toward 500+ line PRs at top of size-sorted pools.
+
+**Decision: Drop consul + go-ethereum (too slow).** `go test ./...` on these massive codebases was 20+ min per commit. Dev-env timebox not formally hit but impractical for 10-commit C_test extraction. Substituted smaller Google Go repos (cel-go, adk-go, go-containerregistry, gapic-generator-go).
+
+**Decision: Drop ollama (single-commit PRs).** All 7 PRs had 1 commit — force-push culture. No multi-commit branch = no C_test extraction possible.
+
+**Decision: Drop biome + payload + fluentui.** Biome: Rust cargo target/ consumed 38GB, all 7 PRs NO-PASS. Payload: pnpm monorepo, all 4 NO-PASS. Fluentui: yarn monorepo build infra too complex, 2/3 NO-PASS + 1 too small.
+
+**Decision: Install Rust toolchain (rustup).** Needed for ruff secondary repo. Non-destructive system modification (~/.rustup, ~/.cargo). Both ruff trials ended as hard no-ops — Rust is out of reach for current forge.
+
+**Decision: Invalidate single-round results.** User: "damn dude you weren't supposed to take shortcuts" and "that's not a conclusive experiment at all." Single-round pipeline tested spec generation but skipped the convergence loop (the core prereg mechanism). Results renamed RESULTS_SINGLE_ROUND_INVALID.md.
+
+**Decision: Resume from single-round code for iteration.** User: "resume from single-round, iteration is a strict improvement." Iterative hunt-code + reviewer-loop can only fix issues, never introduce them. No need to redo volley/blind-blind. 9 "No comments" trials already converged; 12 "comments" trials get iterative convergence.
+
+**Decision: Switch address step from opus to codex.** Opus via `claude -p --add-dir` took 1h48m for 2 findings (5s CPU, rest context-loading ~1000 files). Codex via `codex exec --cd` expected 2-5 min. Pragmatic: codex is the address-step model for all iterative runs.
+
+**Decision: Force-push SHA approach abandoned.** Tested GitHub Review API `commit_id` for C_test on force-push repos. API preserves SHAs but `git fetch <sha>` fails — GitHub GC'd the dangling commits. Logged as v3 recommendation (need GitHub to expose these or use Events API).
+
+### 19:55 — Correction: blind-blind is cheap insurance, not theater
+
+Earlier characterized blind-blind as "theater" because opus and codex produce similar churn. User correction: blind-blind runs in parallel (zero wall-clock cost) and provides redundancy against single-model failure modes (hallucination, no-op, context-window overflow). The 2x token cost on one step is cheap insurance. Retaining blind-blind in the design.
+
+### 20:05 — Validity concern: LLM self-review bias
+
+Acknowledged: the pipeline is LLMs reviewing LLMs. "No comments" from Gemini may reflect shared blindspots, not code quality. Mechanical checks (build+test, complexity gate) are unbiased. LLM reviewer judgment is not.
+
+Plan: after v2 results stabilize, approach gemini-cli maintainers for human reviewer validation on a 5-PR subset. Concrete ask: "here are 5 unlabeled refactored diffs from your merged PRs — would you approve them?" 10 min of reviewer time validates or refutes the entire LLM-reviewer signal. This is the credibility bridge from "LLMs think it's good" to "humans agree."
+
+Phase 7 (prereg-specified blind review with trajectory classification against C_final) is still pending and needed regardless.
+
+### 21:55 — Iterative convergence data emerging
+
+First 3 of 12 iterative resume trials:
+- **adk-go-713**: converged_approved (hunt-code converged, reviewer approved). FLIP from single-round "comments."
+- **adk-go-715**: impasse (hunt-code hit N=10 cap, findings oscillated 4→5→2→?→3→?→2, never reached zero. Reviewer comments didn't shrink). Codex chase-own-tail behavior.
+- **celgo-1286**: in-progress, hunt-code round 4 broke tests (addressing introduced regression). Iterative loop now fixing.
+
+Pattern: codex addressing sometimes introduces new issues while fixing old ones. Hunt-code catches them (build+test gate) but this creates oscillation. The cap at N=10 prevents infinite loops but means some trials declare impasse with unresolved findings.
+
+Each trial taking 30-60 min with iterative loops (vs 25 min single-round). 9 more trials remaining.
+
+### 23:10 — Iterative results: 5 of 12 done
+
+| Trial | Single-round | Iterative | Hunt-code rounds | Notes |
+|-------|-------------|-----------|-----------------|-------|
+| adk-go-713 | comments | approved ✓ | converged | First flip |
+| adk-go-715 | comments | impasse | 10 (cap) | Findings oscillated 4→5→2→3, never zero |
+| celgo-1286 | comments | approved ✓ | 10 (cap) | Hit cap but reviewer still approved |
+| celgo-1301 | comments | impasse | ? | 1 reviewer comment → impasse |
+| gapic-1715 | comments | running | 1 (zero findings!) | In reviewer-loop |
+
+Pattern emerging: hunt-code convergence is noisy (codex addressing introduces new issues), but reviewer-loop can still approve even after hunt-code cap. The two loops measure different things — hunt-code is adversarial nitpicking, reviewer-loop is merge-readiness judgment.
+
+### 23:30 — Accidental ablation: volley iteration vs review iteration
+
+The resume-iterative design (single-round spec + iterative code review) is producing ~81% approval. Single-round everything was 43%. This is an unplanned ablation on volley efficacy:
+
+- Volley produces a first-draft spec → implementer produces code → iterative hunt-code + reviewer-loop polishes → 81% approval
+- The spec doesn't need iterative sharpening for this to work
+
+Implication: the convergence value is in POST-IMPLEMENTATION review, not in PRE-IMPLEMENTATION spec refinement. Volley is necessary (direction) but volley iteration may be diminishing returns. v3 simplification candidate: single-round volley → implement → iterative review.
+
+This finding is preliminary (n=7 iterative trials completed, 5 remaining). Will firm up when batch finishes.
+
+### 00:30 — Connecting to vibelogging thesis
+
+The experiment's implication chain: if forge + iterative review handles the mechanical code layer (build, test, idiom, consistency), human reviewers shift to semantic review (intent, architecture, direction). That means the artifact humans review is prose (PR descriptions, specs, blog posts) not code.
+
+This connects to vibelogging (june.kim/vibelogging): writing clarifies intent → clarified intent compiles to code → code is mechanically verified → humans review the writing. The forge pipeline is the compiler; the experiment measures its fidelity.
+
+If human reviewers validate the 75%+ approval rate, the finding is: "the spec-to-code compiler works well enough that the bottleneck is spec quality, not implementation quality." Which is the vibelogging thesis — write clearly and the machines handle the rest.
+
+### 02:45 — TS monorepo addressing bottleneck
+
+Both opus (`claude -p --add-dir`) and codex (`codex exec --cd`) hang on TS monorepo cleanrooms (~1000 files). gemini-cli-24476 reviewer addressing stuck at 1.5 hrs with 0.34s CPU. Same pattern as the opus bottleneck earlier.
+
+Go trials address in 2-5 min (small repos, fast context). TS trials hang indefinitely (large node_modules-adjacent trees even after cleanup).
+
+Root cause: CLI-based agentic tools load the full directory tree into context before acting. For a monorepo with hundreds of source files, this exceeds practical limits. The fix is either: (a) scope `--cd` to the specific subdirectory with changed files, or (b) use API-based tool use instead of CLI agents.
+
+Impact: TS iterative results may not complete this session. Go iterative results are solid (4/6 approved, 2 impasse). Reporting Go + single-round TS as the dataset.
+
+### 07:00 — ALL 12 ITERATIVE TRIALS COMPLETE
+
+Final iterative results (12 "comments" trials resumed with hunt-code + reviewer-loop iteration):
+- **7 converged_approved** (adk-go-713, celgo-1286, gapic-1715, gapic-1722, gemini-cli-24460, go-containerregistry-2254, go-github-4147)
+- **4 impasse** (adk-go-715, celgo-1301, gemini-cli-24476, gemini-cli-24763)
+- **1 infra fail** (gcloud-14418)
+
+Combined with 9 single-round approvals: **16/20 valid trials approved = 80%.**
+
+Full n=27 breakdown:
+- 16 approved (iterative convergence or single-round "No comments")
+- 4 impasse (iteration didn't converge to approval)
+- 1 infra fail
+- 6 hard no-ops (build/test failure)
+
+**80% active-approval rate clears the 65% prereg improvement threshold.**
+
+Key ablation data:
+- Single-round only: 9/21 = 43% (parity envelope, "do not recommend")
+- With iteration: 16/20 = 80% (above threshold, "worth running")
+- Iteration attribution: 38 percentage points
+
+Language breakdown:
+- Go iterative: 5/7 approved (71%)
+- TS iterative: 1/3 approved (33%) — TS addressing bottleneck limited sample
+- TS single-round: 3/6 approved — retained from earlier run

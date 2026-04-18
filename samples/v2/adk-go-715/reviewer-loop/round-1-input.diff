@@ -1,7 +1,39 @@
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/agent/remoteagent/a2a_agent.go /tmp/refactor-eq-workdir/bb-merged-715/agent/remoteagent/a2a_agent.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/715/agent/remoteagent/a2a_agent.go	2026-04-09 04:30:09
++++ /tmp/refactor-eq-workdir/bb-merged-715/agent/remoteagent/a2a_agent.go	2026-04-17 20:41:54
+@@ -255,8 +255,16 @@
+ 			return
+ 		}
+ 
+-		for a2aEvent, a2aErr := range client.SendStreamingMessage(ctx, req) {
++		streamCtx := context.WithoutCancel(ctx)
++		for a2aEvent, a2aErr := range client.SendStreamingMessage(streamCtx, req) {
++			if ctx.Err() != nil && lastEvent == nil && a2aEvent != nil {
++				lastEvent = a2aEvent
++				return
++			}
+ 			if !processEvent(a2aEvent, a2aErr) {
++				return
++			}
++			if ctx.Err() != nil {
+ 				return
+ 			}
+ 		}
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/adkgo.go /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/adkgo.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/adkgo.go	2026-04-09 04:30:09
++++ /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/adkgo.go	2026-04-17 20:29:43
+@@ -16,6 +16,7 @@
+ package main
+ 
+ import (
++	_ "google.golang.org/adk/cmd/adkgo/internal/deploy/agentengine"
+ 	_ "google.golang.org/adk/cmd/adkgo/internal/deploy/cloudrun"
+ 	"google.golang.org/adk/cmd/adkgo/internal/root"
+ )
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-09 04:30:09
-+++ /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-17 10:07:07
-@@ -56,7 +56,6 @@
++++ /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-17 20:46:47
+@@ -56,15 +56,14 @@
  
  type buildFlags struct {
  	tempDir             string
@@ -9,6 +41,16 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/depl
  	execFile            string
  	dockerfileBuildPath string
  	archivePath         string
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
 @@ -87,7 +86,7 @@
  	Local proxy adding authentication is started. 
  	`,
@@ -85,7 +127,7 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/depl
  // prepareDockerfile creates a temporary Dockerfile which will be executed by agentEngine
  func (f *deployAgentEngineFlags) prepareDockerfile() error {
  	return util.LogStartStop("Preparing Dockerfile",
-@@ -197,17 +175,17 @@
+@@ -197,20 +175,20 @@
  FROM gcr.io/distroless/static-debian11
  
  COPY --from=builder /app/` + f.build.execFile + `  /app/` + f.build.execFile + `
@@ -105,10 +147,28 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/depl
 +				b.WriteString(`, "a2a", "--a2a_agent_url", "` + f.agentEngine.a2aAgentCardURL + `"`)
  			}
 -			if flags.agentEngine.webui {
+-				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"]
+-				`)
 +			if f.agentEngine.webui {
- 				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"]
- 				`)
++				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"`)
  			}
++			b.WriteString("]\n")
+ 			return os.WriteFile(f.build.dockerfileBuildPath, []byte(b.String()), 0o600)
+ 		})
+ }
+@@ -236,10 +214,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
 @@ -330,8 +308,8 @@
  		})
  }

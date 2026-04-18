@@ -1,0 +1,1246 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-1722
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9f26-db59-7283-b4b8-b0c9e69c9ceb
+--------
+user
+# Hunt-code — adversarial review of merged refactor (iterative, full build + tests)
+
+You are adversarially reviewing a merged refactor's code. Find real defects — behavior changes, broken invariants, build failures, test failures, type errors, API-shape issues, spec non-compliance. Style quibbles are out of scope.
+
+## Inputs
+
+- **Repo root**: `/tmp/refactor-eq-workdir/cleanroom-v2/1722/` (current working directory; contains `node_modules`, can build + test)
+- **Goal**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/GOAL.md`
+- **Sharpened spec**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/volley/sharpened-spec-final.md`
+- **Original PR artifact**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/inputs/diff-base-to-test.patch`
+- **Allowed edit set**: `/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/inputs/allowed-files.txt`
+- **C_test baseline**: git HEAD~ in the cleanroom (post-blind-blind merge is current HEAD; C_test is parent).
+
+## What to look for
+
+1. **Build failure.** `npm run build` (or repo-equivalent) must succeed. A build failure is a **blocker**.
+2. **Test failure.** The registered test command must pass. Any failing test is a **blocker**.
+3. **Behavior change.** Observable changes in strings, control flow, return values, side-effects — relative to C_test. Blocker if present.
+4. **Type error.** Unreachable cases under narrowed unions, incorrect casts, API-shape mismatch. Blocker if present.
+5. **Unimplemented claim.** Accepted claims not applied. Warning (reconcile-time blocker would already have caught spec-level defects).
+6. **Out-of-scope edit.** Files outside allowed set or any test file. Blocker.
+7. **Goal drift.** Edits that change the PR's intent relative to C_test. Warning.
+
+## Commands you MUST run
+
+Before writing findings:
+
+```bash
+# The working directory has NO .git — do NOT use git commands.
+# Instead, compare against the cleanroom baseline by reading files directly.
+# The allowed-edit-set file lists which files the implementer was permitted to change.
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/inputs/allowed-files.txt             # files the implementer may have changed
+go build ./...                                         # full build, not just typecheck
+go test ./... -count=1 -short                                          # full registered test command
+```
+
+Record exit codes and tail 50 lines of each in your findings. If either fails, that becomes finding F1 (blocker) automatically.
+
+**Evidence requirement**: For any "claim not applied" or "behavior change" finding, you MUST quote the exact current lines from the file showing the unchanged/problematic code. Do not cite a `git diff` — there is no git history in this directory. If you cannot quote the evidence, do not report the finding.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md`. If zero defects, write:
+
+```
+## Build: PASS
+## Tests: PASS
+No findings.
+```
+
+Otherwise:
+
+```
+## Build: PASS | FAIL
+## Tests: PASS | FAIL
+
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**File**: <path>:<line>
+**What**: <defect>
+**Fix**: <what to change>
+```
+
+Do not edit source.
+mcp startup: no servers
+codex
+I’ll run this as a review task, using the repository and artifact files directly because the worktree has no git history. I’ll first inspect the instructions and allowed files, then run the required build and test commands before writing the gate report.
+exec
+/bin/zsh -lc 'pwd && ls' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/volley/sharpened-spec-final.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/cleanroom-v2/1722
+BUILD
+CHANGES.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+Dockerfile
+FORGE_ALLOWED_FILES.txt
+FORGE_INPUT_DIFF.patch
+GOAL.md
+LICENSE
+Makefile
+README.md
+SECURITY.md
+WORKSPACE
+cmd
+docker-entrypoint.sh
+gapic.sh
+go.mod
+go.sum
+internal
+ exited 1 in 0ms:
+cat: /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/inputs/allowed-files.txt: No such file or directory
+ exited 1 in 0ms:
+sed: /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/volley/sharpened-spec-final.md: No such file or directory
+ succeeded in 0ms:
+# PR #1722
+This PR implements fallback heuristics to deduce resource name templates for unannotated legacy services (like Compute Engine).
+
+It is gated behind a new DynamicResourceHeuristicsFeature flag.
+
+The solution is a two-step process:
+
+1. Scan standard CRUD methods in the API package to learn a vocabulary of valid collection nouns (e.g. projects, topics).
+2. Process URI endpoints against the learned vocabulary to return validated paths as templates.
+
+The learned vocabulary is stored as a new field on the Generator struct so it can be shared across file generation runs without redundant rescans. The implementation includes robust custom verb stripping (e.g. :cancel, :publish), correctly handles interstitial literals like "global", and discards partial matches if variables sitting to the left are not in the vocabulary.
+codex
+Two of the absolute artifact paths in the prompt do not exist on this machine, but the cleanroom contains mirrored files like `GOAL.md`, `FORGE_ALLOWED_FILES.txt`, and `FORGE_INPUT_DIFF.patch`. I’m going to use the in-repo mirrors where necessary and still record the required `cat` path failure in the report context.
+exec
+/bin/zsh -lc "find /Users/junekim/Documents/refactor-equivalence/samples/v2 -maxdepth 4 -path '*gapic-generator-go-1722*' -print" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/pipeline-iterative.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/build-round-1.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/build-round-2.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-1.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/address-round-1-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/test-round-2.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/test-round-1.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-1-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/find_c_test.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/reviewer-loop
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/pr-metadata.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/GOAL.md
+exec
+/bin/zsh -lc 'cat FORGE_ALLOWED_FILES.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "sed -n '1,260p' GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+internal/gengapic/BUILD.bazel
+internal/gengapic/feature.go
+internal/gengapic/generator.go
+internal/gengapic/gengapic.go
+internal/gengapic/gengrpc.go
+internal/gengapic/genrest.go
+internal/gengapic/heuristics.go
+internal/gengapic/testdata/custom_op_init.want
+internal/gengapic/testdata/deprecated_client_init.want
+internal/gengapic/testdata/empty_client_init.want
+internal/gengapic/testdata/foo_client_init.want
+internal/gengapic/testdata/foo_client_init_default.want
+internal/gengapic/testdata/foo_client_init_logging.want
+internal/gengapic/testdata/foo_client_init_metrics.want
+internal/gengapic/testdata/foo_rest_client_init.want
+internal/gengapic/testdata/lro_client_init.want
+internal/gengapic/testdata/method_BidiThings.want
+internal/gengapic/testdata/method_ClientThings.want
+internal/gengapic/testdata/method_GetAnotherThing.want
+internal/gengapic/testdata/method_GetEmptyThing.want
+ succeeded in 0ms:
+# PR #1722
+This PR implements fallback heuristics to deduce resource name templates for unannotated legacy services (like Compute Engine).
+
+It is gated behind a new DynamicResourceHeuristicsFeature flag.
+
+The solution is a two-step process:
+
+1. Scan standard CRUD methods in the API package to learn a vocabulary of valid collection nouns (e.g. projects, topics).
+2. Process URI endpoints against the learned vocabulary to return validated paths as templates.
+
+The learned vocabulary is stored as a new field on the Generator struct so it can be shared across file generation runs without redundant rescans. The implementation includes robust custom verb stripping (e.g. :cancel, :publish), correctly handles interstitial literals like "global", and discards partial matches if variables sitting to the left are not in the vocabulary.
+exec
+/bin/zsh -lc "find /tmp/refactor-eq-workdir -maxdepth 5 -name 'sharpened-spec-final.md' -o -name 'allowed-files.txt'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 4.29s:
+/tmp/refactor-eq-workdir/forge-fastapi/15022/allowed-files.txt
+/tmp/refactor-eq-workdir/forge-fastapi/15022/sharpened-spec-final.md
+/tmp/refactor-eq-workdir/forge-fastapi/14962/allowed-files.txt
+/tmp/refactor-eq-workdir/forge-fastapi/14962/sharpened-spec-final.md
+exec
+/bin/zsh -lc 'find /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722 -maxdepth 3 -type f | sort' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-1.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/find_c_test.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/address-round-1-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/build-round-1.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/build-round-2.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-1-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-1.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2-stdout.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/test-round-1.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/test-round-2.log
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/GOAL.md
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/goal/pr-metadata.json
+/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/pipeline-iterative.log
+ succeeded in 0ms:
+## Build: PASS
+Command: `go build ./...`
+Exit code: 0
+Tail 50 lines:
+
+```text
+```
+
+## Tests: PASS
+Command: `go test ./... -count=1 -short`
+Exit code: 0
+Tail 50 lines:
+
+```text
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.308s
+ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.517s
+ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.700s
+codex
+The previous round had warnings, not blockers. I’m checking whether the current merged state addressed those and looking for any stronger behavioral defects while the mandated build and test commands run.
+exec
+/bin/zsh -lc "nl -ba internal/gengapic/heuristics.go | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "nl -ba internal/gengapic/generator.go | sed -n '88,126p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+    88			mixins:           make(mixins),
+    89			comments:         map[protoiface.MessageV1]string{},
+    90			imports:          map[pbinfo.ImportSpec]bool{},
+    91			customOpServices: map[*descriptorpb.ServiceDescriptorProto]*descriptorpb.ServiceDescriptorProto{},
+    92			aux: &auxTypes{
+    93				iters:           map[string]*iterType{},
+    94				methodToWrapper: map[*descriptorpb.MethodDescriptorProto]operationWrapper{},
+    95				opWrappers:      map[string]operationWrapper{},
+    96			},
+    97		}
+    98	
+    99		// Build and validate the immutable configuration from the CodeGeneratorRequest plugin args.
+   100		cfg, err := configFromRequest(req.Parameter)
+   101		if err != nil {
+   102			return nil, err
+   103		}
+   104	
+   105		// attach config to generator.
+   106		g.cfg = cfg
+   107	
+ succeeded in 0ms:
+     1	// Copyright 2026 Google LLC
+     2	//
+     3	// Licensed under the Apache License, Version 2.0 (the "License");
+     4	// you may not use this file except in compliance with the License.
+     5	// You may obtain a copy of the License at
+     6	//
+     7	//     https://www.apache.org/licenses/LICENSE-2.0
+     8	//
+     9	// Unless required by applicable law or agreed to in writing, software
+    10	// distributed under the License is distributed on an "AS IS" BASIS,
+    11	// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    12	// See the License for the specific language governing permissions and
+    13	// limitations under the License.
+    14	
+    15	package gengapic
+    16	
+    17	import (
+    18		"regexp"
+    19		"strings"
+    20	
+exec
+/bin/zsh -lc "nl -ba internal/gengapic/gengapic.go | sed -n '480,580p'; nl -ba internal/gengapic/gengapic.go | sed -n '890,930p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+   480		p := g.printf
+   481		// Implicit headers are parsed from the google.api.http annotations and are a default
+   482		// behavior for generators per https://google.aip.dev/client-libraries/4222.
+   483		headers := parseImplicitRequestHeaders(m)
+   484		insertHeaders := g.insertImplicitRequestHeaders
+   485	
+   486		// If dynamic routing annotation exists, it supercedes injection of implicit headers
+   487		// as described in https://google.aip.dev/client-libraries/4222.
+   488		if dynamicRequestHeadersExist(m) {
+   489			headers = parseDynamicRequestHeaders(m)
+   490			insertHeaders = g.insertDynamicRequestHeaders
+   491		}
+   492	
+   493		// Has request-based header parameters
+   494		if len(headers) > 0 {
+   495			insertHeaders(m, headers)
+   496			p("")
+   497			switch t {
+   498			case grpc:
+   499				p("hds = append(c.xGoogHeaders, hds...)")
+exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc 'go test ./... -count=1 -short' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 474ms:
+
+ succeeded in 1.22s:
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
+ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
+ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
+?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
+?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
+?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
+codex
+Build and tests both pass. I’m now doing the defect pass against the current source: prioritizing feature gating, generated telemetry behavior, and whether any changes escaped the allowed file set.
+exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/find_c_test.json' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+{"c_test":"8bf0e4f3a8c33f35fc6085e2c29a7758deb56230","c_base":"2dc2d5341a9f7257f6fb186bc481c4ddff1fb442","c_final":"390f6db7d4344409ff534120c16fd3554f9196d8","added_or_modified_tests":[
+  "internal/gengapic/client_init_test.go",
+  "internal/gengapic/gengapic_test.go",
+  "internal/gengapic/gengrpc_test.go",
+  "internal/gengapic/genrest_test.go",
+  "internal/gengapic/heuristics_test.go"
+],"deleted_tests":[
+  ""
+],"commits_scanned":[{"commit":"e84910fa6c3013445b242d793bc76340efb03d93","result":"fail_test"},{"commit":"46359436ec3ce4b0ed5a65f95f8e7ea28a625698","result":"fail_test"},{"commit":"fdd8be140502515a5d1db273d9c0b4c0e477b3ac","result":"fail_test"},{"commit":"2169aac31e25f0d38896bda76dff37da92fad96c","result":"fail_test"},{"commit":"6e54d7712dc0f43697fbf8af54ebc504edf390ae","result":"fail_test"},{"commit":"eb06b3c0eab0a06fe67a873c7542ae7218db7ba9","result":"fail_test"},{"commit":"d84f4706137766557dcd3c046dbb38769dd04a11","result":"fail_test"},{"commit":"6b3f4e146067772d0edf3d57529142cfffd377c0","result":"fail_test"},{"commit":"fd6fc251c2ccb9c1dced559118fcf447a6332fbc","result":"fail_test"},{"commit":"02e939ed31551f253364ea57aaf36109d69a8a11","result":"fail_test"},{"commit":"46c8fa19bcc5e7fdc5f122fea3f55231503787e4","result":"fail_test"},{"commit":"437d63278d90bf031eb8e7650290d7437b9b7155","result":"fail_test"},{"commit":"b8dea2216137c2102cea01b9f6bc35dd157301f8","result":"fail_test"},{"commit":"afebda57ad2ca9df21adc42c84ba688699977cdc","result":"fail_test"},{"commit":"1aa4ee4739e034061cd3ac52831479a97b81d2ac","result":"fail_test"},{"commit":"abe5453750f9137c23255f4d36cf07bd7c02877d","result":"fail_test"},{"commit":"1c871f10ada4d3cce89de9591296d5f37e027993","result":"fail_test"},{"commit":"4d884be5767eb729c2f3c780c737f40343c0227f","result":"fail_test"},{"commit":"ae1b4695c5c562e1d965f20fa887fb991a5bdc65","result":"fail_test"},{"commit":"8bf0e4f3a8c33f35fc6085e2c29a7758deb56230","result":"pass"}]}
+ succeeded in 0ms:
+diff --git a/internal/gengapic/BUILD.bazel b/internal/gengapic/BUILD.bazel
+index 50eea7e8..8f47db4b 100644
+--- a/internal/gengapic/BUILD.bazel
++++ b/internal/gengapic/BUILD.bazel
+@@ -14,6 +14,7 @@ go_library(
+         "gengrpc.go",
+         "genrest.go",
+         "helpers.go",
++        "heuristics.go",
+         "imports.go",
+         "lro.go",
+         "markdown.go",
+@@ -74,6 +75,7 @@ go_test(
+         "gengapic_test.go",
+         "genrest_test.go",
+         "helpers_test.go",
++        "heuristics_test.go",
+         "imports_test.go",
+         "markdown_test.go",
+         "metadata_test.go",
+exec
+/bin/zsh -lc 'rg -n "DynamicResourceHeuristicsFeature|vocabulary|identifyHeuristicTarget|resourceNameField|OpenTelemetryAttributesFeature|WithTelemetryContext" internal/gengapic' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+internal/gengapic/client_init_test.go:141:				OpenTelemetryAttributesFeature: struct{}{},
+internal/gengapic/client_init_test.go:461:			features:    []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:483:			features:    []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:505:			features:    []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:527:			features:    []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:598:			features:    []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:697:			features: []featureID{OpenTelemetryAttributesFeature},
+internal/gengapic/client_init_test.go:766:				g.cfg.featureEnablement[OpenTelemetryAttributesFeature] = struct{}{}
+internal/gengapic/genrest.go:165:	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+internal/gengapic/genrest.go:191:	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+internal/gengapic/gengrpc_test.go:59:		featureEnablement: map[featureID]struct{}{OpenTelemetryAttributesFeature: {}},
+internal/gengapic/gengrpc_test.go:152:		featureEnablement: map[featureID]struct{}{OpenTelemetryAttributesFeature: {}},
+internal/gengapic/generator.go:76:	// learned vocabulary for heuristic path templates
+internal/gengapic/generator.go:77:	vocabulary map[string]bool
+internal/gengapic/generator.go:114:	g.vocabulary = buildHeuristicVocabulary(methods)
+internal/gengapic/gengrpc.go:333:	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+internal/gengapic/gengrpc.go:369:	if g.featureEnabled(OpenTelemetryAttributesFeature) {
+internal/gengapic/heuristics_test.go:197:	vocabulary := map[string]bool{
+internal/gengapic/heuristics_test.go:297:			got, err := identifyHeuristicTarget(m, opts.ProtoReflect().Get(annotations.E_Http.TypeDescriptor()).Message().Interface().(*annotations.HttpRule), vocabulary)
+internal/gengapic/gengapic.go:501:			if g.featureEnabled(OpenTelemetryAttributesFeature) {
+exec
+/bin/zsh -lc "find /tmp/refactor-eq-workdir -maxdepth 4 -type d \\( -name '*1722*' -o -name 'cleanroom-v2' \\) | sort" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 334ms:
+/tmp/refactor-eq-workdir/bb-merged-1722
+/tmp/refactor-eq-workdir/cleanroom-v2
+/tmp/refactor-eq-workdir/cleanroom-v2/1722
+exec
+/bin/zsh -lc 'rg -n "func GetExtension" $(go env GOPATH)/pkg/mod/google.golang.org/protobuf* -g '"'*.go'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.36.11/proto/extension.go:84:func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.36.9/proto/extension.go:84:func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.34.2/proto/extension.go:42:func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.36.8/proto/extension.go:84:func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.36.10/proto/extension.go:84:func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.34.1/proto/extension.go:42:func GetExtension(m Message, xt protoreflect.ExtensionType) interface{} {
+/Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.34.0/proto/extension.go:42:func GetExtension(m Message, xt protoreflect.ExtensionType) interface{} {
+exec
+/bin/zsh -lc "sed -n '84,130p' /Users/junekim/go/pkg/mod/google.golang.org/protobuf@v1.36.11/proto/extension.go" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+func GetExtension(m Message, xt protoreflect.ExtensionType) any {
+	// Treat nil message interface as an empty message; return the default.
+	if m == nil {
+		return xt.InterfaceOf(xt.Zero())
+	}
+
+	return xt.InterfaceOf(m.ProtoReflect().Get(xt.TypeDescriptor()))
+}
+
+// SetExtension stores the value of an extension field.
+// It panics if m is invalid, xt does not extend m, or if type of v
+// is invalid for the specified extension field.
+//
+// The type of the value is dependent on the field type of the extension.
+// For extensions generated by protoc-gen-go, the Go type is as follows:
+//
+//	╔═══════════════════╤═════════════════════════╗
+//	║ Go type           │ Protobuf kind           ║
+//	╠═══════════════════╪═════════════════════════╣
+//	║ bool              │ bool                    ║
+exec
+/bin/zsh -lc "ls -la /tmp/refactor-eq-workdir/bb-merged-1722 | sed -n '1,60p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc 'find /tmp/refactor-eq-workdir/bb-merged-1722 -maxdepth 2 -type f | head -80' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+total 400
+drwxr-xr-x@  29 junekim  wheel    928 Apr 17 22:53 .
+drwxr-xr-x@ 101 junekim  wheel   3232 Apr 17 22:49 ..
+-rw-r--r--@   1 junekim  wheel    149 Mar 31 10:32 .bazeliskrc
+-rw-r--r--@   1 junekim  wheel     75 Mar 31 10:32 .bazelrc
+-rw-r--r--@   1 junekim  wheel      5 Mar 31 10:32 .bazelversion
+drwxr-xr-x@   9 junekim  wheel    288 Mar 31 10:32 .github
+-rw-r--r--@   1 junekim  wheel    443 Mar 31 10:32 .gitignore
+drwxr-xr-x@   4 junekim  wheel    128 Mar 31 10:32 .librarian
+-rw-r--r--@   1 junekim  wheel    877 Mar 31 10:32 BUILD
+-rw-r--r--@   1 junekim  wheel  37212 Mar 31 10:32 CHANGES.md
+-rw-r--r--@   1 junekim  wheel   1981 Mar 31 10:32 CODE_OF_CONDUCT.md
+-rw-r--r--@   1 junekim  wheel   3034 Mar 31 10:32 CONTRIBUTING.md
+-rw-r--r--@   1 junekim  wheel    463 Mar 31 10:32 Dockerfile
+-rw-r--r--@   1 junekim  wheel  11358 Mar 31 10:32 LICENSE
+-rw-r--r--@   1 junekim  wheel   1487 Mar 31 10:32 Makefile
+-rw-r--r--@   1 junekim  wheel  10953 Mar 31 10:32 README.md
+-rw-r--r--@   1 junekim  wheel    329 Mar 31 10:32 SECURITY.md
+-rw-r--r--@   1 junekim  wheel   4556 Mar 31 10:32 WORKSPACE
+drwxr-xr-x@   4 junekim  wheel    128 Mar 31 10:32 cmd
+ succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-merged-1722/CODE_OF_CONDUCT.md
+/tmp/refactor-eq-workdir/bb-merged-1722/gapic.sh
+/tmp/refactor-eq-workdir/bb-merged-1722/.bazelversion
+/tmp/refactor-eq-workdir/bb-merged-1722/rules_go_gapic/go_gapic.bzl
+/tmp/refactor-eq-workdir/bb-merged-1722/rules_go_gapic/go_gapic_pkg.bzl
+/tmp/refactor-eq-workdir/bb-merged-1722/rules_go_gapic/BUILD.bazel
+/tmp/refactor-eq-workdir/bb-merged-1722/go.mod
+/tmp/refactor-eq-workdir/bb-merged-1722/LICENSE
+/tmp/refactor-eq-workdir/bb-merged-1722/renovate.json
+/tmp/refactor-eq-workdir/bb-merged-1722/Dockerfile
+/tmp/refactor-eq-workdir/bb-merged-1722/Makefile
+/tmp/refactor-eq-workdir/bb-merged-1722/WORKSPACE
+/tmp/refactor-eq-workdir/bb-merged-1722/internal/version.go
+/tmp/refactor-eq-workdir/bb-merged-1722/.librarian/state.yaml
+/tmp/refactor-eq-workdir/bb-merged-1722/.librarian/config.yaml
+/tmp/refactor-eq-workdir/bb-merged-1722/go.sum
+/tmp/refactor-eq-workdir/bb-merged-1722/README.md
+/tmp/refactor-eq-workdir/bb-merged-1722/docker-entrypoint.sh
+/tmp/refactor-eq-workdir/bb-merged-1722/.gitignore
+/tmp/refactor-eq-workdir/bb-merged-1722/CONTRIBUTING.md
+exec
+/bin/zsh -lc 'find /tmp/refactor-eq-workdir/cleanroom-v2/1722 -maxdepth 2 -type d -name .git -print' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+
+exec
+/bin/zsh -lc "diff -qr /tmp/refactor-eq-workdir/bb-merged-1722 /tmp/refactor-eq-workdir/cleanroom-v2/1722 | sed -n '1,200p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+Only in /tmp/refactor-eq-workdir/cleanroom-v2/1722: FORGE_ALLOWED_FILES.txt
+Only in /tmp/refactor-eq-workdir/cleanroom-v2/1722: FORGE_INPUT_DIFF.patch
+Only in /tmp/refactor-eq-workdir/cleanroom-v2/1722: GOAL.md
+Files /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go and /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go differ
+Files /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go and /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go differ
+Files /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go and /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go differ
+exec
+/bin/zsh -lc "find /tmp/refactor-eq-workdir -maxdepth 3 -type d -name '*8bf0e4f*' -o -name '*c_test*' -o -name '*baseline*' | sort" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-codex-1286/common/doc_test.go
+/tmp/refactor-eq-workdir/bb-codex-24489/memory-tests/baselines.json
+/tmp/refactor-eq-workdir/bb-merged-24489/memory-tests/baselines.json
+/tmp/refactor-eq-workdir/bb-opus-1286/common/doc_test.go
+/tmp/refactor-eq-workdir/bb-opus-24489/memory-tests/baselines.json
+/tmp/refactor-eq-workdir/cel-go/common/doc_test.go
+/tmp/refactor-eq-workdir/cleanroom-test/common/doc_test.go
+/tmp/refactor-eq-workdir/fastapi/docs_src/async_tests
+/tmp/refactor-eq-workdir/google-cloud-go/auth/auth_token_async_test.go
+/tmp/refactor-eq-workdir/google-cloud-go/bigtable/gc_test.go
+/tmp/refactor-eq-workdir/google-cloud-go/pubsub/topic_test.go
+/tmp/refactor-eq-workdir/google-cloud-go/spanner/oc_test.go
+/tmp/refactor-eq-workdir/google-cloud-go/storage/hmac_test.go
+/tmp/refactor-eq-workdir/google-go-github/github/actions_oidc_test.go
+/tmp/refactor-eq-workdir/google-go-github/github/repos_traffic_test.go
+/tmp/refactor-eq-workdir/googleapis-google-cloud-go/auth/auth_token_async_test.go
+/tmp/refactor-eq-workdir/googleapis-google-cloud-go/bigtable/gc_test.go
+/tmp/refactor-eq-workdir/googleapis-google-cloud-go/pubsub/topic_test.go
+/tmp/refactor-eq-workdir/googleapis-google-cloud-go/spanner/oc_test.go
+/tmp/refactor-eq-workdir/googleapis-google-cloud-go/storage/hmac_test.go
+exec
+/bin/zsh -lc "diff -u /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go | sed -n '1,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "diff -u /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/exec
+/bin/zsh -lc "diff -u /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+--- /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go	2026-04-17 22:52:52
++++ /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go	2026-03-31 10:32:08
+@@ -105,15 +105,13 @@
+ 	// attach config to generator.
+ 	g.cfg = cfg
+ 
+-	if g.featureEnabled(DynamicResourceHeuristicsFeature) {
+-		var methods []*descriptorpb.MethodDescriptorProto
+-		for _, f := range req.GetProtoFile() {
+-			for _, s := range f.GetService() {
+-				methods = append(methods, s.GetMethod()...)
+-			}
++	var methods []*descriptorpb.MethodDescriptorProto
++	for _, f := range req.GetProtoFile() {
++		for _, s := range f.GetService() {
++			methods = append(methods, s.GetMethod()...)
+ 		}
+-		g.vocabulary = buildHeuristicVocabulary(methods)
+ 	}
++	g.vocabulary = buildHeuristicVocabulary(methods)
+ succeeded in 0ms:
+--- /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go	2026-04-17 22:53:21
++++ /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go	2026-03-31 10:32:08
+@@ -45,14 +45,17 @@
+ func buildHeuristicVocabulary(methods []*descriptorpb.MethodDescriptorProto) map[string]bool {
+ 	resourceCollections := make(map[string]bool)
+ 
+-	// Seed standard infrastructure resource collections.
++	// Step 1: Seed standard infrastructure resource collections.
+ 	resourceCollections["projects"] = true
+ 	resourceCollections["locations"] = true
+ 	resourceCollections["folders"] = true
+ 	resourceCollections["organizations"] = true
+ 	resourceCollections["billingAccounts"] = true
+ 
+-	// Vocabulary is learned only from CRUD-like method names.
++	// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++	// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++	// often have path literals that are random verbs or actions, not resource collections.
++	// If we learned from those, we might pollute our vocabulary with non-resource nouns.
+ 	discoveryExactVerbs := map[string]struct{}{
+ succeeded in 0ms:
+--- /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go	2026-04-17 22:52:58
++++ /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go	2026-03-31 10:32:08
+@@ -501,7 +501,35 @@
+ 			if g.featureEnabled(OpenTelemetryAttributesFeature) {
+ 				resTarget := g.resourceNameField(m)
+ 				if resTarget != nil {
+-					g.insertResourceNameTelemetryContext(m, resTarget)
++					p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
++
++					// For Standard APIs (AIP-122 compliant), for both gRPC and HTTP transports,
++					// the expression fieldGetter(resField) returns an accessor for the full
++					// canonical resource name (e.g., "projects/p/secrets/s"). For non-compliant
++					// APIs (missing the resource_reference annotation), an empty string is returned.
++
++					// Prepend the service host if available
++					var getters []string
++					for _, f := range resTarget.FieldNames {
++						getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++					}
++					gettersStr := strings.Join(getters, ", ")
+codex
+The current cleanroom still has the same unimplemented refactor claims visible in source. I’m going to write the requested round-2 gate report with build/test pass status and the exact current-line evidence for each warning.
+exec
+/bin/zsh -lc 'ls -l /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md 2>/dev/null || true' in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+## Build: PASS
+Command: `go build ./...`
+Exit code: 0
+Tail 50 lines:
+
+```text
+```
+
+## Tests: PASS
+Command: `go test ./... -count=1 -short`
+Exit code: 0
+Tail 50 lines:
+
+```text
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
+ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
+ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
+?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
+?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
+?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
+```
+
+## Finding F1 — Vocabulary construction is still unconditional
+**Severity**: warning
+**File**: internal/gengapic/generator.go:108
+**What**: The accepted feature-gating claim is not applied. The method scan and `buildHeuristicVocabulary(methods)` assignment still run for every generator, even when `DynamicResourceHeuristicsFeature` is disabled. Current source:
+
+```go
+   108		var methods []*descriptorpb.MethodDescriptorProto
+   109		for _, f := range req.GetProtoFile() {
+   110			for _, s := range f.GetService() {
+   111				methods = append(methods, s.GetMethod()...)
+   112			}
+   113		}
+   114		g.vocabulary = buildHeuristicVocabulary(methods)
+```
+
+**Fix**: Wrap lines 108-114 in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }` so the vocabulary remains nil and no scan is performed unless the heuristic feature is enabled.
+
+## Finding F2 — Resource-name telemetry emission was not centralized
+**Severity**: warning
+**File**: internal/gengapic/gengapic.go:512
+**What**: The accepted cleanup claim to extract duplicated resource-name telemetry emission into one helper is not applied. The gRPC branch still builds getters, host, escaped format, output lines, and imports inline:
+
+```go
+   512						var getters []string
+   513						for _, f := range resTarget.FieldNames {
+   514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
+   515						}
+   516						gettersStr := strings.Join(getters, ", ")
+```
+
+The REST branch repeats the same body:
+
+```go
+   548						var getters []string
+   549						for _, f := range resTarget.FieldNames {
+   550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
+   551						}
+   552						gettersStr := strings.Join(getters, ", ")
+```
+
+and repeats the emission/import block:
+
+```go
+   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
+   561						if host != "" {
+   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
+   563						} else {
+   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
+   565						}
+   566						p("}")
+   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
+   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
+```
+
+**Fix**: Add a private helper in `gengapic.go` for the shared `resource_name` telemetry formatting/emission/import logic and call it from both transport branches after `resourceNameField` returns a non-nil target.
+
+## Finding F3 — `resourceNameField` documentation is still stale
+**Severity**: warning
+**File**: internal/gengapic/gengapic.go:906
+**What**: The accepted documentation claim is not applied. The comment still describes the old string-returning behavior and says the function returns an empty string, but the function now returns `*heuristicTarget` and can infer a target from HTTP paths when `DynamicResourceHeuristicsFeature` is enabled. Current source:
+
+```go
+   906	// resourceNameField returns the name of the field in the input message
+   907	// that carries a google.api.resource_reference annotation.
+   908	// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
+   909	// If no input type or associated attributes are found, it returns an empty string.
+   910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
+```
+
+**Fix**: Update the comment to describe the `*heuristicTarget` return value, annotation-first behavior, HTTP path tie-breaking, nil result, and the dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
+
+## Finding F4 — Tutorial-style heuristic comments remain
+**Severity**: warning
+**File**: internal/gengapic/heuristics.go:55
+**What**: The accepted comment cleanup claim is not applied. `buildHeuristicVocabulary` still contains tutorial-style step comments and long explanatory prose instead of concise invariants. Current source:
+
+```go
+    55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
+    56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
+    57		// often have path literals that are random verbs or actions, not resource collections.
+    58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
+```
+
+and:
+
+```go
+    78		// Step 3: Walk methods and learn valid resource collection nouns.
+    79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
+    80		// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
+    81		// extracting the static literal nouns that sit immediately before a `{variable}`
+    82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
+    83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
+```
+
+**Fix**: Replace the step-by-step prose with durable invariant comments: learn only from CRUD-like method names, inspect every HTTP pattern, collect only literals immediately before variables, strip literal custom verbs, and ignore version segments.
+apply_patch(auto_approved=true) exited 0 in 28ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+file update:
+diff --git a/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1525c8192b37b1ea30d561c9fb92131f2b136a5b
+--- /dev/null
++++ b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+@@ -0,0 +1,124 @@
++## Build: PASS
++Command: `go build ./...`
++Exit code: 0
++Tail 50 lines:
++
++```text
++```
++
++## Tests: PASS
++Command: `go test ./... -count=1 -short`
++Exit code: 0
++Tail 50 lines:
++
++```text
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
++ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
++ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
++?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
++?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
++?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
++```
++
++## Finding F1 — Vocabulary construction is still unconditional
++**Severity**: warning
++**File**: internal/gengapic/generator.go:108
++**What**: The accepted feature-gating claim is not applied. The method scan and `buildHeuristicVocabulary(methods)` assignment still run for every generator, even when `DynamicResourceHeuristicsFeature` is disabled. Current source:
++
++```go
++   108		var methods []*descriptorpb.MethodDescriptorProto
++   109		for _, f := range req.GetProtoFile() {
++   110			for _, s := range f.GetService() {
++   111				methods = append(methods, s.GetMethod()...)
++   112			}
++   113		}
++   114		g.vocabulary = buildHeuristicVocabulary(methods)
++```
++
++**Fix**: Wrap lines 108-114 in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }` so the vocabulary remains nil and no scan is performed unless the heuristic feature is enabled.
++
++## Finding F2 — Resource-name telemetry emission was not centralized
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:512
++**What**: The accepted cleanup claim to extract duplicated resource-name telemetry emission into one helper is not applied. The gRPC branch still builds getters, host, escaped format, output lines, and imports inline:
++
++```go
++   512						var getters []string
++   513						for _, f := range resTarget.FieldNames {
++   514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   515						}
++   516						gettersStr := strings.Join(getters, ", ")
++```
++
++The REST branch repeats the same body:
++
++```go
++   548						var getters []string
++   549						for _, f := range resTarget.FieldNames {
++   550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   551						}
++   552						gettersStr := strings.Join(getters, ", ")
++```
++
++and repeats the emission/import block:
++
++```go
++   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
++   561						if host != "" {
++   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++   563						} else {
++   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++   565						}
++   566						p("}")
++   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
++   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++```
++
++**Fix**: Add a private helper in `gengapic.go` for the shared `resource_name` telemetry formatting/emission/import logic and call it from both transport branches after `resourceNameField` returns a non-nil target.
++
++## Finding F3 — `resourceNameField` documentation is still stale
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:906
++**What**: The accepted documentation claim is not applied. The comment still describes the old string-returning behavior and says the function returns an empty string, but the function now returns `*heuristicTarget` and can infer a target from HTTP paths when `DynamicResourceHeuristicsFeature` is enabled. Current source:
++
++```go
++   906	// resourceNameField returns the name of the field in the input message
++   907	// that carries a google.api.resource_reference annotation.
++   908	// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
++   909	// If no input type or associated attributes are found, it returns an empty string.
++   910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
++```
++
++**Fix**: Update the comment to describe the `*heuristicTarget` return value, annotation-first behavior, HTTP path tie-breaking, nil result, and the dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
++
++## Finding F4 — Tutorial-style heuristic comments remain
++**Severity**: warning
++**File**: internal/gengapic/heuristics.go:55
++**What**: The accepted comment cleanup claim is not applied. `buildHeuristicVocabulary` still contains tutorial-style step comments and long explanatory prose instead of concise invariants. Current source:
++
++```go
++    55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++    56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++    57		// often have path literals that are random verbs or actions, not resource collections.
++    58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++```
++
++and:
++
++```go
++    78		// Step 3: Walk methods and learn valid resource collection nouns.
++    79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
++    80		// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
++    81		// extracting the static literal nouns that sit immediately before a `{variable}`
++    82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
++    83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++```
++
++**Fix**: Replace the step-by-step prose with durable invariant comments: learn only from CRUD-like method names, inspect every HTTP pattern, collect only literals immediately before variables, strip literal custom verbs, and ignore version segments.
+
+file update:
+diff --git a/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1525c8192b37b1ea30d561c9fb92131f2b136a5b
+--- /dev/null
++++ b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+@@ -0,0 +1,124 @@
++## Build: PASS
++Command: `go build ./...`
++Exit code: 0
++Tail 50 lines:
++
++```text
++```
++
++## Tests: PASS
++Command: `go test ./... -count=1 -short`
++Exit code: 0
++Tail 50 lines:
++
++```text
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
++ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
++ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
++?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
++?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
++?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
++```
++
++## Finding F1 — Vocabulary construction is still unconditional
++**Severity**: warning
++**File**: internal/gengapic/generator.go:108
++**What**: The accepted feature-gating claim is not applied. The method scan and `buildHeuristicVocabulary(methods)` assignment still run for every generator, even when `DynamicResourceHeuristicsFeature` is disabled. Current source:
++
++```go
++   108		var methods []*descriptorpb.MethodDescriptorProto
++   109		for _, f := range req.GetProtoFile() {
++   110			for _, s := range f.GetService() {
++   111				methods = append(methods, s.GetMethod()...)
++   112			}
++   113		}
++   114		g.vocabulary = buildHeuristicVocabulary(methods)
++```
++
++**Fix**: Wrap lines 108-114 in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }` so the vocabulary remains nil and no scan is performed unless the heuristic feature is enabled.
++
++## Finding F2 — Resource-name telemetry emission was not centralized
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:512
++**What**: The accepted cleanup claim to extract duplicated resource-name telemetry emission into one helper is not applied. The gRPC branch still builds getters, host, escaped format, output lines, and imports inline:
++
++```go
++   512						var getters []string
++   513						for _, f := range resTarget.FieldNames {
++   514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   515						}
++   516						gettersStr := strings.Join(getters, ", ")
++```
++
++The REST branch repeats the same body:
++
++```go
++   548						var getters []string
++   549						for _, f := range resTarget.FieldNames {
++   550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   551						}
++   552						gettersStr := strings.Join(getters, ", ")
++```
++
++and repeats the emission/import block:
++
++```go
++   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
++   561						if host != "" {
++   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++   563						} else {
++   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++   565						}
++   566						p("}")
++   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
++   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++```
++
++**Fix**: Add a private helper in `gengapic.go` for the shared `resource_name` telemetry formatting/emission/import logic and call it from both transport branches after `resourceNameField` returns a non-nil target.
++
++## Finding F3 — `resourceNameField` documentation is still stale
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:906
++**What**: The accepted documentation claim is not applied. The comment still describes the old string-returning behavior and says the function returns an empty string, but the function now returns `*heuristicTarget` and can infer a target from HTTP paths when `DynamicResourceHeuristicsFeature` is enabled. Current source:
++
++```go
++   906	// resourceNameField returns the name of the field in the input message
++   907	// that carries a google.api.resource_reference annotation.
++   908	// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
++   909	// If no input type or associated attributes are found, it returns an empty string.
++   910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
++```
++
++**Fix**: Update the comment to describe the `*heuristicTarget` return value, annotation-first behavior, HTTP path tie-breaking, nil result, and the dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
++
++## Finding F4 — Tutorial-style heuristic comments remain
++**Severity**: warning
++**File**: internal/gengapic/heuristics.go:55
++**What**: The accepted comment cleanup claim is not applied. `buildHeuristicVocabulary` still contains tutorial-style step comments and long explanatory prose instead of concise invariants. Current source:
++
++```go
++    55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++    56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++    57		// often have path literals that are random verbs or actions, not resource collections.
++    58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++```
++
++and:
++
++```go
++    78		// Step 3: Walk methods and learn valid resource collection nouns.
++    79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
++    80		// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
++    81		// extracting the static literal nouns that sit immediately before a `{variable}`
++    82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
++    83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++```
++
++**Fix**: Replace the step-by-step prose with durable invariant comments: learn only from CRUD-like method names, inspect every HTTP pattern, collect only literals immediately before variables, strip literal custom verbs, and ignore version segments.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md" in /tmp/refactor-eq-workdir/cleanroom-v2/1722/ succeeded in 0ms:
+## Build: PASS
+Command: `go build ./...`
+Exit code: 0
+Tail 50 lines:
+
+```text
+```
+
+## Tests: PASS
+Command: `go test ./... -count=1 -short`
+Exit code: 0
+Tail 50 lines:
+
+```text
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
+?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
+?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
+ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
+ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
+ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
+file update:
+diff --git a/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1525c8192b37b1ea30d561c9fb92131f2b136a5b
+--- /dev/null
++++ b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+@@ -0,0 +1,124 @@
++## Build: PASS
++Command: `go build ./...`
++Exit code: 0
++Tail 50 lines:
++
++```text
++```
++
++## Tests: PASS
++Command: `go test ./... -count=1 -short`
++Exit code: 0
++Tail 50 lines:
++
++```text
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
++ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
++ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
++?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
++?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
++?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
++```
++
++## Finding F1 — Vocabulary construction is still unconditional
++**Severity**: warning
++**File**: internal/gengapic/generator.go:108
++**What**: The accepted feature-gating claim is not applied. The method scan and `buildHeuristicVocabulary(methods)` assignment still run for every generator, even when `DynamicResourceHeuristicsFeature` is disabled. Current source:
++
++```go
++   108		var methods []*descriptorpb.MethodDescriptorProto
++   109		for _, f := range req.GetProtoFile() {
++   110			for _, s := range f.GetService() {
++   111				methods = append(methods, s.GetMethod()...)
++   112			}
++   113		}
++   114		g.vocabulary = buildHeuristicVocabulary(methods)
++```
++
++**Fix**: Wrap lines 108-114 in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }` so the vocabulary remains nil and no scan is performed unless the heuristic feature is enabled.
++
++## Finding F2 — Resource-name telemetry emission was not centralized
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:512
++**What**: The accepted cleanup claim to extract duplicated resource-name telemetry emission into one helper is not applied. The gRPC branch still builds getters, host, escaped format, output lines, and imports inline:
++
++```go
++   512						var getters []string
++   513						for _, f := range resTarget.FieldNames {
++   514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   515						}
++   516						gettersStr := strings.Join(getters, ", ")
++```
++
++The REST branch repeats the same body:
++
++```go
++   548						var getters []string
++   549						for _, f := range resTarget.FieldNames {
++   550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   551						}
++   552						gettersStr := strings.Join(getters, ", ")
++```
++
++and repeats the emission/import block:
++
++```go
++   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
++   561						if host != "" {
++   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++   563						} else {
++   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++   565						}
++   566						p("}")
++   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
++   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++```
++
++**Fix**: Add a private helper in `gengapic.go` for the shared `resource_name` telemetry formatting/emission/import logic and call it from both transport branches after `resourceNameField` returns a non-nil target.
++
++## Finding F3 — `resourceNameField` documentation is still stale
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:906
++**What**: The accepted documentation claim is not applied. The comment still describes the old string-returning behavior and says the function returns an empty string, but the function now returns `*heuristicTarget` and can infer a target from HTTP paths when `DynamicResourceHeuristicsFeature` is enabled. Current source:
++
++```go
++   906	// resourceNameField returns the name of the field in the input message
++   907	// that carries a google.api.resource_reference annotation.
++   908	// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
++   909	// If no input type or associated attributes are found, it returns an empty string.
++   910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
++```
++
++**Fix**: Update the comment to describe the `*heuristicTarget` return value, annotation-first behavior, HTTP path tie-breaking, nil result, and the dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
++
++## Finding F4 — Tutorial-style heuristic comments remain
++**Severity**: warning
++**File**: internal/gengapic/heuristics.go:55
++**What**: The accepted comment cleanup claim is not applied. `buildHeuristicVocabulary` still contains tutorial-style step comments and long explanatory prose instead of concise invariants. Current source:
++
++```go
++    55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++    56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++    57		// often have path literals that are random verbs or actions, not resource collections.
++    58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++```
++
++and:
++
++```go
++    78		// Step 3: Walk methods and learn valid resource collection nouns.
++    79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
++    80		// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
++    81		// extracting the static literal nouns that sit immediately before a `{variable}`
++    82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
++    83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++```
++
++**Fix**: Replace the step-by-step prose with durable invariant comments: learn only from CRUD-like method names, inspect every HTTP pattern, collect only literals immediately before variables, strip literal custom verbs, and ignore version segments.
+
+codex
+Wrote the round-2 review report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md)
+
+Results:
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: PASS, exit code 0
+- Findings: 4 warnings for unimplemented accepted cleanup/gating claims, with exact current-line evidence quoted.
+
+I did not edit source files. Note: the prompted absolute `inputs/allowed-files.txt` and `volley/sharpened-spec-final.md` paths were missing on disk, so I used the cleanroom mirror `FORGE_ALLOWED_FILES.txt` and available goal/current source context.
+file update:
+diff --git a/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1525c8192b37b1ea30d561c9fb92131f2b136a5b
+--- /dev/null
++++ b/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md
+@@ -0,0 +1,124 @@
++## Build: PASS
++Command: `go build ./...`
++Exit code: 0
++Tail 50 lines:
++
++```text
++```
++
++## Tests: PASS
++Command: `go test ./... -count=1 -short`
++Exit code: 0
++Tail 50 lines:
++
++```text
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_cli	[no test files]
++?   	github.com/googleapis/gapic-generator-go/cmd/protoc-gen-go_gapic	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/gencli	0.253s
++ok  	github.com/googleapis/gapic-generator-go/internal/gengapic	0.420s
++ok  	github.com/googleapis/gapic-generator-go/internal/grpc_service_config	0.661s
++?   	github.com/googleapis/gapic-generator-go/internal/license	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/pbinfo	0.535s
++?   	github.com/googleapis/gapic-generator-go/internal/printer	[no test files]
++ok  	github.com/googleapis/gapic-generator-go/internal/snippets	0.795s
++?   	github.com/googleapis/gapic-generator-go/internal/snippets/metadata	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/testing/sample	[no test files]
++?   	github.com/googleapis/gapic-generator-go/internal/txtdiff	[no test files]
++```
++
++## Finding F1 — Vocabulary construction is still unconditional
++**Severity**: warning
++**File**: internal/gengapic/generator.go:108
++**What**: The accepted feature-gating claim is not applied. The method scan and `buildHeuristicVocabulary(methods)` assignment still run for every generator, even when `DynamicResourceHeuristicsFeature` is disabled. Current source:
++
++```go
++   108		var methods []*descriptorpb.MethodDescriptorProto
++   109		for _, f := range req.GetProtoFile() {
++   110			for _, s := range f.GetService() {
++   111				methods = append(methods, s.GetMethod()...)
++   112			}
++   113		}
++   114		g.vocabulary = buildHeuristicVocabulary(methods)
++```
++
++**Fix**: Wrap lines 108-114 in `if g.featureEnabled(DynamicResourceHeuristicsFeature) { ... }` so the vocabulary remains nil and no scan is performed unless the heuristic feature is enabled.
++
++## Finding F2 — Resource-name telemetry emission was not centralized
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:512
++**What**: The accepted cleanup claim to extract duplicated resource-name telemetry emission into one helper is not applied. The gRPC branch still builds getters, host, escaped format, output lines, and imports inline:
++
++```go
++   512						var getters []string
++   513						for _, f := range resTarget.FieldNames {
++   514							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   515						}
++   516						gettersStr := strings.Join(getters, ", ")
++```
++
++The REST branch repeats the same body:
++
++```go
++   548						var getters []string
++   549						for _, f := range resTarget.FieldNames {
++   550							getters = append(getters, fmt.Sprintf("req%s", fieldGetter(f)))
++   551						}
++   552						gettersStr := strings.Join(getters, ", ")
++```
++
++and repeats the emission/import block:
++
++```go
++   560						escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
++   561						if host != "" {
++   562							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++   563						} else {
++   564							p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++   565						}
++   566						p("}")
++   567						g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
++   568						g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
++```
++
++**Fix**: Add a private helper in `gengapic.go` for the shared `resource_name` telemetry formatting/emission/import logic and call it from both transport branches after `resourceNameField` returns a non-nil target.
++
++## Finding F3 — `resourceNameField` documentation is still stale
++**Severity**: warning
++**File**: internal/gengapic/gengapic.go:906
++**What**: The accepted documentation claim is not applied. The comment still describes the old string-returning behavior and says the function returns an empty string, but the function now returns `*heuristicTarget` and can infer a target from HTTP paths when `DynamicResourceHeuristicsFeature` is enabled. Current source:
++
++```go
++   906	// resourceNameField returns the name of the field in the input message
++   907	// that carries a google.api.resource_reference annotation.
++   908	// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
++   909	// If no input type or associated attributes are found, it returns an empty string.
++   910	func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
++```
++
++**Fix**: Update the comment to describe the `*heuristicTarget` return value, annotation-first behavior, HTTP path tie-breaking, nil result, and the dynamic heuristic fallback guarded by `DynamicResourceHeuristicsFeature`.
++
++## Finding F4 — Tutorial-style heuristic comments remain
++**Severity**: warning
++**File**: internal/gengapic/heuristics.go:55
++**What**: The accepted comment cleanup claim is not applied. `buildHeuristicVocabulary` still contains tutorial-style step comments and long explanatory prose instead of concise invariants. Current source:
++
++```go
++    55		// Step 2: Define "CRUD-like" patterns for vocabulary learning.
++    56		// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
++    57		// often have path literals that are random verbs or actions, not resource collections.
++    58		// If we learned from those, we might pollute our vocabulary with non-resource nouns.
++```
++
++and:
++
++```go
++    78		// Step 3: Walk methods and learn valid resource collection nouns.
++    79		// By "learn" and "valid", we mean finding standard verbs (Get, List, Create),
++    80		// reading their paths (e.g., `/v1/projects/{project}/topics/{topic}`), and
++    81		// extracting the static literal nouns that sit immediately before a `{variable}`
++    82		// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
++    83		// validate unannotated field patterns later, in IdentifyHeuristicTarget.
++```
++
++**Fix**: Replace the step-by-step prose with durable invariant comments: learn only from CRUD-like method names, inspect every HTTP pattern, collect only literals immediately before variables, strip literal custom verbs, and ignore version segments.
+
+tokens used
+44,694
+Wrote the round-2 review report to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gapic-generator-go-1722/gates/hunt-code-round-2.md)
+
+Results:
+- `go build ./...`: PASS, exit code 0
+- `go test ./... -count=1 -short`: PASS, exit code 0
+- Findings: 4 warnings for unimplemented accepted cleanup/gating claims, with exact current-line evidence quoted.
+
+I did not edit source files. Note: the prompted absolute `inputs/allowed-files.txt` and `volley/sharpened-spec-final.md` paths were missing on disk, so I used the cleanroom mirror `FORGE_ALLOWED_FILES.txt` and available goal/current source context.

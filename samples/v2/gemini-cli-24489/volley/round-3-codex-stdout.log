@@ -1,0 +1,1099 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9de9-e914-7b51-980b-820ddadcbeac
+--------
+user
+# Volley — goal-anchored refactor spec
+
+You are sharpening a refactor spec into specific, testable claims against a concrete goal. Do not edit code. Produce a markdown document.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md` — concatenation of: linked issue(s) title + body (if any), PR title, PR body. This is what the PR is *trying* to accomplish.
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch` — the first-pass implementation that made tests pass. A working draft, not the final shape.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt` — source files changed from C_base to C_test (post-exclusion). You may only propose edits to files in this set.
+- **Cleanroom source tree** rooted at `/tmp/refactor-eq-workdir/cleanroom-v2/24489/` — the repo at C_test. You may grep it for patterns, imports, and idioms.
+
+Read all inputs. You may grep the wider codebase.
+
+## Task
+
+Produce a sharpened list of **prescriptive, bounded refactor claims** that, if applied, would move the artifact closer to a cleaner expression of the goal — without changing behavior.
+
+"Closer to the goal" means:
+- The implementation expresses the intent of the goal more directly (less accidental structure, fewer indirections that don't serve the goal).
+- The code is more idiomatic to the surrounding codebase at C_test.
+- Accidental complexity added during the first-pass (helper duplication, stray dead code, over-abstracted for one call site, unnecessary state) is removed.
+
+Each claim must be:
+- **Specific**: names a file, a function/block, and the change.
+- **Bounded**: one independent change, applicable without forward reference to later claims.
+- **Testable against the existing suite**: behavior preserved; the full test suite at C_test continues to pass.
+- **Justified against the goal**: one sentence on *which goal aspect* this clarifies and *why* it reduces complexity.
+- **Within scope**: only touches files in `allowed-files.txt`; never any `*.test.ts`, `*.test.tsx`, or other test files.
+
+**Empty Accepted Claims is permitted.** If the artifact is already a clean expression of the goal and no prescriptive changes are warranted, say so explicitly. Do not invent claims.
+
+List rejected candidate claims with reasons (e.g., "would cross a public API boundary", "out of allowed edit set", "would change observable behavior in test X").
+
+## Output
+
+Write to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md`, where N is passed in the task environment.
+
+Format:
+
+```
+## Accepted Claims
+
+### C1 — <title>
+**File**: <path>:<line>
+**Change**: <prescriptive description>
+**Goal link**: <which aspect of the goal this clarifies>
+**Justification**: <one sentence>
+
+### C2 — ...
+
+## Rejected
+
+- <claim candidate>: <reason>
+```
+
+No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the goal, draft patch, allowed file list, and the touched source so the claims are tied to the actual implementation rather than guessed from the diff.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+.github/workflows/chained_e2e.yml
+.github/workflows/evals-nightly.yml
+.github/workflows/perf-nightly.yml
+.gitignore
+GEMINI.md
+evals/answer-vs-act.eval.ts
+evals/app-test-helper.ts
+evals/ask_user.eval.ts
+evals/automated-tool-use.eval.ts
+evals/cli_help_delegation.eval.ts
+evals/component-test-helper.ts
+evals/concurrency-safety.eval.ts
+evals/edit-locations-eval.eval.ts
+evals/frugalReads.eval.ts
+evals/frugalSearch.eval.ts
+evals/generalist_agent.eval.ts
+evals/generalist_delegation.eval.ts
+evals/gitRepo.eval.ts
+evals/grep_search_functionality.eval.ts
+evals/hierarchical_memory.eval.ts
+ succeeded in 0ms:
+# PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
+
+## PR body
+
+## Summary
+
+Refactors specialized subagent tools into a single, unified `invoke_agent` tool and updates the Policy Engine to support virtual tool aliases for subagents.
+
+## Details
+
+- **Unified Tooling**: Introduced `invoke_agent` in `packages/core` as the standard mechanism for subagent delegation, replacing the previous 1:1 tool-to-agent mapping.
+- **Policy Engine Enhancement**: Updated `PolicyEngine` to automatically treat the `agent_name` argument of `invoke_agent` as a virtual tool name. This ensures that existing safety policies (e.g., denying `codebase_investigator`) remain functional without requiring rule updates.
+- **Prompt Refactoring**: Updated both modern and legacy prompt snippets to instruct the model to use `invoke_agent`.
+- **Testing**: Added unit tests in `policy-engine.test.ts` for virtual alias matching and updated `subagents.eval.ts` to verify successful delegation via the new unified tool.
+- **Documentation**: Updated `subagents.md` and `policy-engine.md` to reflect the new invocation pattern and policy syntax.
+
+## Related Issues
+
+Related to the effort of simplifying the main agent's toolset and improving context efficiency.
+
+ succeeded in 0ms:
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index 94215e4795..fe87fb1d5d 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,8 +335,6 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
+-          # Only run always passes behavioral tests.
+-          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index fbb770ac84..9acc1de050 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,18 +5,10 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+codex
+The allowed set is broad and the patch includes unrelated eval/workflow churn, so I’m narrowing on the files that express the stated goal: unified subagent invocation, policy aliasing, prompts, and docs.
+exec
+/bin/zsh -lc 'rg -n "invoke_agent|subagent|agent_name|codebase_investigator|virtual|PolicyEngine|Subagent|sub-agent|agent tool" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+427:     name: 'should delegate to cli_help agent for subagent creation questions',
+459:-  createPolicyEngineConfig,
+504:-    const policyEngineConfig = await createPolicyEngineConfig(
+1133:diff --git a/evals/subagents.eval.ts b/evals/subagents.eval.ts
+1135:--- a/evals/subagents.eval.ts
+1136:+++ b/evals/subagents.eval.ts
+1148:+ * Helper to verify that a specific subagent was successfully invoked via the unified tool.
+1150:+async function expectSubagentCall(rig: TestRig, agentName: string) {
+1157:+        return parsed.agent_name === agentName;
+1166:+ * Helper to check if a subagent (either via unified tool or direct name) was called.
+1168:+function isSubagentCalled(toolLogs: any[], agentName: string): boolean {
+1173:+        return args.agent_name === agentName;
+1185:@@ -45,8 +81,6 @@ describe('subagent eval test cases', () => {
+1186:    * This tests the system prompt's subagent specific clauses.
+1194:@@ -62,7 +96,7 @@ describe('subagent eval test cases', () => {
+1199:+      await expectSubagentCall(rig, TEST_AGENTS.DOCS_AGENT.name);
+1203:@@ -71,8 +105,6 @@ describe('subagent eval test cases', () => {
+1204:    * subagents are available. This helps catch orchestration overuse.
+1212:@@ -99,14 +131,10 @@ describe('subagent eval test cases', () => {
+1222:+      expect(isSubagentCalled(toolLogs, TEST_AGENTS.DOCS_AGENT.name)).toBe(
+exec
+/bin/zsh -lc "rg --files | rg '(subagents|policy-engine)\\.md"'$|packages/core/src/(agents|policy|prompts|tools)'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc 'rg -n "invoke_agent|subagent|agent_name|codebase_investigator|virtual|PolicyEngine" packages/core/src evals/subagents.eval.ts packages/test-utils/src/fixtures/agents.ts' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+evals/subagents.eval.ts:18: * Helper to verify that a specific subagent was successfully invoked via the unified tool.
+evals/subagents.eval.ts:27:        return parsed.agent_name === agentName;
+evals/subagents.eval.ts:36: * Helper to check if a subagent (either via unified tool or direct name) was called.
+evals/subagents.eval.ts:43:        return args.agent_name === agentName;
+evals/subagents.eval.ts:57:    name: 'subagent-eval-project',
+evals/subagents.eval.ts:72:describe('subagent eval test cases', () => {
+evals/subagents.eval.ts:74:   * Checks whether the outer agent reliably utilizes an expert subagent to
+evals/subagents.eval.ts:81:   * This tests the system prompt's subagent specific clauses.
+evals/subagents.eval.ts:105:   * subagents are available. This helps catch orchestration overuse.
+evals/subagents.eval.ts:219:   * Checks that the main agent can correctly select the appropriate subagent
+evals/subagents.eval.ts:220:   * from a large pool of available subagents (10 total).
+evals/subagents.eval.ts:223:    name: 'should select the correct subagent from a pool of 10 different agents',
+evals/subagents.eval.ts:263:   * Checks that the main agent can correctly select the appropriate subagent
+evals/subagents.eval.ts:264:   * from a large pool of available subagents, even when many irrelevant MCP tools are present.
+evals/subagents.eval.ts:266:   * This test includes stress tests the subagent delegation with ~80 tools.
+evals/subagents.eval.ts:269:    name: 'should select the correct subagent from a pool of 10 different agents with MCP tools present',
+packages/core/src/policy/policy-engine.ts:19:  type PolicyEngineConfig,
+packages/core/src/policy/policy-engine.ts:91:  subagent?: string,
+packages/core/src/policy/policy-engine.ts:100:  // Check subagent if specified (only for PolicyRule, SafetyCheckerRule doesn't have it)
+packages/core/src/policy/policy-engine.ts:101:  if ('subagent' in rule && rule.subagent !== undefined) {
+ succeeded in 231ms:
+packages/core/src/tools/complete-task.test.ts
+packages/core/src/tools/complete-task.ts
+packages/core/src/tools/grep.test.ts
+packages/core/src/tools/tools.test.ts
+packages/core/src/tools/write-file.test.ts
+packages/core/src/tools/memoryTool.test.ts
+packages/core/src/tools/tools.ts
+packages/core/src/tools/mcp-client-manager.test.ts
+packages/core/src/tools/confirmation-policy.test.ts
+packages/core/src/tools/ripGrep.ts
+packages/core/src/tools/constants.ts
+packages/core/src/tools/shell.ts
+packages/core/src/tools/trackerTools.ts
+packages/core/src/tools/diff-utils.test.ts
+packages/core/src/tools/edit.ts
+packages/core/src/tools/enter-plan-mode.ts
+packages/core/src/tools/grep.ts
+packages/core/src/tools/jit-context.ts
+packages/core/src/tools/ls.ts
+packages/core/src/tools/trackerTools.test.ts
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.ts | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '500,630p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  BaseDeclarativeTool,
+     9	  Kind,
+    10	  type ToolInvocation,
+    11	  type ToolResult,
+    12	  BaseToolInvocation,
+    13	  type ToolCallConfirmationDetails,
+    14	  type ToolLiveOutput,
+    15	} from '../tools/tools.js';
+    16	import { type AgentLoopContext } from '../config/agent-loop-context.js';
+    17	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+    18	import type { AgentDefinition, AgentInputs } from './types.js';
+    19	import { LocalSubagentInvocation } from './local-invocation.js';
+    20	import { RemoteAgentInvocation } from './remote-invocation.js';
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  BaseDeclarativeTool,
+     9	  Kind,
+    10	  type ToolInvocation,
+    11	  type ToolResult,
+    12	  BaseToolInvocation,
+    13	  type ToolCallConfirmationDetails,
+    14	  isTool,
+    15	  type ToolLiveOutput,
+    16	} from '../tools/tools.js';
+    17	import type { Config } from '../config/config.js';
+    18	import { type AgentLoopContext } from '../config/agent-loop-context.js';
+    19	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+    20	import type { AgentDefinition, AgentInputs } from './types.js';
+ succeeded in 0ms:
+   500	    if (!serverName && isMcpToolAnnotation(toolAnnotations)) {
+   501	      serverName = toolAnnotations._serverName;
+   502	    }
+   503	
+   504	    // Case 2: Fallback for static FQN strings (e.g. from TOML policies or allowed/excluded settings strings).
+   505	    // These strings don't have active metadata objects associated with them during policy generation,
+   506	    // so we must extract the server name from the qualified `mcp_{server}_{tool}` format.
+   507	    if (!serverName && toolCall.name) {
+   508	      const parsed = parseMcpToolName(toolCall.name);
+   509	      if (parsed.serverName) {
+   510	        serverName = parsed.serverName;
+   511	      }
+   512	    }
+   513	
+   514	    let stringifiedArgs: string | undefined;
+   515	    // Compute stringified args once before the loop
+   516	    if (
+   517	      toolCall.args &&
+   518	      (this.rules.some((rule) => rule.argsPattern) ||
+   519	        this.checkers.some((checker) => checker.argsPattern))
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '1,460p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import * as crypto from 'node:crypto';
+     8	import { Storage } from '../config/storage.js';
+     9	import { CoreEvent, coreEvents } from '../utils/events.js';
+    10	import type { AgentOverride, Config } from '../config/config.js';
+    11	import type { AgentDefinition, LocalAgentDefinition } from './types.js';
+    12	import { getAgentCardLoadOptions, getRemoteAgentTargetUrl } from './types.js';
+    13	import { loadAgentsFromDirectory } from './agentLoader.js';
+    14	import { CodebaseInvestigatorAgent } from './codebase-investigator.js';
+    15	import { CliHelpAgent } from './cli-help-agent.js';
+    16	import { GeneralistAgent } from './generalist-agent.js';
+    17	import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+    18	import { MemoryManagerAgent } from './memory-manager-agent.js';
+    19	import { AgentTool } from './agent-tool.js';
+    20	import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '213,300p'
+" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   213	  private withUserHints(agentArgs: AgentInputs): AgentInputs {
+   214	    if (this.definition.kind !== 'remote') {
+   215	      return agentArgs;
+   216	    }
+   217	
+   218	    const userHints = this.context.config.injectionService.getInjectionsAfter(
+   219	      this.startIndex,
+   220	      'user_steering',
+   221	    );
+   222	    const formattedHints = formatUserHintsForModel(userHints);
+   223	    if (!formattedHints) {
+   224	      return agentArgs;
+   225	    }
+   226	
+   227	    // Find the primary key to append hints to
+   228	    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+   229	    if (!isRecord(schemaObj)) {
+   230	      return agentArgs;
+   231	    }
+   232	    const properties = schemaObj['properties'];
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-names.ts | sed -n '170,210p;280,305p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '460,560p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   170	 * Tools that require mandatory argument narrowing (e.g., file paths, command prefixes)
+   171	 * when granting persistent or session-wide approval.
+   172	 */
+   173	export const TOOLS_REQUIRING_NARROWING = new Set([
+   174	  GLOB_TOOL_NAME,
+   175	  GREP_TOOL_NAME,
+   176	  READ_MANY_FILES_TOOL_NAME,
+   177	  READ_FILE_TOOL_NAME,
+   178	  LS_TOOL_NAME,
+   179	  WRITE_FILE_TOOL_NAME,
+   180	  EDIT_TOOL_NAME,
+   181	  SHELL_TOOL_NAME,
+   182	]);
+   183	
+   184	export const TRACKER_CREATE_TASK_TOOL_NAME = 'tracker_create_task';
+   185	export const TRACKER_UPDATE_TASK_TOOL_NAME = 'tracker_update_task';
+   186	export const TRACKER_GET_TASK_TOOL_NAME = 'tracker_get_task';
+   187	export const TRACKER_LIST_TASKS_TOOL_NAME = 'tracker_list_tasks';
+   188	export const TRACKER_ADD_DEPENDENCY_TOOL_NAME = 'tracker_add_dependency';
+   189	export const TRACKER_VISUALIZE_TOOL_NAME = 'tracker_visualize';
+ succeeded in 0ms:
+   460	    const remoteDef = definition;
+   461	
+   462	    // Capture the original description from the first registration
+   463	    if (remoteDef.originalDescription === undefined) {
+   464	      remoteDef.originalDescription = remoteDef.description;
+   465	    }
+   466	
+   467	    // Load the remote A2A agent card and register.
+   468	    try {
+   469	      const clientManager = this.config.getA2AClientManager();
+   470	      if (!clientManager) {
+   471	        debugLogger.warn(
+   472	          `[AgentRegistry] Skipping remote agent '${definition.name}': A2AClientManager is not available.`,
+   473	        );
+   474	        return;
+   475	      }
+   476	      const targetUrl = getRemoteAgentTargetUrl(remoteDef);
+   477	      let authHandler: AuthenticationHandler | undefined;
+   478	      if (definition.auth) {
+   479	        const provider = await A2AAuthProviderFactory.create({
+exec
+/bin/zsh -lc "nl -ba packages/core/src/prompts/snippets.ts | sed -n '340,440p' && nl -ba packages/core/src/prompts/snippets.legacy.ts | sed -n '30,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   340	
+   341	${workflowStepResearch(options)}
+   342	${workflowStepStrategy(options)}
+   343	3. **Execution:** For each sub-task:
+   344	   - **Plan:** Define the specific implementation approach **and the testing strategy to verify the change.**
+   345	   - **Act:** Apply targeted, surgical changes strictly related to the sub-task. Use the available tools (e.g., ${formatToolName(EDIT_TOOL_NAME)}, ${formatToolName(WRITE_FILE_TOOL_NAME)}, ${formatToolName(SHELL_TOOL_NAME)}). Ensure changes are idiomatically complete and follow all workspace standards, even if it requires multiple tool calls. **Include necessary automated tests; a change is incomplete without verification logic.** Avoid unrelated refactoring or "cleanup" of outside code. Before making manual code changes, check if an ecosystem tool (like 'eslint --fix', 'prettier --write', 'go fmt', 'cargo fmt') is available in the project to perform the task automatically.
+   346	   - **Validate:** Run tests and workspace standards to confirm the success of the specific change and ensure no regressions were introduced. After making code changes, execute the project-specific build, linting and type-checking commands (e.g., 'tsc', 'npm run lint', 'ruff check .') that you have identified for this project.${workflowVerifyStandardsSuffix(options.interactive)}
+   347	
+   348	**Validation is the only path to finality.** Never assume success or settle for unverified changes. Rigorous, exhaustive verification is mandatory; it prevents the compounding cost of diagnosing failures later. A task is only complete when the behavioral correctness of the change has been verified and its structural integrity is confirmed within the full project context. Prioritize comprehensive validation above all else, utilizing redirection and focused analysis to manage high-output tasks without sacrificing depth. Never sacrifice validation rigor for the sake of brevity or to minimize tool-call overhead; partial or isolated checks are insufficient when more comprehensive validation is possible.
+   349	
+   350	## New Applications
+   351	
+   352	**Goal:** Autonomously implement and deliver a visually appealing, substantially complete, and functional prototype with rich aesthetics. Users judge applications by their visual impact; ensure they feel modern, "alive," and polished through consistent spacing, interactive feedback, and platform-appropriate design.
+   353	
+   354	${newApplicationSteps(options)}
+   355	`.trim();
+   356	}
+   357	
+   358	export function renderOperationalGuidelines(
+   359	  options?: OperationalGuidelinesOptions,
+exec
+/bin/zsh -lc 'rg -n "SubagentTool|subagent-tool|SubAgentInvocation|buildSubInvocation|AgentTool|DelegateInvocation" packages/core/src packages/cli/src evals' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+evals/app-test-helper.ts:30:  /** Restricting tools via mainAgentTools in evals is forbidden. */
+evals/app-test-helper.ts:31:  mainAgentTools?: never;
+packages/core/src/telemetry/metrics.ts:340:    assign: (c: Counter) => (browserAgentToolsMissingSemanticCounter = c),
+packages/core/src/telemetry/metrics.ts:524:    assign: (h: Histogram) => (browserAgentToolsDiscoveredHistogram = h),
+packages/core/src/telemetry/metrics.ts:793:let browserAgentToolsDiscoveredHistogram: Histogram | undefined;
+packages/core/src/telemetry/metrics.ts:794:let browserAgentToolsMissingSemanticCounter: Counter | undefined;
+packages/core/src/telemetry/metrics.ts:1652:export function recordBrowserAgentToolDiscovery(
+packages/core/src/telemetry/metrics.ts:1661:  if (browserAgentToolsDiscoveredHistogram) {
+packages/core/src/telemetry/metrics.ts:1662:    browserAgentToolsDiscoveredHistogram.record(toolCount, {
+packages/core/src/telemetry/metrics.ts:1668:  if (browserAgentToolsMissingSemanticCounter) {
+packages/core/src/telemetry/metrics.ts:1670:      browserAgentToolsMissingSemanticCounter.add(1, {
+packages/core/src/telemetry/metrics.test.ts:111:  let recordBrowserAgentToolDiscoveryModule: typeof import('./metrics.js').recordBrowserAgentToolDiscovery;
+packages/core/src/telemetry/metrics.test.ts:168:    recordBrowserAgentToolDiscoveryModule =
+packages/core/src/telemetry/metrics.test.ts:169:      metricsJsModule.recordBrowserAgentToolDiscovery;
+packages/core/src/telemetry/metrics.test.ts:1744:    describe('recordBrowserAgentToolDiscovery', () => {
+packages/core/src/telemetry/metrics.test.ts:1747:        recordBrowserAgentToolDiscoveryModule(config, 5, [], 'persistent');
+packages/core/src/telemetry/metrics.test.ts:1757:        recordBrowserAgentToolDiscoveryModule(
+packages/core/src/tools/tool-registry.ts:641:    const mainAgentTools = this.isMainRegistry
+packages/core/src/tools/tool-registry.ts:642:      ? this.config.getMainAgentTools()
+packages/core/src/tools/tool-registry.ts:656:        mainAgentTools &&
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.ts | sed -n '220,320p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   220	      query: `${formattedHints}\n\n${query}`,
+   221	    };
+   222	  }
+   223	
+   224	  private buildSubInvocation(
+   225	    definition: AgentDefinition,
+   226	    agentArgs: AgentInputs,
+   227	  ): ToolInvocation<AgentInputs, ToolResult> {
+   228	    const wrapper = new SubagentToolWrapper(
+   229	      definition,
+   230	      this.context,
+   231	      this.messageBus,
+   232	    );
+   233	
+   234	    return wrapper.build(agentArgs);
+   235	  }
+   236	}
+exec
+/bin/zsh -lc "nl -ba packages/core/src/config/config.ts | sed -n '3600,3655p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  3600	    }
+  3601	
+  3602	    if (this.isTrackerEnabled()) {
+  3603	      maybeRegister(TrackerCreateTaskTool, () =>
+  3604	        registry.registerTool(new TrackerCreateTaskTool(this, this.messageBus)),
+  3605	      );
+  3606	      maybeRegister(TrackerUpdateTaskTool, () =>
+  3607	        registry.registerTool(new TrackerUpdateTaskTool(this, this.messageBus)),
+  3608	      );
+  3609	      maybeRegister(TrackerGetTaskTool, () =>
+  3610	        registry.registerTool(new TrackerGetTaskTool(this, this.messageBus)),
+  3611	      );
+  3612	      maybeRegister(TrackerListTasksTool, () =>
+  3613	        registry.registerTool(new TrackerListTasksTool(this, this.messageBus)),
+  3614	      );
+  3615	      maybeRegister(TrackerAddDependencyTool, () =>
+  3616	        registry.registerTool(
+  3617	          new TrackerAddDependencyTool(this, this.messageBus),
+  3618	        ),
+  3619	      );
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.test.ts | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool.test.ts | sed -n '1,230p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { describe, it, expect, vi, beforeEach } from 'vitest';
+     8	import { AgentTool } from './agent-tool.js';
+     9	import { makeFakeConfig } from '../test-utils/config.js';
+    10	import { createMockMessageBus } from '../test-utils/mock-message-bus.js';
+    11	import type { Config } from '../config/config.js';
+    12	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+    13	import { LocalSubagentInvocation } from './local-invocation.js';
+    14	import { RemoteAgentInvocation } from './remote-invocation.js';
+    15	import { BrowserAgentInvocation } from './browser/browserAgentInvocation.js';
+    16	import { BROWSER_AGENT_NAME } from './browser/browserAgentDefinition.js';
+    17	import { AgentRegistry } from './registry.js';
+    18	import type { LocalAgentDefinition, RemoteAgentDefinition } from './types.js';
+    19	
+    20	vi.mock('./local-invocation.js');
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { describe, it, expect, vi, beforeEach } from 'vitest';
+     8	import { SubagentTool } from './subagent-tool.js';
+     9	import { SubagentToolWrapper } from './subagent-tool-wrapper.js';
+    10	import {
+    11	  Kind,
+    12	  type DeclarativeTool,
+    13	  type ToolCallConfirmationDetails,
+    14	  type ToolInvocation,
+    15	  type ToolResult,
+    16	} from '../tools/tools.js';
+    17	import type {
+    18	  LocalAgentDefinition,
+    19	  RemoteAgentDefinition,
+    20	  AgentInputs,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/prompts/snippets.ts | sed -n '1,140p;220,300p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/prompts/snippets.legacy.ts | sed -n '1,260p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  ACTIVATE_SKILL_TOOL_NAME,
+     9	  ASK_USER_TOOL_NAME,
+    10	  EDIT_TOOL_NAME,
+    11	  ENTER_PLAN_MODE_TOOL_NAME,
+    12	  EXIT_PLAN_MODE_TOOL_NAME,
+    13	  UPDATE_TOPIC_TOOL_NAME,
+    14	  TOPIC_PARAM_TITLE,
+    15	  TOPIC_PARAM_SUMMARY,
+    16	  GLOB_TOOL_NAME,
+    17	  GREP_TOOL_NAME,
+    18	  MEMORY_TOOL_NAME,
+    19	  READ_FILE_TOOL_NAME,
+    20	  SHELL_TOOL_NAME,
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import type { HierarchicalMemory } from '../config/memory.js';
+     8	import {
+     9	  ACTIVATE_SKILL_TOOL_NAME,
+    10	  ASK_USER_TOOL_NAME,
+    11	  EDIT_TOOL_NAME,
+    12	  ENTER_PLAN_MODE_TOOL_NAME,
+    13	  EXIT_PLAN_MODE_TOOL_NAME,
+    14	  GLOB_TOOL_NAME,
+    15	  GREP_TOOL_NAME,
+    16	  MEMORY_TOOL_NAME,
+    17	  READ_FILE_TOOL_NAME,
+    18	  SHELL_PARAM_IS_BACKGROUND,
+    19	  SHELL_TOOL_NAME,
+    20	  TRACKER_CREATE_TASK_TOOL_NAME,
+exec
+/bin/zsh -lc 'rg -n "AGENT_TOOL_NAME|invoke_agent|sub-agent|subagents|save_memory|codebase_investigator" packages/core/src/prompts/snippets.ts packages/core/src/prompts/snippets.legacy.ts packages/core/src/prompts/promptProvider.ts packages/core/src/tools/tool-names.ts packages/core/src/policy/policies/agents.toml packages/core/src/policy/policies/plan.toml' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policies/plan.toml:26:#   30: Unknown subagents (blocked by Plan Mode's 40)
+packages/core/src/policy/policies/plan.toml:108:# Allow specific subagents in Plan mode.
+packages/core/src/policy/policies/plan.toml:109:# We use argsPattern to match the agent_name argument for invoke_agent.
+packages/core/src/policy/policies/plan.toml:111:name = "Allow specific subagents in Plan mode"
+packages/core/src/policy/policies/plan.toml:112:toolName = "invoke_agent"
+packages/core/src/policy/policies/plan.toml:113:argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
+packages/core/src/policy/policies/plan.toml:119:toolName = ["ask_user", "save_memory", "web_fetch"]
+packages/core/src/policy/policies/plan.toml:126:toolName = ["ask_user", "save_memory", "web_fetch"]
+packages/core/src/tools/tool-names.ts:191:export const AGENT_TOOL_NAME = 'invoke_agent';
+packages/core/src/tools/tool-names.ts:274:  AGENT_TOOL_NAME,
+packages/core/src/tools/tool-names.ts:292:  'codebase_investigator',
+packages/core/src/prompts/promptProvider.ts:29:  AGENT_TOOL_NAME,
+packages/core/src/prompts/promptProvider.ts:154:          enabledToolNames.has(AGENT_TOOL_NAME),
+packages/core/src/policy/policies/agents.toml:6:name = "Allow invoke_agent"
+packages/core/src/policy/policies/agents.toml:7:toolName = "invoke_agent"
+packages/core/src/prompts/snippets.legacy.ts:28:  AGENT_TOOL_NAME,
+packages/core/src/prompts/snippets.legacy.ts:206:You can invoke sub-agents using the \`${AGENT_TOOL_NAME}\` tool by passing their name to the \`agent_name\` parameter. You MUST always delegate tasks to the sub-agent with the relevant expertise, if one is available.
+packages/core/src/prompts/snippets.legacy.ts:208:The following sub-agents are available:
+packages/core/src/prompts/snippets.legacy.ts:212:Remember that the closest relevant sub-agent should still be used even if its expertise is broader than the given task.
+packages/core/src/prompts/snippets.legacy.ts:563:    return `1. **Understand & Strategize:** Think about the user's request and the relevant codebase context. When the task involves **complex refactoring, codebase exploration or system-wide analysis**, your **first and primary action** must be to delegate to the 'codebase_investigator' agent using the \`${AGENT_TOOL_NAME}\` tool. Use it to build a comprehensive understanding of the code, its structure, and dependencies. For **simple, targeted searches** (like finding a specific function name, file path, or variable declaration), you should use '${GREP_TOOL_NAME}' or '${GLOB_TOOL_NAME}' directly.`;
+exec
+/bin/zsh -lc "sed -n '3470,3575p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '3100,3270p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+ 
+   if (sessions.length === 0) {
+diff --git a/packages/core/src/agents/agent-tool.ts b/packages/core/src/agents/agent-tool.ts
+new file mode 100644
+index 0000000000..0d4c85a599
+--- /dev/null
++++ b/packages/core/src/agents/agent-tool.ts
+@@ -0,0 +1,250 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import {
++  BaseDeclarativeTool,
++  Kind,
++  type ToolInvocation,
++  type ToolResult,
++  BaseToolInvocation,
+ succeeded in 0ms:
+ 
+   private isAgentEnabled<TOutput extends z.ZodTypeAny>(
+diff --git a/packages/core/src/agents/subagent-tool.ts b/packages/core/src/agents/subagent-tool.ts
+index e689098f5a..3ef9f0aa86 100644
+--- a/packages/core/src/agents/subagent-tool.ts
++++ b/packages/core/src/agents/subagent-tool.ts
+@@ -182,7 +182,6 @@ class SubAgentInvocation extends BaseToolInvocation<AgentInputs, ToolResult> {
+       {
+         operation: GeminiCliOperation.AgentCall,
+         logPrompts: this.context.config.getTelemetryLogPromptsEnabled(),
+-        sessionId: this.context.config.getSessionId(),
+         attributes: {
+           [GEN_AI_AGENT_NAME]: this.definition.name,
+           [GEN_AI_AGENT_DESCRIPTION]: this.definition.description,
+diff --git a/packages/core/src/config/config.ts b/packages/core/src/config/config.ts
+index 0edd4af7b0..2ef6fc26a8 100644
+--- a/packages/core/src/config/config.ts
++++ b/packages/core/src/config/config.ts
+@@ -43,6 +43,7 @@ import { WebSearchTool } from '../tools/web-search.js';
+ import { AskUserTool } from '../tools/ask-user.js';
+exec
+/bin/zsh -lc "sed -n '3815,3885p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '3690,3730p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+ modes = ["plan"]
+diff --git a/packages/core/src/policy/policy-engine.ts b/packages/core/src/policy/policy-engine.ts
+index f2376df914..eb5b141ba5 100644
+--- a/packages/core/src/policy/policy-engine.ts
++++ b/packages/core/src/policy/policy-engine.ts
+@@ -26,9 +26,10 @@ import {
+ } from './types.js';
+ import { stableStringify } from './stable-stringify.js';
+ import { debugLogger } from '../utils/debugLogger.js';
++import { isRecord } from '../utils/markdownUtils.js';
+ import type { CheckerRunner } from '../safety/checker-runner.js';
+ import { SafetyCheckDecision } from '../safety/protocol.js';
+-import { getToolAliases } from '../tools/tool-names.js';
++import { getToolAliases, AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ import { PARAM_ADDITIONAL_PERMISSIONS } from '../tools/definitions/base-declarations.js';
+ import {
+   MCP_TOOL_PREFIX,
+@@ -546,6 +547,16 @@ export class PolicyEngine {
+     // We also want to check legacy aliases for the tool name.
+     const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+ succeeded in 0ms:
+   WRITE_TODOS_TOOL_NAME,
++  AGENT_TOOL_NAME,
+ } from '../tools/tool-names.js';
+ 
+ // --- Options Structs ---
+@@ -202,9 +203,9 @@ export function renderSubAgents(subAgents?: SubAgentOptions[]): string {
+ # Available Sub-Agents
+ Sub-agents are specialized expert agents that you can use to assist you in the completion of all or part of a task.
+ 
+-Each sub-agent is available as a tool of the same name. You MUST always delegate tasks to the sub-agent with the relevant expertise, if one is available.
++You can invoke sub-agents using the \`${AGENT_TOOL_NAME}\` tool by passing their name to the \`agent_name\` parameter. You MUST always delegate tasks to the sub-agent with the relevant expertise, if one is available.
+ 
+-The following tools can be used to start sub-agents:
++The following sub-agents are available:
+ 
+ ${subAgentsList}
+ 
+@@ -559,7 +560,7 @@ function mandateContinueWork(interactive: boolean): string {
+ 
+ function workflowStepUnderstand(options: PrimaryWorkflowsOptions): string {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/subagent-tool-wrapper.ts | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  BaseDeclarativeTool,
+     9	  Kind,
+    10	  type ToolInvocation,
+    11	  type ToolResult,
+    12	} from '../tools/tools.js';
+    13	
+    14	import { type AgentLoopContext } from '../config/agent-loop-context.js';
+    15	import type { AgentDefinition, AgentInputs } from './types.js';
+    16	import { LocalSubagentInvocation } from './local-invocation.js';
+    17	import { RemoteAgentInvocation } from './remote-invocation.js';
+    18	import { BrowserAgentInvocation } from './browser/browserAgentInvocation.js';
+    19	import { BROWSER_AGENT_NAME } from './browser/browserAgentDefinition.js';
+    20	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+exec
+/bin/zsh -lc "rg -n \"build\\(\" packages/core/src/tools/tools.ts packages/core/src/tools/base-tool* packages/core/src/agents/subagent-tool-wrapper.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/tools/tools.ts:454:  build(params: TParams): ToolInvocation<TParams, TResult>;
+packages/core/src/tools/tools.ts:598:  abstract build(params: TParams): ToolInvocation<TParams, TResult>;
+packages/core/src/tools/tools.ts:614:    const invocation = this.build(params);
+packages/core/src/tools/tools.ts:627:      return this.build(params);
+packages/core/src/tools/tools.ts:687:  build(params: TParams): ToolInvocation<TParams, TResult> {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tools.ts | sed -n '660,710p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   660	    try {
+   661	      return await invocationOrError.execute(abortSignal);
+   662	    } catch (error) {
+   663	      const errorMessage =
+   664	        error instanceof Error ? error.message : String(error);
+   665	      return {
+   666	        llmContent: `Error: Tool call execution failed. Reason: ${errorMessage}`,
+   667	        returnDisplay: errorMessage,
+   668	        error: {
+   669	          message: errorMessage,
+   670	          type: ToolErrorType.EXECUTION_FAILED,
+   671	        },
+   672	      };
+   673	    }
+   674	  }
+   675	}
+   676	
+   677	/**
+   678	 * New base class for declarative tools that separates validation from execution.
+   679	 * New tools should extend this class, which provides a `build` method that
+exec
+/bin/zsh -lc "rg -n \"kind:\" packages/core/src/agents/browser/browserAgentDefinition.ts && nl -ba packages/core/src/agents/browser/browserAgentDefinition.ts | sed -n '1,100p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+129: * - kind: 'local' for LocalAgentExecutor
+144:    kind: 'local',
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	/**
+     8	 * @fileoverview Browser Agent definition following the LocalAgentDefinition pattern.
+     9	 *
+    10	 * This agent uses LocalAgentExecutor for its reAct loop, like CodebaseInvestigatorAgent.
+    11	 * It is available ONLY via delegate_to_agent, NOT as a direct tool.
+    12	 *
+    13	 * Tools are configured dynamically at invocation time via browserAgentFactory.
+    14	 */
+    15	
+    16	import type { LocalAgentDefinition } from '../types.js';
+    17	import { supersedeStaleSnapshots } from './snapshotSuperseder.js';
+    18	import type { Config } from '../../config/config.js';
+exec
+/bin/zsh -lc "rg -n \"validate\\(\" packages/core/src/agents/local-invocation.ts packages/core/src/agents/remote-invocation.ts packages/core/src/agents/browser/browserAgentInvocation.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 exited 1 in 0ms:
+
+exec
+/bin/zsh -lc 'rg -n "subagent-tool|SubagentTool|SubagentToolWrapper" packages/core/src/index.ts packages/core/src/**/*.ts | head -100' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/agents/subagent-tool.test.ts:8:import { SubagentTool } from './subagent-tool.js';
+packages/core/src/agents/subagent-tool.test.ts:9:import { SubagentToolWrapper } from './subagent-tool-wrapper.js';
+packages/core/src/agents/subagent-tool.test.ts:33:vi.mock('./subagent-tool-wrapper.js');
+packages/core/src/agents/subagent-tool.test.ts:49:const MockSubagentToolWrapper = vi.mocked(SubagentToolWrapper);
+packages/core/src/agents/subagent-tool.test.ts:93:    MockSubagentToolWrapper.prototype.build = vi
+packages/core/src/agents/subagent-tool.test.ts:99:    const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
+packages/core/src/agents/subagent-tool.test.ts:104:    const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
+packages/core/src/agents/subagent-tool.test.ts:120:    expect(MockSubagentToolWrapper).toHaveBeenCalledWith(
+packages/core/src/agents/subagent-tool.test.ts:128:    const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
+packages/core/src/agents/subagent-tool.test.ts:138:    const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:164:    expect(MockSubagentToolWrapper).toHaveBeenCalledWith(
+packages/core/src/agents/subagent-tool.test.ts:172:    const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
+packages/core/src/agents/subagent-tool.test.ts:218:      const tool = new SubagentTool(testDefinition, mockConfig, mockMessageBus);
+packages/core/src/agents/subagent-tool.test.ts:233:      const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:251:      const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:269:      const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:293:      const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:322:      const tool = new SubagentTool(
+packages/core/src/agents/subagent-tool.test.ts:339:describe('SubagentTool Read-Only logic', () => {
+packages/core/src/agents/subagent-tool.test.ts:355:    const tool = new SubagentTool(
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policies/plan.toml | sed -n '100,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   100	toolName = "*"
+   101	mcpName = "*"
+   102	toolAnnotations = { readOnlyHint = true }
+   103	decision = "deny"
+   104	priority = 50
+   105	modes = ["plan"]
+   106	interactive = false
+   107	
+   108	# Allow specific subagents in Plan mode.
+   109	# We use argsPattern to match the agent_name argument for invoke_agent.
+   110	[[rule]]
+   111	name = "Allow specific subagents in Plan mode"
+   112	toolName = "invoke_agent"
+   113	argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
+   114	decision = "allow"
+   115	priority = 50
+   116	modes = ["plan"]
+   117	
+   118	[[rule]]
+   119	toolName = ["ask_user", "save_memory", "web_fetch"]
+exec
+/bin/zsh -lc 'rg -n "Allow specific subagents|codebase_investigator|invoke_agent|argsPattern" packages/core/src/policy/*.test.ts packages/core/src/agents/*.test.ts' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-updater.test.ts:84:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:95:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:102:  it('should pass mcpName to policyEngine.addRule for argsPattern updates', async () => {
+packages/core/src/policy/policy-updater.test.ts:108:      argsPattern: '"foo":"bar"',
+packages/core/src/policy/policy-updater.test.ts:117:        argsPattern: /"foo":"bar"/,
+packages/core/src/policy/policy-updater.test.ts:174:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:241:      argsPattern: '(a+)+',
+packages/core/src/policy/persistence.test.ts:168:  it('should include argsPattern if provided', async () => {
+packages/core/src/policy/persistence.test.ts:178:      argsPattern: '^foo.*$',
+packages/core/src/policy/persistence.test.ts:184:    expect(content).toContain('argsPattern = "^foo.*$"');
+packages/core/src/policy/policy-engine.test.ts:187:          argsPattern: /rm -rf/,
+packages/core/src/policy/policy-engine.test.ts:276:    it('should match subagent name as alias for invoke_agent', async () => {
+packages/core/src/policy/policy-engine.test.ts:278:        { toolName: 'codebase_investigator', decision: PolicyDecision.DENY },
+packages/core/src/policy/policy-engine.test.ts:284:        name: 'invoke_agent',
+packages/core/src/policy/policy-engine.test.ts:285:        args: { agent_name: 'codebase_investigator', prompt: 'Hello' },
+packages/core/src/policy/policy-engine.test.ts:765:          argsPattern: /"command":"ls/,
+packages/core/src/policy/policy-engine.test.ts:805:          argsPattern: new RegExp(patterns[0]!),
+packages/core/src/policy/policy-engine.test.ts:826:          argsPattern: /secret/,
+packages/core/src/policy/policy-engine.test.ts:864:          argsPattern: /"command":"rm[^"]*-rf/,
+packages/core/src/policy/policy-engine.test.ts:896:          argsPattern: /"sensitive":true/,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/toml-loader.test.ts | sed -n '1000,1060p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  1000	        );
+  1001	
+  1002	        // 2. Initialize Policy Engine with these rules
+  1003	        const engine = new PolicyEngine({
+  1004	          rules: result.rules,
+  1005	          approvalMode: ApprovalMode.PLAN,
+  1006	        });
+  1007	
+  1008	        // 3. Simulate an unknown Subagent being registered (Dynamic Rule)
+  1009	        engine.addRule({
+  1010	          toolName: 'invoke_agent',
+  1011	          argsPattern: /"agent_name":\s*"unknown_subagent"/,
+  1012	          decision: PolicyDecision.ALLOW,
+  1013	          priority: PRIORITY_SUBAGENT_TOOL,
+  1014	          source: 'AgentRegistry (Dynamic)',
+  1015	        });
+  1016	
+  1017	        // 4. Verify Behavior:
+  1018	        // The Plan Mode "Catch-All Deny" (from plan.toml) should override the Subagent Allow
+  1019	        // Plan Mode Deny (1.04) > Subagent Allow (1.03)
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.test.ts | sed -n '1070,1125p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  1070	        kind: 'remote',
+  1071	        name: 'RemotePolicyAgent',
+  1072	        description: 'A remote agent',
+  1073	        agentCardUrl: 'https://example.com/card',
+  1074	        inputConfig: { inputSchema: { type: 'object' } },
+  1075	      };
+  1076	
+  1077	      vi.spyOn(mockConfig, 'getA2AClientManager').mockReturnValue({
+  1078	        loadAgent: vi.fn().mockResolvedValue({ name: 'RemotePolicyAgent' }),
+  1079	      } as unknown as A2AClientManager);
+  1080	
+  1081	      const policyEngine = mockConfig.getPolicyEngine();
+  1082	
+  1083	      await registry.testRegisterAgent(remoteAgent);
+  1084	
+  1085	      // Verify behavior: calling invoke_agent with this remote agent should return ASK_USER
+  1086	      const result = await policyEngine.check(
+  1087	        { name: 'invoke_agent', args: { agent_name: 'RemotePolicyAgent' } },
+  1088	        undefined,
+  1089	      );
+codex
+I found two policy-side cleanups that are tightly tied to the virtual-alias goal and do not require touching tests. I’m writing the requested markdown now, with the more tempting but unsafe cleanups called out as rejected.
+exec
+/bin/zsh -lc 'ls -ld /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+drwxr-xr-x@ 14 junekim  staff  448 Apr 17 17:07 /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+## Accepted Claims
+
+### C1 — Use Virtual Subagent Tool Names In Plan Policy
+**File**: packages/core/src/policy/policies/plan.toml:108
+**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
+**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+
+### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
+**File**: packages/core/src/agents/registry.ts:394
+**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
+**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
+**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
+- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
+- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
+- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
+- Update `docs/core/subagents.md` or `docs/reference/policy-engine.md`: documentation changes may be relevant to the PR goal, but those files are not in `allowed-files.txt`.
+- Clean up unrelated eval and workflow changes from the artifact: those files are in the broad allowed set, but they are outside the stated goal of unified subagent invocation and policy aliasing.
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+index db6be578a628795860628259bb10c9f41544e79c..6059beeb4962c715ea9dde7bad6967c97933c609
+--- a/samples/v2/gemini-cli-24489/volley/round-3-claims.md
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -1,29 +1,22 @@
+ ## Accepted Claims
+ 
+-### C2 — Share schema property-name extraction in AgentTool
+-**File**: packages/core/src/agents/agent-tool.ts:96
+-**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+-**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+-**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++### C1 — Use Virtual Subagent Tool Names In Plan Policy
++**File**: packages/core/src/policy/policies/plan.toml:108
++**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
++**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+ 
+-### C3 — Inline policy virtual-call construction
+-**File**: packages/core/src/policy/policy-engine.ts:560
+-**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+-**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+-**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+-
+-### C4 — Update the unified tool registration comment
+-**File**: packages/core/src/config/config.ts:3625
+-**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+-**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+-**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
++**File**: packages/core/src/agents/registry.ts:394
++**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
++**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
++**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+ 
+ ## Rejected
+ 
+-- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
+-- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
+-- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
+-- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
+-- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
+-- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
+-- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
++- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
++- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
++- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
++- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
++- Update `docs/core/subagents.md` or `docs/reference/policy-engine.md`: documentation changes may be relevant to the PR goal, but those files are not in `allowed-files.txt`.
++- Clean up unrelated eval and workflow changes from the artifact: those files are in the broad allowed set, but they are outside the stated goal of unified subagent invocation and policy aliasing.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+index db6be578a628795860628259bb10c9f41544e79c..6059beeb4962c715ea9dde7bad6967c97933c609
+--- a/samples/v2/gemini-cli-24489/volley/round-3-claims.md
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -1,29 +1,22 @@
+ ## Accepted Claims
+ 
+-### C2 — Share schema property-name extraction in AgentTool
+-**File**: packages/core/src/agents/agent-tool.ts:96
+-**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+-**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+-**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++### C1 — Use Virtual Subagent Tool Names In Plan Policy
++**File**: packages/core/src/policy/policies/plan.toml:108
++**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
++**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+ 
+-### C3 — Inline policy virtual-call construction
+-**File**: packages/core/src/policy/policy-engine.ts:560
+-**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+-**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+-**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+-
+-### C4 — Update the unified tool registration comment
+-**File**: packages/core/src/config/config.ts:3625
+-**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+-**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+-**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
++**File**: packages/core/src/agents/registry.ts:394
++**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
++**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
++**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+ 
+ ## Rejected
+ 
+-- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
+-- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
+-- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
+-- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
+-- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
+-- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
+-- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
++- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
++- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
++- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
++- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
++- Update `docs/core/subagents.md` or `docs/reference/policy-engine.md`: documentation changes may be relevant to the PR goal, but those files are not in `allowed-files.txt`.
++- Clean up unrelated eval and workflow changes from the artifact: those files are in the broad allowed set, but they are outside the stated goal of unified subagent invocation and policy aliasing.
+
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use Virtual Subagent Tool Names In Plan Policy
+**File**: packages/core/src/policy/policies/plan.toml:108
+**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
+**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+
+### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
+**File**: packages/core/src/agents/registry.ts:394
+**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
+**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
+**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
+- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
+- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
+- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+index db6be578a628795860628259bb10c9f41544e79c..6059beeb4962c715ea9dde7bad6967c97933c609
+--- a/samples/v2/gemini-cli-24489/volley/round-3-claims.md
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -1,29 +1,22 @@
+ ## Accepted Claims
+ 
+-### C2 — Share schema property-name extraction in AgentTool
+-**File**: packages/core/src/agents/agent-tool.ts:96
+-**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+-**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+-**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++### C1 — Use Virtual Subagent Tool Names In Plan Policy
++**File**: packages/core/src/policy/policies/plan.toml:108
++**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
++**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+ 
+-### C3 — Inline policy virtual-call construction
+-**File**: packages/core/src/policy/policy-engine.ts:560
+-**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+-**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+-**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+-
+-### C4 — Update the unified tool registration comment
+-**File**: packages/core/src/config/config.ts:3625
+-**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+-**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+-**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
++**File**: packages/core/src/agents/registry.ts:394
++**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
++**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
++**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+ 
+ ## Rejected
+ 
+-- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
+-- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
+-- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
+-- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
+-- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
+-- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
+-- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
++- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
++- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
++- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
++- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
++- Update `docs/core/subagents.md` or `docs/reference/policy-engine.md`: documentation changes may be relevant to the PR goal, but those files are not in `allowed-files.txt`.
++- Clean up unrelated eval and workflow changes from the artifact: those files are in the broad allowed set, but they are outside the stated goal of unified subagent invocation and policy aliasing.
+
+codex
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md`.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+index db6be578a628795860628259bb10c9f41544e79c..6059beeb4962c715ea9dde7bad6967c97933c609
+--- a/samples/v2/gemini-cli-24489/volley/round-3-claims.md
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -1,29 +1,22 @@
+ ## Accepted Claims
+ 
+-### C2 — Share schema property-name extraction in AgentTool
+-**File**: packages/core/src/agents/agent-tool.ts:96
+-**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+-**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+-**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++### C1 — Use Virtual Subagent Tool Names In Plan Policy
++**File**: packages/core/src/policy/policies/plan.toml:108
++**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
++**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+ 
+-### C3 — Inline policy virtual-call construction
+-**File**: packages/core/src/policy/policy-engine.ts:560
+-**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+-**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+-**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+-
+-### C4 — Update the unified tool registration comment
+-**File**: packages/core/src/config/config.ts:3625
+-**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+-**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+-**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
++**File**: packages/core/src/agents/registry.ts:394
++**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
++**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
++**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+ 
+ ## Rejected
+ 
+-- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
+-- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
+-- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
+-- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
+-- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
+-- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
+-- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
++- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
++- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
++- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
++- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
++- Update `docs/core/subagents.md` or `docs/reference/policy-engine.md`: documentation changes may be relevant to the PR goal, but those files are not in `allowed-files.txt`.
++- Clean up unrelated eval and workflow changes from the artifact: those files are in the broad allowed set, but they are outside the stated goal of unified subagent invocation and policy aliasing.
+
+tokens used
+92,269
+Wrote `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md`.

@@ -1,0 +1,6 @@
+## Finding F1 — Empty `properties` fallback is not specified
+**Severity**: warning
+**Claim**: C1
+**What**: The claim says the shared helper should preserve "a single schema property maps to that property, multiple properties fall back to `prompt`, and non-object/non-properties schemas keep the existing no-remap/no-hints behavior," but it does not say how an object schema with an empty `properties: {}` should be classified. Current behavior treats empty `properties` like the multi-property fallback in both paths: `mapParams` returns `{ prompt }`, and `withUserHints` selects `prompt` because `keys.length === 1` is false. An implementer could reasonably treat empty `properties` as "non-properties" and suppress hint injection, changing behavior.
+**Evidence**: `packages/core/src/agents/agent-tool.ts:112` checks only whether `properties` is a record before falling back to `{ prompt }` when `keys.length !== 1`; `packages/core/src/agents/agent-tool.ts:233` similarly selects `prompt` for every record `properties` case whose key count is not exactly one, including zero keys.
+**Fix**: Clarify C1 so zero-property schemas with `properties: {}` use the same `prompt` fallback as multi-property schemas; reserve "non-properties" for schemas where `properties` is absent or not an object.

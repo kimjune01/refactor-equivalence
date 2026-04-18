@@ -1,0 +1,583 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9de8-2069-7712-a779-7c9e5cb6a860
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/24489/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/24489/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll review the goal, latest claims, allowed file list, patch, and relevant source/tests, then write only the requested hunt-spec output file.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+# PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
+
+## PR body
+
+## Summary
+
+Refactors specialized subagent tools into a single, unified `invoke_agent` tool and updates the Policy Engine to support virtual tool aliases for subagents.
+
+## Details
+
+- **Unified Tooling**: Introduced `invoke_agent` in `packages/core` as the standard mechanism for subagent delegation, replacing the previous 1:1 tool-to-agent mapping.
+- **Policy Engine Enhancement**: Updated `PolicyEngine` to automatically treat the `agent_name` argument of `invoke_agent` as a virtual tool name. This ensures that existing safety policies (e.g., denying `codebase_investigator`) remain functional without requiring rule updates.
+- **Prompt Refactoring**: Updated both modern and legacy prompt snippets to instruct the model to use `invoke_agent`.
+- **Testing**: Added unit tests in `policy-engine.test.ts` for virtual alias matching and updated `subagents.eval.ts` to verify successful delegation via the new unified tool.
+- **Documentation**: Updated `subagents.md` and `policy-engine.md` to reflect the new invocation pattern and policy syntax.
+
+## Related Issues
+
+Related to the effort of simplifying the main agent's toolset and improving context efficiency.
+
+exec
+/bin/zsh -lc 'cat /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt' in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+.github/workflows/chained_e2e.yml
+.github/workflows/evals-nightly.yml
+.github/workflows/perf-nightly.yml
+.gitignore
+GEMINI.md
+evals/answer-vs-act.eval.ts
+evals/app-test-helper.ts
+evals/ask_user.eval.ts
+evals/automated-tool-use.eval.ts
+evals/cli_help_delegation.eval.ts
+evals/component-test-helper.ts
+evals/concurrency-safety.eval.ts
+evals/edit-locations-eval.eval.ts
+evals/frugalReads.eval.ts
+evals/frugalSearch.eval.ts
+evals/generalist_agent.eval.ts
+evals/generalist_delegation.eval.ts
+evals/gitRepo.eval.ts
+evals/grep_search_functionality.eval.ts
+evals/hierarchical_memory.eval.ts
+ succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name AgentTool override parameters directly
+**File**: packages/core/src/agents/agent-tool.ts:77
+**Change**: In `AgentTool.createInvocation` and the `DelegateInvocation` constructor, rename `_toolName` and `_toolDisplayName` to `toolName` and `toolDisplayName`, and pass those renamed parameters through unchanged to `BaseToolInvocation`.
+**Goal link**: This clarifies the unified `invoke_agent` tool's delegated display-name path.
+**Justification**: These parameters are used to preserve the unified tool identity, so removing the unused-parameter convention reduces misleading first-pass scaffolding without changing values or behavior.
+
+### C2 — Share schema property-name extraction in AgentTool
+**File**: packages/core/src/agents/agent-tool.ts:96
+**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
+
+### C3 — Inline policy virtual-call construction
+**File**: packages/core/src/policy/policy-engine.ts:560
+**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+
+exec
+/bin/zsh -lc 'rg --files' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 166ms:
+node_modules/ajv/lib/dotjs/_limitProperties.js
+node_modules/ajv/lib/dotjs/format.js
+node_modules/ajv/lib/dotjs/pattern.js
+node_modules/ajv/lib/dotjs/_limitItems.js
+node_modules/ajv/lib/dotjs/multipleOf.js
+node_modules/ajv/lib/dotjs/_limitLength.js
+node_modules/ajv/lib/dotjs/oneOf.js
+node_modules/ajv/lib/dotjs/required.js
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/LastValue.js.map
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/Drop.d.ts
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/LastValue.d.ts
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/index.d.ts
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/ExponentialHistogram.js.map
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/index.js.map
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/Drop.js
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/Sum.js
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/Sum.d.ts
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/index.js
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/Sum.js.map
+node_modules/@opentelemetry/sdk-metrics/build/src/aggregator/types.d.ts
+codex
+The accepted claims are narrowly scoped to three source files. I’m checking the exact current code and tests around `AgentTool`, policy matching, and config registration to see whether any claim names the wrong symbol or would alter observable behavior.
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '1,220p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  BaseDeclarativeTool,
+     9	  Kind,
+    10	  type ToolInvocation,
+    11	  type ToolResult,
+    12	  BaseToolInvocation,
+    13	  type ToolCallConfirmationDetails,
+    14	  type ToolLiveOutput,
+    15	} from '../tools/tools.js';
+    16	import { type AgentLoopContext } from '../config/agent-loop-context.js';
+    17	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+    18	import type { AgentDefinition, AgentInputs } from './types.js';
+    19	import { LocalSubagentInvocation } from './local-invocation.js';
+    20	import { RemoteAgentInvocation } from './remote-invocation.js';
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '520,610p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   520	    ) {
+   521	      stringifiedArgs = stableStringify(toolCall.args);
+   522	    }
+   523	
+   524	    debugLogger.debug(
+   525	      `[PolicyEngine.check] toolCall.name: ${toolCall.name}, stringifiedArgs: ${stringifiedArgs}`,
+   526	    );
+   527	
+   528	    // Check for shell commands upfront to handle splitting
+   529	    let isShellCommand = false;
+   530	    let command: string | undefined;
+   531	    let shellDirPath: string | undefined;
+   532	
+   533	    const toolName = toolCall.name;
+   534	
+   535	    if (toolName && SHELL_TOOL_NAMES.includes(toolName)) {
+   536	      isShellCommand = true;
+   537	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   538	      const args = toolCall.args as { command?: string; dir_path?: string };
+   539	      command = args?.command;
+exec
+/bin/zsh -lc "nl -ba packages/core/src/config/config.ts | sed -n '3605,3645p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  3605	      );
+  3606	      maybeRegister(TrackerUpdateTaskTool, () =>
+  3607	        registry.registerTool(new TrackerUpdateTaskTool(this, this.messageBus)),
+  3608	      );
+  3609	      maybeRegister(TrackerGetTaskTool, () =>
+  3610	        registry.registerTool(new TrackerGetTaskTool(this, this.messageBus)),
+  3611	      );
+  3612	      maybeRegister(TrackerListTasksTool, () =>
+  3613	        registry.registerTool(new TrackerListTasksTool(this, this.messageBus)),
+  3614	      );
+  3615	      maybeRegister(TrackerAddDependencyTool, () =>
+  3616	        registry.registerTool(
+  3617	          new TrackerAddDependencyTool(this, this.messageBus),
+  3618	        ),
+  3619	      );
+  3620	      maybeRegister(TrackerVisualizeTool, () =>
+  3621	        registry.registerTool(new TrackerVisualizeTool(this, this.messageBus)),
+  3622	      );
+  3623	    }
+  3624	
+exec
+/bin/zsh -lc "rg -n \"invoke_agent|agent_name|PolicyEngine|withUserHints|mapParams|Subagent|Register Subagent Tool|Register unified\" packages evals --glob '*.{ts,tsx}' --glob '"'!node_modules/**'"'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 39ms:
+packages/cli/src/ui/components/messages/SubagentHistoryMessage.tsx:9:import type { HistoryItemSubagent } from '../../types.js';
+packages/cli/src/ui/components/messages/SubagentHistoryMessage.tsx:11:interface SubagentHistoryMessageProps {
+packages/cli/src/ui/components/messages/SubagentHistoryMessage.tsx:12:  item: HistoryItemSubagent;
+packages/cli/src/ui/components/messages/SubagentHistoryMessage.tsx:16:export const SubagentHistoryMessage: React.FC<SubagentHistoryMessageProps> = ({
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:13:  isSubagentProgress,
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:15:  type SubagentActivityItem,
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:18:  SubagentProgressDisplay,
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:20:} from './SubagentProgressDisplay.js';
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:23:export interface SubagentGroupDisplayProps {
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:33:export const SubagentGroupDisplay: React.FC<SubagentGroupDisplayProps> = ({
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:67:    if (isSubagentProgress(singleAgent)) {
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:90:      if (isSubagentProgress(progress)) {
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:163:        if (!isSubagentProgress(progress)) {
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:195:        const lastActivity: SubagentActivityItem | undefined =
+packages/cli/src/ui/components/messages/SubagentGroupDisplay.tsx:261:            <SubagentProgressDisplay
+packages/cli/src/ui/components/messages/ToolGroupMessageRegression.test.tsx:77:          isSubagentProgress: true,
+packages/cli/src/ui/components/messages/ToolGroupMessageRegression.test.tsx:113:          isSubagentProgress: true,
+packages/cli/src/ui/components/messages/ToolResultDisplay.tsx:18:  isSubagentProgress,
+packages/cli/src/ui/components/messages/ToolResultDisplay.tsx:29:import { SubagentProgressDisplay } from './SubagentProgressDisplay.js';
+packages/cli/src/ui/components/messages/ToolResultDisplay.tsx:106:    } else if (isSubagentProgress(contentData)) {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.test.ts | sed -n '260,310p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.ts | sed -n '213,310p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   260	    it('should match tool call using one legacy name against policy for another legacy name (same canonical tool)', async () => {
+   261	      const legacyName1 = 'legacy_test_tool';
+   262	      const legacyName2 = 'another_legacy_test_tool';
+   263	
+   264	      const rules: PolicyRule[] = [
+   265	        { toolName: legacyName2, decision: PolicyDecision.DENY },
+   266	      ];
+   267	
+   268	      engine = new PolicyEngine({ rules });
+   269	
+   270	      // Call using legacyName1, should be denied because legacyName2 has a deny rule
+   271	      // and they both point to the same canonical tool.
+   272	      const { decision } = await engine.check({ name: legacyName1 }, undefined);
+   273	      expect(decision).toBe(PolicyDecision.DENY);
+   274	    });
+   275	
+   276	    it('should match subagent name as alias for invoke_agent', async () => {
+   277	      const rules: PolicyRule[] = [
+   278	        { toolName: 'codebase_investigator', decision: PolicyDecision.DENY },
+   279	      ];
+ succeeded in 0ms:
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index 94215e4795..fe87fb1d5d 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,8 +335,6 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
+-          # Only run always passes behavioral tests.
+-          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index fbb770ac84..9acc1de050 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,18 +5,10 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+ succeeded in 0ms:
+   213	  private withUserHints(agentArgs: AgentInputs): AgentInputs {
+   214	    if (this.definition.kind !== 'remote') {
+   215	      return agentArgs;
+   216	    }
+   217	
+   218	    const userHints = this.context.config.injectionService.getInjectionsAfter(
+   219	      this.startIndex,
+   220	      'user_steering',
+   221	    );
+   222	    const formattedHints = formatUserHintsForModel(userHints);
+   223	    if (!formattedHints) {
+   224	      return agentArgs;
+   225	    }
+   226	
+   227	    // Find the primary key to append hints to
+   228	    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+   229	    if (!isRecord(schemaObj)) {
+   230	      return agentArgs;
+   231	    }
+   232	    const properties = schemaObj['properties'];
+exec
+/bin/zsh -lc "rg -n \"class BaseToolInvocation|_toolName|toolDisplayName|createInvocation\" packages/core/src/tools packages/core/src -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/tools/ask-user.ts:89:  protected createInvocation(
+packages/core/src/tools/ask-user.ts:93:    toolDisplayName: string,
+packages/core/src/tools/ask-user.ts:95:    return new AskUserInvocation(params, messageBus, toolName, toolDisplayName);
+packages/core/src/tools/write-todos.ts:42:    _toolName?: string,
+packages/core/src/tools/write-todos.ts:43:    _toolDisplayName?: string,
+packages/core/src/tools/write-todos.ts:45:    super(params, messageBus, _toolName, _toolDisplayName);
+packages/core/src/tools/write-todos.ts:133:  protected createInvocation(
+packages/core/src/tools/write-todos.ts:136:    _toolName?: string,
+packages/core/src/tools/write-todos.ts:142:      _toolName,
+packages/core/src/tools/memoryTool.ts:331:  protected createInvocation(
+packages/core/src/hooks/hookSystem.ts:118:        toolDisplayName: details.toolDisplayName,
+packages/core/src/tools/glob.ts:105:    _toolName?: string,
+packages/core/src/tools/glob.ts:106:    _toolDisplayName?: string,
+packages/core/src/tools/glob.ts:108:    super(params, messageBus, _toolName, _toolDisplayName);
+packages/core/src/tools/glob.ts:342:  protected createInvocation(
+packages/core/src/tools/glob.ts:345:    _toolName?: string,
+packages/core/src/tools/glob.ts:346:    _toolDisplayName?: string,
+packages/core/src/tools/glob.ts:352:      _toolName,
+packages/core/src/tools/glob.ts:353:      _toolDisplayName,
+packages/core/src/tools/message-bus-integration.test.ts:90:  protected createInvocation(
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tools.ts | sed -n '155,180p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tools.ts | sed -n '660,730p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/agent-tool.test.ts | sed -n '1,240p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   155	  allowRedirection?: boolean;
+   156	}
+   157	
+   158	/**
+   159	 * A convenience base class for ToolInvocation.
+   160	 */
+   161	export abstract class BaseToolInvocation<
+   162	  TParams extends object,
+   163	  TResult extends ToolResult,
+   164	> implements ToolInvocation<TParams, TResult>
+   165	{
+   166	  constructor(
+   167	    readonly params: TParams,
+   168	    protected readonly messageBus: MessageBus,
+   169	    readonly _toolName?: string,
+   170	    readonly _toolDisplayName?: string,
+   171	    readonly _serverName?: string,
+   172	    readonly _toolAnnotations?: Record<string, unknown>,
+   173	    readonly respectsAutoEdit: boolean = false,
+   174	    readonly getApprovalMode: () => ApprovalMode = () => ApprovalMode.DEFAULT,
+ succeeded in 0ms:
+   660	    try {
+   661	      return await invocationOrError.execute(abortSignal);
+   662	    } catch (error) {
+   663	      const errorMessage =
+   664	        error instanceof Error ? error.message : String(error);
+   665	      return {
+   666	        llmContent: `Error: Tool call execution failed. Reason: ${errorMessage}`,
+   667	        returnDisplay: errorMessage,
+   668	        error: {
+   669	          message: errorMessage,
+   670	          type: ToolErrorType.EXECUTION_FAILED,
+   671	        },
+   672	      };
+   673	    }
+   674	  }
+   675	}
+   676	
+   677	/**
+   678	 * New base class for declarative tools that separates validation from execution.
+   679	 * New tools should extend this class, which provides a `build` method that
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2026 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import { describe, it, expect, vi, beforeEach } from 'vitest';
+     8	import { AgentTool } from './agent-tool.js';
+     9	import { makeFakeConfig } from '../test-utils/config.js';
+    10	import { createMockMessageBus } from '../test-utils/mock-message-bus.js';
+    11	import type { Config } from '../config/config.js';
+    12	import type { MessageBus } from '../confirmation-bus/message-bus.js';
+    13	import { LocalSubagentInvocation } from './local-invocation.js';
+    14	import { RemoteAgentInvocation } from './remote-invocation.js';
+    15	import { BrowserAgentInvocation } from './browser/browserAgentInvocation.js';
+    16	import { BROWSER_AGENT_NAME } from './browser/browserAgentDefinition.js';
+    17	import { AgentRegistry } from './registry.js';
+    18	import type { LocalAgentDefinition, RemoteAgentDefinition } from './types.js';
+    19	
+    20	vi.mock('./local-invocation.js');
+exec
+/bin/zsh -lc "rg -n \"argsPattern|function ruleMatches|const ruleMatches|export function ruleMatches|toolNamesToTry|getToolAliases\" packages/core/src/policy/policy-engine.ts packages/core/src/policy -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-engine.ts:32:import { getToolAliases, AGENT_TOOL_NAME } from '../tools/tool-names.js';
+packages/core/src/policy/policy-engine.ts:83:function ruleMatches(
+packages/core/src/policy/policy-engine.ts:169:  if (rule.argsPattern) {
+packages/core/src/policy/policy-engine.ts:177:      !rule.argsPattern.test(stringifiedArgs)
+packages/core/src/policy/policy-engine.ts:518:      (this.rules.some((rule) => rule.argsPattern) ||
+packages/core/src/policy/policy-engine.ts:519:        this.checkers.some((checker) => checker.argsPattern))
+packages/core/src/policy/policy-engine.ts:548:    const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+packages/core/src/policy/policy-engine.ts:555:          toolNamesToTry.push(subagentName);
+packages/core/src/policy/policy-engine.ts:561:    for (const name of toolNamesToTry) {
+packages/core/src/policy/policy-engine.ts:585:          `[PolicyEngine.check] MATCHED rule: toolName=${rule.toolName}, decision=${rule.decision}, priority=${rule.priority}, argsPattern=${rule.argsPattern?.source || 'none'}`,
+packages/core/src/policy/policy-engine.ts:593:          !rule.argsPattern
+packages/core/src/policy/policy-engine.ts:852:   * 1. Global rules (no argsPattern)
+packages/core/src/policy/policy-engine.ts:886:        // Create a copy of the rule without argsPattern to see if it targets the tool
+packages/core/src/policy/policy-engine.ts:888:        const ruleWithoutArgs: PolicyRule = { ...rule, argsPattern: undefined };
+packages/core/src/policy/policy-engine.ts:902:          if (rule.argsPattern) {
+packages/core/src/policy/policy-engine.ts:32:import { getToolAliases, AGENT_TOOL_NAME } from '../tools/tool-names.js';
+packages/core/src/policy/policy-engine.ts:83:function ruleMatches(
+packages/core/src/policy/policy-engine.ts:169:  if (rule.argsPattern) {
+packages/core/src/policy/policy-engine.ts:177:      !rule.argsPattern.test(stringifiedArgs)
+packages/core/src/policy/policy-engine.ts:518:      (this.rules.some((rule) => rule.argsPattern) ||
+codex
+One issue is emerging in C1: its wording conflicts with the fallback defaults that current tests rely on when `createInvocation` is called directly. I’m checking whether this is just ambiguous or a literal test-breaking instruction before writing the findings file.
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md && nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md | sed -n '1,200p' || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/remote-invocation.ts | sed -n '55,82p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/browser/browserAgentInvocation.ts | sed -n '55,85p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/local-invocation.ts | sed -n '55,75p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+    55	 * - MCP connection and tool wrapping at invocation time
+    56	 * - Browser cleanup after execution
+    57	 */
+    58	export class BrowserAgentInvocation extends BaseToolInvocation<
+    59	  AgentInputs,
+    60	  ToolResult
+    61	> {
+    62	  private readonly agentName: string;
+    63	
+    64	  constructor(
+    65	    private readonly context: AgentLoopContext,
+    66	    params: AgentInputs,
+    67	    messageBus: MessageBus,
+    68	    _toolName?: string,
+    69	    _toolDisplayName?: string,
+    70	  ) {
+    71	    const resolvedName = _toolName ?? 'browser_agent';
+    72	    // Note: BrowserAgentDefinition is a factory function, so we use hardcoded names
+    73	    super(
+    74	      params,
+ succeeded in 0ms:
+    55	  private authHandler: AuthenticationHandler | undefined;
+    56	
+    57	  constructor(
+    58	    private readonly definition: RemoteAgentDefinition,
+    59	    private readonly context: AgentLoopContext,
+    60	    params: AgentInputs,
+    61	    messageBus: MessageBus,
+    62	    _toolName?: string,
+    63	    _toolDisplayName?: string,
+    64	  ) {
+    65	    const query = params['query'] ?? DEFAULT_QUERY_STRING;
+    66	    if (typeof query !== 'string') {
+    67	      throw new Error(
+    68	        `Remote agent '${definition.name}' requires a string 'query' input.`,
+    69	      );
+    70	    }
+    71	    // Safe to pass strict object to super
+    72	    super(
+    73	      { query },
+    74	      messageBus,
+ succeeded in 0ms:
+    55	   * @param params The validated input parameters for the agent.
+    56	   * @param messageBus Message bus for policy enforcement.
+    57	   */
+    58	  constructor(
+    59	    private readonly definition: LocalAgentDefinition,
+    60	    private readonly context: AgentLoopContext,
+    61	    params: AgentInputs,
+    62	    messageBus: MessageBus,
+    63	    _toolName?: string,
+    64	    _toolDisplayName?: string,
+    65	  ) {
+    66	    super(
+    67	      params,
+    68	      messageBus,
+    69	      _toolName ?? definition.name,
+    70	      _toolDisplayName ?? definition.displayName,
+    71	    );
+    72	  }
+    73	
+    74	  /**
+codex
+I found a blocker in C1’s wording. I’m going to write the hunt-spec file with that single finding and leave the source tree untouched.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
+**Severity**: blocker
+**Claim**: C1
+**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
+**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
+**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+apply_patch(auto_approved=true) exited 0 in 27ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bacf13af45d499e5395f55735f6291400e9b2c3d
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
++**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bacf13af45d499e5395f55735f6291400e9b2c3d
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
++**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+
+exec
+/bin/zsh -lc 'nl -ba /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
+     2	**Severity**: blocker
+     3	**Claim**: C1
+     4	**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
+     5	**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
+     6	**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bacf13af45d499e5395f55735f6291400e9b2c3d
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
++**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+
+codex
+Wrote the review findings to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md)
+
+It contains one blocker finding against C1. No source files were edited.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bacf13af45d499e5395f55735f6291400e9b2c3d
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md
+@@ -0,0 +1,6 @@
++## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
++**Severity**: blocker
++**Claim**: C1
++**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
++**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
++**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+
+tokens used
+61,246
+Wrote the review findings to:
+
+[/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md)
+
+It contains one blocker finding against C1. No source files were edited.

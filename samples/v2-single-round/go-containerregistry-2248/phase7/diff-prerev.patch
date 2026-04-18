@@ -1,0 +1,454 @@
+diff --git a/cmd/krane/go.mod b/cmd/krane/go.mod
+index 33a4fcc8..670ae5d7 100644
+--- a/cmd/krane/go.mod
++++ b/cmd/krane/go.mod
+@@ -45,7 +45,6 @@ require (
+ 	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
+ 	github.com/dimchansky/utfbom v1.1.1 // indirect
+ 	github.com/docker/cli v29.3.1+incompatible // indirect
+-	github.com/docker/distribution v2.8.3+incompatible // indirect
+ 	github.com/docker/docker-credential-helpers v0.9.5 // indirect
+ 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+ 	github.com/google/go-cmp v0.7.0 // indirect
+diff --git a/go.mod b/go.mod
+index 48ecf24f..ee45f696 100644
+--- a/go.mod
++++ b/go.mod
+@@ -10,7 +10,6 @@ go 1.25.0
+ require (
+ 	github.com/containerd/stargz-snapshotter/estargz v0.18.2
+ 	github.com/docker/cli v29.3.1+incompatible
+-	github.com/docker/distribution v2.8.3+incompatible
+ 	github.com/google/go-cmp v0.7.0
+ 	github.com/klauspost/compress v1.18.5
+ 	github.com/mitchellh/go-homedir v1.1.0
+diff --git a/go.sum b/go.sum
+index 5712ddf6..d1997e83 100644
+--- a/go.sum
++++ b/go.sum
+@@ -17,8 +17,6 @@ github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5Qvfr
+ github.com/distribution/reference v0.6.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
+ github.com/docker/cli v29.3.1+incompatible h1:M04FDj2TRehDacrosh7Vlkgc7AuQoWloQkf1PA5hmoI=
+ github.com/docker/cli v29.3.1+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
+-github.com/docker/distribution v2.8.3+incompatible h1:AtKxIZ36LoNK51+Z6RpzLpddBirtxJnzDrHLEKxTAYk=
+-github.com/docker/distribution v2.8.3+incompatible/go.mod h1:J2gT2udsDAN96Uj4KfcMRqY0/ypR+oyYUYmja8H+y+w=
+ github.com/docker/docker-credential-helpers v0.9.3 h1:gAm/VtF9wgqJMoxzT3Gj5p4AqIjCBS4wrsOh9yRqcz8=
+ github.com/docker/docker-credential-helpers v0.9.3/go.mod h1:x+4Gbw9aGmChi3qTLZj8Dfn0TD20M/fuWy0E5+WDeCo=
+ github.com/docker/go-connections v0.6.0 h1:LlMG9azAe1TqfR7sO+NJttz1gy6KO7VJBh+pMmjSD94=
+diff --git a/pkg/authn/k8schain/go.mod b/pkg/authn/k8schain/go.mod
+index 595af03f..b8e2a7a0 100644
+--- a/pkg/authn/k8schain/go.mod
++++ b/pkg/authn/k8schain/go.mod
+@@ -52,7 +52,6 @@ require (
+ 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+ 	github.com/dimchansky/utfbom v1.1.1 // indirect
+ 	github.com/docker/cli v29.3.1+incompatible // indirect
+-	github.com/docker/distribution v2.8.3+incompatible // indirect
+ 	github.com/docker/docker-credential-helpers v0.9.5 // indirect
+ 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
+ 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
+diff --git a/vendor/github.com/docker/distribution/registry/client/auth/challenge/authchallenge.go b/pkg/v1/remote/internal/authchallenge/authchallenge.go
+similarity index 65%
+rename from vendor/github.com/docker/distribution/registry/client/auth/challenge/authchallenge.go
+rename to pkg/v1/remote/internal/authchallenge/authchallenge.go
+index fe238210..e8740f2f 100644
+--- a/vendor/github.com/docker/distribution/registry/client/auth/challenge/authchallenge.go
++++ b/pkg/v1/remote/internal/authchallenge/authchallenge.go
+@@ -1,91 +1,10 @@
+-package challenge
++package authchallenge
+ 
+ import (
+-	"fmt"
+ 	"net/http"
+-	"net/url"
+ 	"strings"
+-	"sync"
+ )
+ 
+-// Challenge carries information from a WWW-Authenticate response header.
+-// See RFC 2617.
+-type Challenge struct {
+-	// Scheme is the auth-scheme according to RFC 2617
+-	Scheme string
+-
+-	// Parameters are the auth-params according to RFC 2617
+-	Parameters map[string]string
+-}
+-
+-// Manager manages the challenges for endpoints.
+-// The challenges are pulled out of HTTP responses. Only
+-// responses which expect challenges should be added to
+-// the manager, since a non-unauthorized request will be
+-// viewed as not requiring challenges.
+-type Manager interface {
+-	// GetChallenges returns the challenges for the given
+-	// endpoint URL.
+-	GetChallenges(endpoint url.URL) ([]Challenge, error)
+-
+-	// AddResponse adds the response to the challenge
+-	// manager. The challenges will be parsed out of
+-	// the WWW-Authenicate headers and added to the
+-	// URL which was produced the response. If the
+-	// response was authorized, any challenges for the
+-	// endpoint will be cleared.
+-	AddResponse(resp *http.Response) error
+-}
+-
+-// NewSimpleManager returns an instance of
+-// Manger which only maps endpoints to challenges
+-// based on the responses which have been added the
+-// manager. The simple manager will make no attempt to
+-// perform requests on the endpoints or cache the responses
+-// to a backend.
+-func NewSimpleManager() Manager {
+-	return &simpleManager{
+-		Challenges: make(map[string][]Challenge),
+-	}
+-}
+-
+-type simpleManager struct {
+-	sync.RWMutex
+-	Challenges map[string][]Challenge
+-}
+-
+-func normalizeURL(endpoint *url.URL) {
+-	endpoint.Host = strings.ToLower(endpoint.Host)
+-	endpoint.Host = canonicalAddr(endpoint)
+-}
+-
+-func (m *simpleManager) GetChallenges(endpoint url.URL) ([]Challenge, error) {
+-	normalizeURL(&endpoint)
+-
+-	m.RLock()
+-	defer m.RUnlock()
+-	challenges := m.Challenges[endpoint.String()]
+-	return challenges, nil
+-}
+-
+-func (m *simpleManager) AddResponse(resp *http.Response) error {
+-	challenges := ResponseChallenges(resp)
+-	if resp.Request == nil {
+-		return fmt.Errorf("missing request reference")
+-	}
+-	urlCopy := url.URL{
+-		Path:   resp.Request.URL.Path,
+-		Host:   resp.Request.URL.Host,
+-		Scheme: resp.Request.URL.Scheme,
+-	}
+-	normalizeURL(&urlCopy)
+-
+-	m.Lock()
+-	defer m.Unlock()
+-	m.Challenges[urlCopy.String()] = challenges
+-	return nil
+-}
+-
+ // Octet types from RFC 2616.
+ type octetType byte
+ 
+@@ -128,6 +47,16 @@ func init() {
+ 	}
+ }
+ 
++// Challenge carries information from a WWW-Authenticate response header.
++// See RFC 2617.
++type Challenge struct {
++	// Scheme is the auth-scheme according to RFC 2617
++	Scheme string
++
++	// Parameters are the auth-params according to RFC 2617
++	Parameters map[string]string
++}
++
+ // ResponseChallenges returns a list of authorization challenges
+ // for the given http Response. Challenges are only checked if
+ // the response status code was a 401.
+diff --git a/pkg/v1/remote/transport/bearer.go b/pkg/v1/remote/transport/bearer.go
+index ea652d4a..8b806602 100644
+--- a/pkg/v1/remote/transport/bearer.go
++++ b/pkg/v1/remote/transport/bearer.go
+@@ -26,12 +26,11 @@ import (
+ 	"strings"
+ 	"sync"
+ 
+-	authchallenge "github.com/docker/distribution/registry/client/auth/challenge"
+-
+ 	"github.com/google/go-containerregistry/internal/redact"
+ 	"github.com/google/go-containerregistry/pkg/authn"
+ 	"github.com/google/go-containerregistry/pkg/logs"
+ 	"github.com/google/go-containerregistry/pkg/name"
++	"github.com/google/go-containerregistry/pkg/v1/remote/internal/authchallenge"
+ )
+ 
+ type Token struct {
+diff --git a/pkg/v1/remote/transport/ping.go b/pkg/v1/remote/transport/ping.go
+index 32587439..6d5cba6d 100644
+--- a/pkg/v1/remote/transport/ping.go
++++ b/pkg/v1/remote/transport/ping.go
+@@ -24,9 +24,9 @@ import (
+ 	"strings"
+ 	"time"
+ 
+-	authchallenge "github.com/docker/distribution/registry/client/auth/challenge"
+ 	"github.com/google/go-containerregistry/pkg/logs"
+ 	"github.com/google/go-containerregistry/pkg/name"
++	"github.com/google/go-containerregistry/pkg/v1/remote/internal/authchallenge"
+ )
+ 
+ // 300ms is the default fallback period for go's DNS dialer but we could make this configurable.
+diff --git a/vendor/github.com/docker/distribution/LICENSE b/vendor/github.com/docker/distribution/LICENSE
+deleted file mode 100644
+index e06d2081..00000000
+--- a/vendor/github.com/docker/distribution/LICENSE
++++ /dev/null
+@@ -1,202 +0,0 @@
+-Apache License
+-                           Version 2.0, January 2004
+-                        http://www.apache.org/licenses/
+-
+-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+-
+-   1. Definitions.
+-
+-      "License" shall mean the terms and conditions for use, reproduction,
+-      and distribution as defined by Sections 1 through 9 of this document.
+-
+-      "Licensor" shall mean the copyright owner or entity authorized by
+-      the copyright owner that is granting the License.
+-
+-      "Legal Entity" shall mean the union of the acting entity and all
+-      other entities that control, are controlled by, or are under common
+-      control with that entity. For the purposes of this definition,
+-      "control" means (i) the power, direct or indirect, to cause the
+-      direction or management of such entity, whether by contract or
+-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+-      outstanding shares, or (iii) beneficial ownership of such entity.
+-
+-      "You" (or "Your") shall mean an individual or Legal Entity
+-      exercising permissions granted by this License.
+-
+-      "Source" form shall mean the preferred form for making modifications,
+-      including but not limited to software source code, documentation
+-      source, and configuration files.
+-
+-      "Object" form shall mean any form resulting from mechanical
+-      transformation or translation of a Source form, including but
+-      not limited to compiled object code, generated documentation,
+-      and conversions to other media types.
+-
+-      "Work" shall mean the work of authorship, whether in Source or
+-      Object form, made available under the License, as indicated by a
+-      copyright notice that is included in or attached to the work
+-      (an example is provided in the Appendix below).
+-
+-      "Derivative Works" shall mean any work, whether in Source or Object
+-      form, that is based on (or derived from) the Work and for which the
+-      editorial revisions, annotations, elaborations, or other modifications
+-      represent, as a whole, an original work of authorship. For the purposes
+-      of this License, Derivative Works shall not include works that remain
+-      separable from, or merely link (or bind by name) to the interfaces of,
+-      the Work and Derivative Works thereof.
+-
+-      "Contribution" shall mean any work of authorship, including
+-      the original version of the Work and any modifications or additions
+-      to that Work or Derivative Works thereof, that is intentionally
+-      submitted to Licensor for inclusion in the Work by the copyright owner
+-      or by an individual or Legal Entity authorized to submit on behalf of
+-      the copyright owner. For the purposes of this definition, "submitted"
+-      means any form of electronic, verbal, or written communication sent
+-      to the Licensor or its representatives, including but not limited to
+-      communication on electronic mailing lists, source code control systems,
+-      and issue tracking systems that are managed by, or on behalf of, the
+-      Licensor for the purpose of discussing and improving the Work, but
+-      excluding communication that is conspicuously marked or otherwise
+-      designated in writing by the copyright owner as "Not a Contribution."
+-
+-      "Contributor" shall mean Licensor and any individual or Legal Entity
+-      on behalf of whom a Contribution has been received by Licensor and
+-      subsequently incorporated within the Work.
+-
+-   2. Grant of Copyright License. Subject to the terms and conditions of
+-      this License, each Contributor hereby grants to You a perpetual,
+-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+-      copyright license to reproduce, prepare Derivative Works of,
+-      publicly display, publicly perform, sublicense, and distribute the
+-      Work and such Derivative Works in Source or Object form.
+-
+-   3. Grant of Patent License. Subject to the terms and conditions of
+-      this License, each Contributor hereby grants to You a perpetual,
+-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+-      (except as stated in this section) patent license to make, have made,
+-      use, offer to sell, sell, import, and otherwise transfer the Work,
+-      where such license applies only to those patent claims licensable
+-      by such Contributor that are necessarily infringed by their
+-      Contribution(s) alone or by combination of their Contribution(s)
+-      with the Work to which such Contribution(s) was submitted. If You
+-      institute patent litigation against any entity (including a
+-      cross-claim or counterclaim in a lawsuit) alleging that the Work
+-      or a Contribution incorporated within the Work constitutes direct
+-      or contributory patent infringement, then any patent licenses
+-      granted to You under this License for that Work shall terminate
+-      as of the date such litigation is filed.
+-
+-   4. Redistribution. You may reproduce and distribute copies of the
+-      Work or Derivative Works thereof in any medium, with or without
+-      modifications, and in Source or Object form, provided that You
+-      meet the following conditions:
+-
+-      (a) You must give any other recipients of the Work or
+-          Derivative Works a copy of this License; and
+-
+-      (b) You must cause any modified files to carry prominent notices
+-          stating that You changed the files; and
+-
+-      (c) You must retain, in the Source form of any Derivative Works
+-          that You distribute, all copyright, patent, trademark, and
+-          attribution notices from the Source form of the Work,
+-          excluding those notices that do not pertain to any part of
+-          the Derivative Works; and
+-
+-      (d) If the Work includes a "NOTICE" text file as part of its
+-          distribution, then any Derivative Works that You distribute must
+-          include a readable copy of the attribution notices contained
+-          within such NOTICE file, excluding those notices that do not
+-          pertain to any part of the Derivative Works, in at least one
+-          of the following places: within a NOTICE text file distributed
+-          as part of the Derivative Works; within the Source form or
+-          documentation, if provided along with the Derivative Works; or,
+-          within a display generated by the Derivative Works, if and
+-          wherever such third-party notices normally appear. The contents
+-          of the NOTICE file are for informational purposes only and
+-          do not modify the License. You may add Your own attribution
+-          notices within Derivative Works that You distribute, alongside
+-          or as an addendum to the NOTICE text from the Work, provided
+-          that such additional attribution notices cannot be construed
+-          as modifying the License.
+-
+-      You may add Your own copyright statement to Your modifications and
+-      may provide additional or different license terms and conditions
+-      for use, reproduction, or distribution of Your modifications, or
+-      for any such Derivative Works as a whole, provided Your use,
+-      reproduction, and distribution of the Work otherwise complies with
+-      the conditions stated in this License.
+-
+-   5. Submission of Contributions. Unless You explicitly state otherwise,
+-      any Contribution intentionally submitted for inclusion in the Work
+-      by You to the Licensor shall be under the terms and conditions of
+-      this License, without any additional terms or conditions.
+-      Notwithstanding the above, nothing herein shall supersede or modify
+-      the terms of any separate license agreement you may have executed
+-      with Licensor regarding such Contributions.
+-
+-   6. Trademarks. This License does not grant permission to use the trade
+-      names, trademarks, service marks, or product names of the Licensor,
+-      except as required for reasonable and customary use in describing the
+-      origin of the Work and reproducing the content of the NOTICE file.
+-
+-   7. Disclaimer of Warranty. Unless required by applicable law or
+-      agreed to in writing, Licensor provides the Work (and each
+-      Contributor provides its Contributions) on an "AS IS" BASIS,
+-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+-      implied, including, without limitation, any warranties or conditions
+-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+-      PARTICULAR PURPOSE. You are solely responsible for determining the
+-      appropriateness of using or redistributing the Work and assume any
+-      risks associated with Your exercise of permissions under this License.
+-
+-   8. Limitation of Liability. In no event and under no legal theory,
+-      whether in tort (including negligence), contract, or otherwise,
+-      unless required by applicable law (such as deliberate and grossly
+-      negligent acts) or agreed to in writing, shall any Contributor be
+-      liable to You for damages, including any direct, indirect, special,
+-      incidental, or consequential damages of any character arising as a
+-      result of this License or out of the use or inability to use the
+-      Work (including but not limited to damages for loss of goodwill,
+-      work stoppage, computer failure or malfunction, or any and all
+-      other commercial damages or losses), even if such Contributor
+-      has been advised of the possibility of such damages.
+-
+-   9. Accepting Warranty or Additional Liability. While redistributing
+-      the Work or Derivative Works thereof, You may choose to offer,
+-      and charge a fee for, acceptance of support, warranty, indemnity,
+-      or other liability obligations and/or rights consistent with this
+-      License. However, in accepting such obligations, You may act only
+-      on Your own behalf and on Your sole responsibility, not on behalf
+-      of any other Contributor, and only if You agree to indemnify,
+-      defend, and hold each Contributor harmless for any liability
+-      incurred by, or claims asserted against, such Contributor by reason
+-      of your accepting any such warranty or additional liability.
+-
+-   END OF TERMS AND CONDITIONS
+-
+-   APPENDIX: How to apply the Apache License to your work.
+-
+-      To apply the Apache License to your work, attach the following
+-      boilerplate notice, with the fields enclosed by brackets "{}"
+-      replaced with your own identifying information. (Don't include
+-      the brackets!)  The text should be enclosed in the appropriate
+-      comment syntax for the file format. We also recommend that a
+-      file or class name and description of purpose be included on the
+-      same "printed page" as the copyright notice for easier
+-      identification within third-party archives.
+-
+-   Copyright {yyyy} {name of copyright owner}
+-
+-   Licensed under the Apache License, Version 2.0 (the "License");
+-   you may not use this file except in compliance with the License.
+-   You may obtain a copy of the License at
+-
+-       http://www.apache.org/licenses/LICENSE-2.0
+-
+-   Unless required by applicable law or agreed to in writing, software
+-   distributed under the License is distributed on an "AS IS" BASIS,
+-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-   See the License for the specific language governing permissions and
+-   limitations under the License.
+-
+diff --git a/vendor/github.com/docker/distribution/registry/client/auth/challenge/addr.go b/vendor/github.com/docker/distribution/registry/client/auth/challenge/addr.go
+deleted file mode 100644
+index 2c3ebe16..00000000
+--- a/vendor/github.com/docker/distribution/registry/client/auth/challenge/addr.go
++++ /dev/null
+@@ -1,27 +0,0 @@
+-package challenge
+-
+-import (
+-	"net/url"
+-	"strings"
+-)
+-
+-// FROM: https://golang.org/src/net/http/http.go
+-// Given a string of the form "host", "host:port", or "[ipv6::address]:port",
+-// return true if the string includes a port.
+-func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
+-
+-// FROM: http://golang.org/src/net/http/transport.go
+-var portMap = map[string]string{
+-	"http":  "80",
+-	"https": "443",
+-}
+-
+-// canonicalAddr returns url.Host but always with a ":port" suffix
+-// FROM: http://golang.org/src/net/http/transport.go
+-func canonicalAddr(url *url.URL) string {
+-	addr := url.Host
+-	if !hasPort(addr) {
+-		return addr + ":" + portMap[url.Scheme]
+-	}
+-	return addr
+-}
+diff --git a/vendor/modules.txt b/vendor/modules.txt
+index d5ff3404..0c0a2aca 100644
+--- a/vendor/modules.txt
++++ b/vendor/modules.txt
+@@ -32,9 +32,6 @@ github.com/docker/cli/cli/config/configfile
+ github.com/docker/cli/cli/config/credentials
+ github.com/docker/cli/cli/config/memorystore
+ github.com/docker/cli/cli/config/types
+-# github.com/docker/distribution v2.8.3+incompatible
+-## explicit
+-github.com/docker/distribution/registry/client/auth/challenge
+ # github.com/docker/docker-credential-helpers v0.9.3
+ ## explicit; go 1.21
+ github.com/docker/docker-credential-helpers/client

@@ -7,7 +7,7 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: none
 reasoning summaries: none
-session id: 019d9782-09c3-7591-8f0f-3e0054b5f447
+session id: 019d9dee-190c-7682-b848-46d6fea705aa
 --------
 user
 # Implement the sharpened refactor claims
@@ -48,9 +48,12 @@ You must either:
 Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
 mcp startup: no servers
 codex
-I’ll read the goal, sharpened spec, allowed file list, and input diff first, then apply only the accepted claims in their stated order.
+I’ll read the spec, goal, patch, and allowed file list first, then apply only the accepted claims within that edit set. I’ll avoid tests as requested and write the required implementation summary at the end.
 exec
-/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "sed -n '1,220p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
 # PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
 
 ## PR body
@@ -71,52 +74,27 @@ Refactors specialized subagent tools into a single, unified `invoke_agent` tool 
 
 Related to the effort of simplifying the main agent's toolset and improving context efficiency.
 
-exec
-/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
-/private/tmp/refactor-eq-workdir/bb-codex-24489
-SECURITY.md
-SHARPENED_SPEC.md
-FORGE_INPUT_DIFF.patch
-sea/sea-launch.cjs
-sea/sea-launch.test.js
-eslint.config.js
-GEMINI.md
-tsconfig.json
-packages/a2a-server/src/index.ts
-packages/a2a-server/src/commands/command-registry.ts
-packages/a2a-server/src/commands/memory.test.ts
-packages/a2a-server/src/commands/memory.ts
-packages/a2a-server/src/commands/extensions.test.ts
-packages/a2a-server/src/commands/command-registry.test.ts
-packages/a2a-server/src/commands/restore.test.ts
-packages/a2a-server/src/commands/types.ts
-packages/a2a-server/src/commands/extensions.ts
-packages/a2a-server/src/commands/init.test.ts
-packages/a2a-server/src/commands/init.ts
-exec
-/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24489exec
-/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24489exec
-/bin/zsh -lc "sed -n '1,200p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+ succeeded in 0ms:
 ## Accepted Claims
 
-### C1 — Centralize Agent Input Key Selection
-**File**: packages/core/src/agents/agent-tool.ts:106
-**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
-**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
-**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
-**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
+### C1 — Use Virtual Subagent Tool Names In Plan Policy
+**File**: packages/core/src/policy/policies/plan.toml:108
+**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
+**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
 
-### C2 — Reuse Hinted Child Invocation Construction
-**File**: packages/core/src/agents/agent-tool.ts:180
-**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
-**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
-**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
+### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
+**File**: packages/core/src/agents/registry.ts:394
+**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
+**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
+**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
 
 ## Rejected
 
-- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
-- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
-- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
+- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
+- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
+- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
+- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
  succeeded in 0ms:
 diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
 index 94215e4795..fe87fb1d5d 100644
@@ -138,7 +116,8 @@ index fbb770ac84..9acc1de050 100644
 @@ -5,18 +5,10 @@ on:
      - cron: '0 1 * * *' # Runs at 1 AM every day
    workflow_dispatch:
- succeeded in 0ms:
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
 .github/workflows/chained_e2e.yml
 .github/workflows/evals-nightly.yml
 .github/workflows/perf-nightly.yml
@@ -159,916 +138,739 @@ evals/generalist_delegation.eval.ts
 evals/gitRepo.eval.ts
 evals/grep_search_functionality.eval.ts
 evals/hierarchical_memory.eval.ts
-codex
-The accepted scope is narrow: both claims target `packages/core/src/agents/agent-tool.ts`, which is in the allowed set and is not a test. I’m opening that file now and ignoring the unrelated artifact hunks.
-exec
-/bin/zsh -lc "sed -n '1,280p' packages/core/src/agents/agent-tool.ts" in /tmp/refactor-eq-workdir/bb-codex-24489exec
-/bin/zsh -lc 'rg -n "class AgentTool|class DelegateInvocation|mapParams|withUserHints|buildChildInvocation|mappedInputs|prompt" packages/core/src/agents/agent-tool.ts' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
-37: * mapping the general 'prompt' parameter to the agent's specific schema,
-40:export class AgentTool extends BaseDeclarativeTool<
-41:  { agent_name: string; prompt: string },
-62:          prompt: {
-68:        required: ['agent_name', 'prompt'],
-77:    params: { agent_name: string; prompt: string },
-81:  ): ToolInvocation<{ agent_name: string; prompt: string }, ToolResult> {
-90:    const mappedInputs = this.mapParams(
-91:      params.prompt,
-97:      mappedInputs,
-106:  private mapParams(prompt: string, schema: unknown): AgentInputs {
-109:      return { prompt };
-115:        return { [keys[0]]: prompt };
-118:    return { prompt };
-122:class DelegateInvocation extends BaseToolInvocation<
-123:  { agent_name: string; prompt: string },
-129:    params: { agent_name: string; prompt: string },
-130:    private readonly mappedInputs: AgentInputs,
-150:  private buildChildInvocation(
-183:    const hintedParams = this.withUserHints(this.mappedInputs);
  succeeded in 0ms:
-/**
- * @license
- * Copyright 2026 Google LLC
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import {
-  BaseDeclarativeTool,
-  Kind,
-  type ToolInvocation,
-  type ToolResult,
-  BaseToolInvocation,
-  type ToolCallConfirmationDetails,
-  type ToolLiveOutput,
-} from '../tools/tools.js';
-import { type AgentLoopContext } from '../config/agent-loop-context.js';
-import type { MessageBus } from '../confirmation-bus/message-bus.js';
-import type { AgentDefinition, AgentInputs } from './types.js';
-import { LocalSubagentInvocation } from './local-invocation.js';
-import { RemoteAgentInvocation } from './remote-invocation.js';
-exec
-/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24489 exited 128 in 0ms:
-fatal: not a git repository (or any of the parent directories): .git
+/private/tmp/refactor-eq-workdir/bb-codex-24489
+SECURITY.md
+SHARPENED_SPEC.md
+FORGE_INPUT_DIFF.patch
+sea/sea-launch.cjs
+sea/sea-launch.test.js
+eslint.config.js
+GEMINI.md
+tsconfig.json
+packages/a2a-server/src/index.ts
+packages/a2a-server/src/commands/command-registry.ts
+packages/a2a-server/src/commands/memory.test.ts
+packages/a2a-server/src/commands/memory.ts
+packages/a2a-server/src/commands/extensions.test.ts
+packages/a2a-server/src/commands/command-registry.test.ts
+packages/a2a-server/src/commands/restore.test.ts
+packages/a2a-server/src/commands/types.ts
+packages/a2a-server/src/commands/extensions.ts
+packages/a2a-server/src/commands/init.test.ts
+packages/a2a-server/src/commands/init.ts
 codex
-I’m going to make two small source edits: a module-private input-key helper reused by mapping and hint injection, then a DelegateInvocation helper that builds the hinted child invocation for both confirmation and execution. After that I’ll write the required implementation summary.
+The accepted scope is narrow: two source files, both inside the allowed edit set, and no tests. I’m going straight to those policy and registry sections now and will ignore the broader artifact changes because the spec rejected them as unrelated.
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policies/plan.toml | sed -n '90,125p'" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+    90	[[rule]]
+    91	toolName = "*"
+    92	mcpName = "*"
+    93	toolAnnotations = { readOnlyHint = true }
+    94	decision = "ask_user"
+    95	priority = 50
+    96	modes = ["plan"]
+    97	interactive = true
+    98	
+    99	[[rule]]
+   100	toolName = "*"
+   101	mcpName = "*"
+   102	toolAnnotations = { readOnlyHint = true }
+   103	decision = "deny"
+   104	priority = 50
+   105	modes = ["plan"]
+   106	interactive = false
+   107	
+   108	# Allow specific subagents in Plan mode.
+   109	# We use argsPattern to match the agent_name argument for invoke_agent.
+exec
+/bin/zsh -lc 'rg -n "AgentTool|argsPattern|invoke_agent|codebase_investigator|cli_help" packages/core/src/agents/registry.ts packages/core/src/policy/policies/plan.toml' in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '360,420p'" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '1,80p'" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+packages/core/src/policy/policies/plan.toml:109:# We use argsPattern to match the agent_name argument for invoke_agent.
+packages/core/src/policy/policies/plan.toml:112:toolName = "invoke_agent"
+packages/core/src/policy/policies/plan.toml:113:argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
+packages/core/src/policy/policies/plan.toml:140:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+packages/core/src/policy/policies/plan.toml:148:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+packages/core/src/agents/registry.ts:19:import { AgentTool } from './agent-tool.js';
+packages/core/src/agents/registry.ts:397:        toolName: AgentTool.Name,
+packages/core/src/agents/registry.ts:398:        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
+ succeeded in 0ms:
+   360	          `[AgentRegistry] Skipping disabled agent '${definition.name}'`,
+   361	        );
+   362	      }
+   363	      return;
+   364	    }
+   365	
+   366	    if (this.agents.has(definition.name) && this.config.getDebugMode()) {
+   367	      debugLogger.log(`[AgentRegistry] Overriding agent '${definition.name}'`);
+   368	    }
+   369	
+   370	    const mergedDefinition = this.applyOverrides(definition, settingsOverrides);
+   371	    this.agents.set(mergedDefinition.name, mergedDefinition);
+   372	
+   373	    this.registerModelConfigs(mergedDefinition);
+   374	    this.addAgentPolicy(mergedDefinition);
+   375	  }
+   376	
+   377	  private addAgentPolicy(definition: AgentDefinition<z.ZodTypeAny>): void {
+   378	    const policyEngine = this.config.getPolicyEngine();
+   379	    if (!policyEngine) {
+ succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import * as crypto from 'node:crypto';
+     8	import { Storage } from '../config/storage.js';
+     9	import { CoreEvent, coreEvents } from '../utils/events.js';
+    10	import type { AgentOverride, Config } from '../config/config.js';
+    11	import type { AgentDefinition, LocalAgentDefinition } from './types.js';
+    12	import { getAgentCardLoadOptions, getRemoteAgentTargetUrl } from './types.js';
+    13	import { loadAgentsFromDirectory } from './agentLoader.js';
+    14	import { CodebaseInvestigatorAgent } from './codebase-investigator.js';
+    15	import { CliHelpAgent } from './cli-help-agent.js';
+    16	import { GeneralistAgent } from './generalist-agent.js';
+    17	import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+    18	import { MemoryManagerAgent } from './memory-manager-agent.js';
+    19	import { AgentTool } from './agent-tool.js';
+    20	import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+codex
+I’m making the two source edits now: the plan-mode allowlist will name the virtual subagent tools directly, and the dynamic remote-agent policy will register against the agent name instead of parsing `invoke_agent` args.
 file update
-M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -32,2 +32,16 @@
- 
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-@@ -106,14 +120,4 @@
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
-@@ -179,2 +183,7 @@
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-@@ -182,4 +191,3 @@
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-@@ -191,4 +199,3 @@
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-@@ -226,24 +233,16 @@
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
-apply_patch(auto_approved=true) exited 0 in 13ms:
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -108,7 +108,6 @@
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -18,3 +18,2 @@
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+@@ -396,4 +395,3 @@
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+apply_patch(auto_approved=true) exited 0 in 17ms:
 Success. Updated the following files:
-M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
 file update:
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
- 
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 file update:
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
- 
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 codex
-The source change is in place. I’m doing a quick readback for the touched file and then adding `IMPLEMENT_SUMMARY.md`; I will not run tests per your constraint.
+The source edits are in place. I’m doing a quick static check of the touched snippets and then I’ll write `IMPLEMENT_SUMMARY.md`; I will not run tests.
 exec
-/bin/zsh -lc "sed -n '1,280p' packages/core/src/agents/agent-tool.ts" in /tmp/refactor-eq-workdir/bb-codex-24489exec
-/bin/zsh -lc "find . -maxdepth 1 -name 'IMPLEMENT_SUMMARY.md' -print" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
-
- succeeded in 0ms:
-/**
- * @license
- * Copyright 2026 Google LLC
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import {
-  BaseDeclarativeTool,
-  Kind,
-  type ToolInvocation,
-  type ToolResult,
-  BaseToolInvocation,
-  type ToolCallConfirmationDetails,
-  type ToolLiveOutput,
-} from '../tools/tools.js';
-import { type AgentLoopContext } from '../config/agent-loop-context.js';
-import type { MessageBus } from '../confirmation-bus/message-bus.js';
-import type { AgentDefinition, AgentInputs } from './types.js';
-import { LocalSubagentInvocation } from './local-invocation.js';
-import { RemoteAgentInvocation } from './remote-invocation.js';
+/bin/zsh -lc 'git diff -- packages/core/src/policy/policies/plan.toml packages/core/src/agents/registry.ts' in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc 'rg -n "AgentTool|argsPattern|invoke_agent|codebase_investigator|cli_help" packages/core/src/agents/registry.ts packages/core/src/policy/policies/plan.toml' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+packages/core/src/policy/policies/plan.toml:109:# Relies on invoke_agent virtual alias matching for agent_name.
+packages/core/src/policy/policies/plan.toml:112:toolName = ["codebase_investigator", "cli_help"]
+packages/core/src/policy/policies/plan.toml:139:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+packages/core/src/policy/policies/plan.toml:147:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+ exited 1 in 0ms:
+diff --git a/packages/core/src/policy/policies/plan.toml b/packages/core/src/agents/registry.ts
+index 19f6379..2c28c80 100644
+--- a/packages/core/src/policy/policies/plan.toml
++++ b/packages/core/src/agents/registry.ts
+@@ -1,155 +1,714 @@
+-# Priority system for policy rules:
+-# - Higher priority numbers win over lower priority numbers
+-# - When multiple rules match, the highest priority rule is applied
+-# - Rules are evaluated in order of priority (highest first)
+-#
+-# Priority bands (tiers):
+-# - Default policies (TOML): 1 + priority/1000 (e.g., priority 100 → 1.100)
+-# - Extension policies (TOML): 2 + priority/1000 (e.g., priority 100 → 2.100)
+-# - Workspace policies (TOML): 3 + priority/1000 (e.g., priority 100 → 3.100)
+-# - User policies (TOML): 4 + priority/1000 (e.g., priority 100 → 4.100)
+-# - Admin policies (TOML): 5 + priority/1000 (e.g., priority 100 → 5.100)
+-#
+-# This ensures Admin > User > Workspace > Extension > Default hierarchy is always preserved,
+-# while allowing user-specified priorities to work within each tier.
+-#
 file update:
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
+
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc 'git rev-parse --show-toplevel' in /tmp/refactor-eq-workdir/bb-codex-24489 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+ exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+exec
+/bin/zsh -lc 'git diff -- packages/core/src/agents/registry.ts' in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc 'git diff -- packages/core/src/policy/policies/plan.toml' in /tmp/refactor-eq-workdir/bb-codex-24489 exited 129 in 0ms:
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+ exited 129 in 0ms:
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 file update
 A /tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
 Applied claims:
-- C1 — Centralize Agent Input Key Selection
-- C2 — Reuse Hinted Child Invocation Construction
+- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
+- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 
 Modified files:
-- packages/core/src/agents/agent-tool.ts
-apply_patch(auto_approved=true) exited 0 in 14ms:
+- packages/core/src/policy/policies/plan.toml
+- packages/core/src/agents/registry.ts
+apply_patch(auto_approved=true) exited 0 in 15ms:
 Success. Updated the following files:
 A /tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
 file update:
 diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+index 0000000000000000000000000000000000000000..9beaae3ad0d35aa9c4f11402d1e96353462a195e
 --- /dev/null
 +++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,7 @@
 +Applied claims:
-+- C1 — Centralize Agent Input Key Selection
-+- C2 — Reuse Hinted Child Invocation Construction
++- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
++- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 +
 +Modified files:
-+- packages/core/src/agents/agent-tool.ts
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
++- packages/core/src/policy/policies/plan.toml
++- packages/core/src/agents/registry.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
- 
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 file update:
 diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+index 0000000000000000000000000000000000000000..9beaae3ad0d35aa9c4f11402d1e96353462a195e
 --- /dev/null
 +++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,7 @@
 +Applied claims:
-+- C1 — Centralize Agent Input Key Selection
-+- C2 — Reuse Hinted Child Invocation Construction
++- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
++- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 +
 +Modified files:
-+- packages/core/src/agents/agent-tool.ts
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
++- packages/core/src/policy/policies/plan.toml
++- packages/core/src/agents/registry.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
+
+exec
+/bin/zsh -lc "sed -n '1,120p' IMPLEMENT_SUMMARY.md" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+Applied claims:
+- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
+- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
+
+Modified files:
+- packages/core/src/policy/policies/plan.toml
+- packages/core/src/agents/registry.ts
+exec
+/bin/zsh -lc "rg -n \"AgentTool|argsPattern: new RegExp\\("'`'"\\\"agent_name\\\"|toolName = \\\"invoke_agent\\\"|agent_name.*codebase_investigator\" packages/core/src/agents/registry.ts packages/core/src/policy/policies/plan.toml" in /tmp/refactor-eq-workdir/bb-codex-24489 exited 1 in 0ms:
+zsh:1: unmatched "
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policies/plan.toml | sed -n '104,116p'" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '14,22p;392,402p'" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+   104	priority = 50
+   105	modes = ["plan"]
+   106	interactive = false
+   107	
+   108	# Allow specific subagents in Plan mode.
+   109	# Relies on invoke_agent virtual alias matching for agent_name.
+   110	[[rule]]
+   111	name = "Allow specific subagents in Plan mode"
+   112	toolName = ["codebase_investigator", "cli_help"]
+   113	decision = "allow"
+   114	priority = 50
+   115	modes = ["plan"]
+   116	
+ succeeded in 0ms:
+    14	import { CodebaseInvestigatorAgent } from './codebase-investigator.js';
+    15	import { CliHelpAgent } from './cli-help-agent.js';
+    16	import { GeneralistAgent } from './generalist-agent.js';
+    17	import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+    18	import { MemoryManagerAgent } from './memory-manager-agent.js';
+    19	import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+    20	import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+    21	import { type z } from 'zod';
+    22	import { debugLogger } from '../utils/debugLogger.js';
+   392	
+   393	    // Only add override for remote agents. Local agents are handled by blanket allow.
+   394	    if (definition.kind === 'remote') {
+   395	      policyEngine.addRule({
+   396	        toolName: definition.name,
+   397	        decision: PolicyDecision.ASK_USER,
+   398	        priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+   399	        source: DYNAMIC_RULE_SOURCE,
+   400	      });
+   401	    }
+   402	  }
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9beaae3ad0d35aa9c4f11402d1e96353462a195e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,7 @@
++Applied claims:
++- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
++- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 +
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
++Modified files:
++- packages/core/src/policy/policies/plan.toml
++- packages/core/src/agents/registry.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
+ 
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
+
+exec
+/bin/zsh -lc "rg -n 'argsPattern' packages/core/src/agents/registry.ts packages/core/src/policy/policies/plan.toml" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "rg -n 'AgentTool|toolName = \"invoke_agent\"|agent_name.*codebase_investigator' packages/core/src/agents/registry.ts packages/core/src/policy/policies/plan.toml" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+packages/core/src/policy/policies/plan.toml:139:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+packages/core/src/policy/policies/plan.toml:147:argsPattern = "\\x00\"file_path\":\"[^\"]+[\\\\/]+\\.gemini[\\\\/]+tmp[\\\\/]+[\\w-]+[\\\\/]+plans[\\\\/]+[\\w-]+\\.md\"\\x00"
+ exited 1 in 0ms:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9beaae3ad0d35aa9c4f11402d1e96353462a195e
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,7 @@
++Applied claims:
++- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
++- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 +
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
++Modified files:
++- packages/core/src/policy/policies/plan.toml
++- packages/core/src/agents/registry.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 codex
-Implemented both accepted claims.
+Implemented both accepted claims and wrote [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md).
 
 Changed:
-- [packages/core/src/agents/agent-tool.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts): added shared input-key selection, reused it in parameter mapping and remote hint injection, and centralized hinted child invocation construction.
-- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md): recorded applied claims and modified source file.
+- [plan.toml](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml): replaced the `invoke_agent` `argsPattern` allow rule with `toolName = ["codebase_investigator", "cli_help"]` and updated the comment to reference virtual alias matching.
+- [registry.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts): dynamic remote-agent policies now use `toolName: definition.name`; removed the unused `AgentTool` import.
 
-Tests were not run, per instruction.
+I did not run tests, per instruction.
 file update:
 diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+index 0000000000000000000000000000000000000000..9beaae3ad0d35aa9c4f11402d1e96353462a195e
 --- /dev/null
 +++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,7 @@
 +Applied claims:
-+- C1 — Centralize Agent Input Key Selection
-+- C2 — Reuse Hinted Child Invocation Construction
++- C1: Updated packages/core/src/policy/policies/plan.toml to allow plan-mode subagents via virtual tool names instead of an invoke_agent argsPattern.
++- C2: Updated packages/core/src/agents/registry.ts to register dynamic remote-agent policy rules by agent name and removed the now-unused AgentTool import.
 +
 +Modified files:
-+- packages/core/src/agents/agent-tool.ts
-diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
---- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-+++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
-@@ -30,6 +30,20 @@
- } from '../telemetry/constants.js';
- import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
++- packages/core/src/policy/policies/plan.toml
++- packages/core/src/agents/registry.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+index ebb757487cf7b0e1664b49bc29382d1651e27ed0..2c28c804119c3ec95e8f71fa009864564af92b23
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts
+@@ -16,7 +16,6 @@
+ import { GeneralistAgent } from './generalist-agent.js';
+ import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+ import { MemoryManagerAgent } from './memory-manager-agent.js';
+-import { AgentTool } from './agent-tool.js';
+ import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+ import type { AuthenticationHandler } from '@a2a-js/sdk/client';
+ import { type z } from 'zod';
+@@ -394,8 +393,7 @@
+     // Only add override for remote agents. Local agents are handled by blanket allow.
+     if (definition.kind === 'remote') {
+       policyEngine.addRule({
+-        toolName: AgentTool.Name,
+-        argsPattern: new RegExp(`"agent_name":\\s*"${definition.name}"`),
++        toolName: definition.name,
+         decision: PolicyDecision.ASK_USER,
+         priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+         source: DYNAMIC_RULE_SOURCE,
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+index 9c7ba69a76ffea22ca4c66876f093540685acd94..19f63792e6f3d6bd8cf74dd7c046328d262c09cb
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml
+@@ -106,11 +106,10 @@
+ interactive = false
  
-+function getAgentInputKey(schema: unknown): string | undefined {
-+  if (!isRecord(schema)) {
-+    return undefined;
-+  }
-+
-+  const properties = schema['properties'];
-+  if (!isRecord(properties)) {
-+    return undefined;
-+  }
-+
-+  const keys = Object.keys(properties);
-+  return keys.length === 1 ? keys[0] : 'prompt';
-+}
-+
- /**
-  * A unified tool for invoking subagents.
-  *
-@@ -104,18 +118,8 @@
-   }
- 
-   private mapParams(prompt: string, schema: unknown): AgentInputs {
--    const schemaObj: unknown = schema;
--    if (!isRecord(schemaObj)) {
--      return { prompt };
--    }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      if (keys.length === 1) {
--        return { [keys[0]]: prompt };
--      }
--    }
--    return { prompt };
-+    const inputKey = getAgentInputKey(schema) ?? 'prompt';
-+    return { [inputKey]: prompt };
-   }
- }
- 
-@@ -177,11 +181,15 @@
-     }
-   }
- 
-+  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
-+    const hintedParams = this.withUserHints(this.mappedInputs);
-+    return this.buildChildInvocation(hintedParams);
-+  }
-+
-   override async shouldConfirmExecute(
-     abortSignal: AbortSignal,
-   ): Promise<ToolCallConfirmationDetails | false> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
-     return invocation.shouldConfirmExecute(abortSignal);
-   }
- 
-@@ -189,8 +197,7 @@
-     signal: AbortSignal,
-     updateOutput?: (output: ToolLiveOutput) => void,
-   ): Promise<ToolResult> {
--    const hintedParams = this.withUserHints(this.mappedInputs);
--    const invocation = this.buildChildInvocation(hintedParams);
-+    const invocation = this.buildHintedChildInvocation();
- 
-     return runInDevTraceSpan(
-       {
-@@ -224,27 +231,19 @@
-       return agentArgs;
-     }
- 
--    // Find the primary key to append hints to
--    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
--    if (!isRecord(schemaObj)) {
-+    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
-+    if (!primaryKey) {
-       return agentArgs;
-     }
--    const properties = schemaObj['properties'];
--    if (isRecord(properties)) {
--      const keys = Object.keys(properties);
--      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
- 
--      const value = agentArgs[primaryKey];
--      if (typeof value !== 'string' || value.trim().length === 0) {
--        return agentArgs;
--      }
--
--      return {
--        ...agentArgs,
--        [primaryKey]: `${formattedHints}\n\n${value}`,
--      };
-+    const value = agentArgs[primaryKey];
-+    if (typeof value !== 'string' || value.trim().length === 0) {
-+      return agentArgs;
-     }
- 
--    return agentArgs;
-+    return {
-+      ...agentArgs,
-+      [primaryKey]: `${formattedHints}\n\n${value}`,
-+    };
-   }
- }
+ # Allow specific subagents in Plan mode.
+-# We use argsPattern to match the agent_name argument for invoke_agent.
++# Relies on invoke_agent virtual alias matching for agent_name.
+ [[rule]]
+ name = "Allow specific subagents in Plan mode"
+-toolName = "invoke_agent"
+-argsPattern = "\"agent_name\":\\s*\"(codebase_investigator|cli_help)\""
++toolName = ["codebase_investigator", "cli_help"]
+ decision = "allow"
+ priority = 50
+ modes = ["plan"]
 
 tokens used
-27,553
-Implemented both accepted claims.
+38,822
+Implemented both accepted claims and wrote [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md).
 
 Changed:
-- [packages/core/src/agents/agent-tool.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts): added shared input-key selection, reused it in parameter mapping and remote hint injection, and centralized hinted child invocation construction.
-- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md): recorded applied claims and modified source file.
+- [plan.toml](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/policy/policies/plan.toml): replaced the `invoke_agent` `argsPattern` allow rule with `toolName = ["codebase_investigator", "cli_help"]` and updated the comment to reference virtual alias matching.
+- [registry.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/registry.ts): dynamic remote-agent policies now use `toolName: definition.name`; removed the unused `AgentTool` import.
 
-Tests were not run, per instruction.
+I did not run tests, per instruction.

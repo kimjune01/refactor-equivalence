@@ -1,0 +1,397 @@
+diff --git a/cel/env.go b/cel/env.go
+index d3295b6a..e2de2ff6 100644
+--- a/cel/env.go
++++ b/cel/env.go
+@@ -184,6 +184,16 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
+ 		conf.AddImports(env.NewImport(typeName))
+ 	}
+ 
++	// Serialize features
++	for featID, enabled := range e.features {
++		featName, found := featureNameByID(featID)
++		if !found {
++			// If the feature isn't named, it isn't intended to be publicly exposed
++			continue
++		}
++		conf.AddFeatures(env.NewFeature(featName, enabled))
++	}
++
+ 	libOverloads := map[string][]string{}
+ 	for libName, lib := range e.libraries {
+ 		// Track the options which have been configured by a library and
+@@ -244,7 +254,7 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
+ 		fields := e.contextProto.Fields()
+ 		for i := 0; i < fields.Len(); i++ {
+ 			field := fields.Get(i)
+-			variable, err := fieldToVariable(field)
++			variable, err := fieldToVariable(field, e.HasFeature(featureJSONFieldNames))
+ 			if err != nil {
+ 				return nil, fmt.Errorf("could not serialize context field variable %q, reason: %w", field.FullName(), err)
+ 			}
+@@ -279,16 +289,6 @@ func (e *Env) ToConfig(name string) (*env.Config, error) {
+ 		}
+ 	}
+ 
+-	// Serialize features
+-	for featID, enabled := range e.features {
+-		featName, found := featureNameByID(featID)
+-		if !found {
+-			// If the feature isn't named, it isn't intended to be publicly exposed
+-			continue
+-		}
+-		conf.AddFeatures(env.NewFeature(featName, enabled))
+-	}
+-
+ 	for id, val := range e.limits {
+ 		limitName, found := limitNameByID(id)
+ 		if !found || val == 0 {
+@@ -361,7 +361,7 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
+ // See the EnvOption helper functions for the options that can be used to configure the
+ // environment.
+ func NewCustomEnv(opts ...EnvOption) (*Env, error) {
+-	registry, err := types.NewRegistry()
++	registry, err := types.NewProtoRegistry()
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -554,6 +554,7 @@ func (e *Env) Extend(opts ...EnvOption) (*Env, error) {
+ 	}
+ 	validatorsCopy := make([]ASTValidator, len(e.validators))
+ 	copy(validatorsCopy, e.validators)
++
+ 	costOptsCopy := make([]checker.CostOption, len(e.costOptions))
+ 	copy(costOptsCopy, e.costOptions)
+ 
+@@ -847,6 +848,18 @@ func (e *Env) configure(opts []EnvOption) (*Env, error) {
+ 		return nil, err
+ 	}
+ 
++	// Enable JSON field names is using a proto-based *types.Registry
++	if e.HasFeature(featureJSONFieldNames) {
++		reg, isReg := e.provider.(*types.Registry)
++		if !isReg {
++			return nil, fmt.Errorf("JSONFieldNames() option is only compatible with *types.Registry providers")
++		}
++		err := reg.WithJSONFieldNames(true)
++		if err != nil {
++			return nil, err
++		}
++	}
++
+ 	// Ensure that the checker init happens eagerly rather than lazily.
+ 	if e.HasFeature(featureEagerlyValidateDeclarations) {
+ 		_, err := e.initChecker()
+@@ -865,6 +878,8 @@ func (e *Env) initChecker() (*checker.Env, error) {
+ 		chkOpts = append(chkOpts,
+ 			checker.CrossTypeNumericComparisons(
+ 				e.HasFeature(featureCrossTypeNumericComparisons)))
++		chkOpts = append(chkOpts,
++			checker.JSONFieldNames(e.HasFeature(featureJSONFieldNames)))
+ 
+ 		ce, err := checker.NewEnv(e.Container, e.provider, chkOpts...)
+ 		if err != nil {
+diff --git a/cel/options.go b/cel/options.go
+index 0287da9e..d7d2ab03 100644
+--- a/cel/options.go
++++ b/cel/options.go
+@@ -71,12 +71,16 @@ const (
+ 
+ 	// Enable escape syntax for field identifiers (`).
+ 	featureIdentEscapeSyntax
++
++	// Enable accessing fields by JSON names within protobuf messages
++	featureJSONFieldNames
+ )
+ 
+ var featureIDsToNames = map[int]string{
+ 	featureEnableMacroCallTracking:     "cel.feature.macro_call_tracking",
+ 	featureCrossTypeNumericComparisons: "cel.feature.cross_type_numeric_comparisons",
+ 	featureIdentEscapeSyntax:           "cel.feature.backtick_escape_syntax",
++	featureJSONFieldNames:              "cel.feature.json_field_names",
+ }
+ 
+ func featureNameByID(id int) (string, bool) {
+@@ -309,9 +313,9 @@ func Abbrevs(qualifiedNames ...string) EnvOption {
+ 	}
+ }
+ 
+-// customTypeRegistry is an internal-only interface containing the minimum methods required to support
++// protoTypeRegistry is an internal-only interface containing the minimum methods required to support
+ // custom types. It is a subset of methods from ref.TypeRegistry.
+-type customTypeRegistry interface {
++type protoTypeRegistry interface {
+ 	RegisterDescriptor(protoreflect.FileDescriptor) error
+ 	RegisterType(...ref.Type) error
+ }
+@@ -328,7 +332,7 @@ type customTypeRegistry interface {
+ // Note: This option must be specified after the CustomTypeProvider option when used together.
+ func Types(addTypes ...any) EnvOption {
+ 	return func(e *Env) (*Env, error) {
+-		reg, isReg := e.provider.(customTypeRegistry)
++		reg, isReg := e.provider.(protoTypeRegistry)
+ 		if !isReg {
+ 			return nil, fmt.Errorf("custom types not supported by provider: %T", e.provider)
+ 		}
+@@ -365,7 +369,7 @@ func Types(addTypes ...any) EnvOption {
+ // extension or by re-using the same EnvOption with another NewEnv() call.
+ func TypeDescs(descs ...any) EnvOption {
+ 	return func(e *Env) (*Env, error) {
+-		reg, isReg := e.provider.(customTypeRegistry)
++		reg, isReg := e.provider.(protoTypeRegistry)
+ 		if !isReg {
+ 			return nil, fmt.Errorf("custom types not supported by provider: %T", e.provider)
+ 		}
+@@ -413,7 +417,7 @@ func TypeDescs(descs ...any) EnvOption {
+ 	}
+ }
+ 
+-func registerFileSet(reg customTypeRegistry, fileSet *descpb.FileDescriptorSet) error {
++func registerFileSet(reg protoTypeRegistry, fileSet *descpb.FileDescriptorSet) error {
+ 	files, err := protodesc.NewFiles(fileSet)
+ 	if err != nil {
+ 		return fmt.Errorf("protodesc.NewFiles(%v) failed: %v", fileSet, err)
+@@ -421,7 +425,7 @@ func registerFileSet(reg customTypeRegistry, fileSet *descpb.FileDescriptorSet)
+ 	return registerFiles(reg, files)
+ }
+ 
+-func registerFiles(reg customTypeRegistry, files *protoregistry.Files) error {
++func registerFiles(reg protoTypeRegistry, files *protoregistry.Files) error {
+ 	var err error
+ 	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+ 		err = reg.RegisterDescriptor(fd)
+@@ -430,6 +434,15 @@ func registerFiles(reg customTypeRegistry, files *protoregistry.Files) error {
+ 	return err
+ }
+ 
++// JSONFieldNames supports accessing protocol buffer fields by json-name.
++//
++// Enabling JSON field name support will create a copy of the types.Registry with fields indexed
++// by JSON name, and whether JSON name or Proto-style names are supported will be inferred from
++// the AST extensions metadata.
++func JSONFieldNames(enabled bool) EnvOption {
++	return features(featureJSONFieldNames, enabled)
++}
++
+ // ProgramOption is a functional interface for configuring evaluation bindings and behaviors.
+ type ProgramOption func(p *prog) (*prog, error)
+ 
+@@ -557,6 +570,17 @@ func configToEnvOptions(config *env.Config, provider types.Provider, optFactorie
+ 		envOpts = append(envOpts, Abbrevs(imp.Name))
+ 	}
+ 
++	// Configure features and common limits.
++	for _, feat := range config.Features {
++		// Note, if a feature is not found, it is skipped as it is possible the feature
++		// is not intended to be supported publicly. In the future, a refinement of
++		// to this strategy to report unrecognized features and validators should probably
++		// be covered as a standard ConfigOptionFactory
++		if id, found := featureIDByName(feat.Name); found {
++			envOpts = append(envOpts, features(id, feat.Enabled))
++		}
++	}
++
+ 	// Configure the context variable declaration
+ 	if config.ContextVariable != nil {
+ 		typeName := config.ContextVariable.TypeName
+@@ -598,17 +622,6 @@ func configToEnvOptions(config *env.Config, provider types.Provider, optFactorie
+ 		envOpts = append(envOpts, FunctionDecls(funcs...))
+ 	}
+ 
+-	// Configure features and common limits.
+-	for _, feat := range config.Features {
+-		// Note, if a feature is not found, it is skipped as it is possible the feature
+-		// is not intended to be supported publicly. In the future, a refinement of
+-		// to this strategy to report unrecognized features and validators should probably
+-		// be covered as a standard ConfigOptionFactory
+-		if id, found := featureIDByName(feat.Name); found {
+-			envOpts = append(envOpts, features(id, feat.Enabled))
+-		}
+-	}
+-
+ 	for _, limit := range config.Limits {
+ 		if id, found := limitIDByName(limit.Name); found {
+ 			envOpts = append(envOpts, setLimit(id, limit.Value))
+@@ -767,8 +780,11 @@ func fieldToCELType(field protoreflect.FieldDescriptor) (*Type, error) {
+ 	return nil, fmt.Errorf("field %s type %s not implemented", field.FullName(), field.Kind().String())
+ }
+ 
+-func fieldToVariable(field protoreflect.FieldDescriptor) (*decls.VariableDecl, error) {
++func fieldToVariable(field protoreflect.FieldDescriptor, jsonFieldNames bool) (*decls.VariableDecl, error) {
+ 	name := string(field.Name())
++	if jsonFieldNames {
++		name = field.JSONName()
++	}
+ 	if field.IsMap() {
+ 		mapKey := field.MapKey()
+ 		mapValue := field.MapValue()
+@@ -799,6 +815,8 @@ func fieldToVariable(field protoreflect.FieldDescriptor) (*decls.VariableDecl, e
+ // DeclareContextProto returns an option to extend CEL environment with declarations from the given context proto.
+ // Each field of the proto defines a variable of the same name in the environment.
+ // https://github.com/google/cel-spec/blob/master/doc/langdef.md#evaluation-environment
++//
++// If using JSONFieldNames(), ensure that the option is set before DeclareContextProto is provided.
+ func DeclareContextProto(descriptor protoreflect.MessageDescriptor) EnvOption {
+ 	return func(e *Env) (*Env, error) {
+ 		if e.contextProto != nil {
+@@ -808,9 +826,10 @@ func DeclareContextProto(descriptor protoreflect.MessageDescriptor) EnvOption {
+ 		e.contextProto = descriptor
+ 		fields := descriptor.Fields()
+ 		vars := make([]*decls.VariableDecl, 0, fields.Len())
++		jsonFieldNames := e.HasFeature(featureJSONFieldNames)
+ 		for i := 0; i < fields.Len(); i++ {
+ 			field := fields.Get(i)
+-			variable, err := fieldToVariable(field)
++			variable, err := fieldToVariable(field, jsonFieldNames)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -829,11 +848,15 @@ func DeclareContextProto(descriptor protoreflect.MessageDescriptor) EnvOption {
+ //
+ // Consider using with `DeclareContextProto` to simplify variable type declarations and publishing when using
+ // protocol buffers.
+-func ContextProtoVars(ctx proto.Message) (Activation, error) {
++//
++// Use the types.JSONFieldNames(true) option to populate the context proto vars using the JSON field names.
++func ContextProtoVars(ctx proto.Message, opts ...types.RegistryOption) (Activation, error) {
+ 	if ctx == nil || !ctx.ProtoReflect().IsValid() {
+ 		return interpreter.EmptyActivation(), nil
+ 	}
+-	reg, err := types.NewRegistry(ctx)
++	regOpts := []types.RegistryOption{types.ProtoTypeDefs(ctx)}
++	regOpts = append(regOpts, opts...)
++	reg, err := types.NewProtoRegistry(regOpts...)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -843,15 +866,19 @@ func ContextProtoVars(ctx proto.Message) (Activation, error) {
+ 	vars := make(map[string]any, fields.Len())
+ 	for i := 0; i < fields.Len(); i++ {
+ 		field := fields.Get(i)
+-		sft, found := reg.FindStructFieldType(typeName, field.TextName())
++		fieldName := field.TextName()
++		if reg.JSONFieldNames() {
++			fieldName = field.JSONName()
++		}
++		sft, found := reg.FindStructFieldType(typeName, fieldName)
+ 		if !found {
+-			return nil, fmt.Errorf("no such field: %s", field.TextName())
++			return nil, fmt.Errorf("no such field: %s", fieldName)
+ 		}
+ 		fieldVal, err := sft.GetFrom(ctx)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		vars[field.TextName()] = fieldVal
++		vars[fieldName] = fieldVal
+ 	}
+ 	return NewActivation(vars)
+ }
+diff --git a/cel/program.go b/cel/program.go
+index 00577e05..c46d694e 100644
+--- a/cel/program.go
++++ b/cel/program.go
+@@ -219,6 +219,12 @@ func newProgram(e *Env, a *ast.AST, opts []ProgramOption) (Program, error) {
+ 	attrFactorOpts := []interpreter.AttrFactoryOption{
+ 		interpreter.EnableErrorOnBadPresenceTest(p.HasFeature(featureEnableErrorOnBadPresenceTest)),
+ 	}
++	if a.SourceInfo().HasExtension("json_name", ast.NewExtensionVersion(1, 1)) {
++		if !e.HasFeature(featureJSONFieldNames) {
++			return nil, errors.New("the AST extension 'json_name' requires the option cel.JSONFieldNames(true)")
++		}
++	}
++	// Configure the type provider, considering whether the AST indicates whether it supports JSON field names
+ 	if p.evalOpts&OptPartialEval == OptPartialEval {
+ 		attrFactory = interpreter.NewPartialAttributeFactory(e.Container, e.adapter, e.provider, attrFactorOpts...)
+ 	} else {
+diff --git a/common/ast/ast.go b/common/ast/ast.go
+index aae2a83e..3ae2e106 100644
+--- a/common/ast/ast.go
++++ b/common/ast/ast.go
+@@ -438,6 +438,17 @@ func (s *SourceInfo) Extensions() []Extension {
+ 	return s.extensions
+ }
+ 
++// HasExtension returns whether the source info contains the extension which satisfies the minimum version requirement.
++//
++// For an extension to be considered 'present' it must have the same major version as the minVersion and a minor version
++// at least as great as the lowest minor version specified.
++func (s *SourceInfo) HasExtension(id string, minVersion ExtensionVersion) bool {
++	for _, ext := range s.Extensions() {
++		return ext.ID == id && ext.Version.Major == minVersion.Major && ext.Version.Minor >= minVersion.Minor
++	}
++	return false
++}
++
+ // AddExtension adds an extension record into the SourceInfo.
+ func (s *SourceInfo) AddExtension(ext Extension) {
+ 	if s == nil {
+diff --git a/common/types/provider.go b/common/types/provider.go
+index ebfd66dc..13680a23 100644
+--- a/common/types/provider.go
++++ b/common/types/provider.go
+@@ -96,7 +96,7 @@ type Registry struct {
+ // provider which can create new instances of the provided message or any
+ // message that proto depends upon in its FileDescriptor.
+ func NewRegistry(types ...proto.Message) (*Registry, error) {
+-	return NewProtoRegistry(ProtoTypes(types...))
++	return NewProtoRegistry(ProtoTypeDefs(types...))
+ }
+ 
+ // RegistryOption configures the behavior of the registry.
+@@ -105,23 +105,13 @@ type RegistryOption func(r *Registry) (*Registry, error)
+ // JSONFieldNames configures JSON field name support within the protobuf types in the registry.
+ func JSONFieldNames(enabled bool) RegistryOption {
+ 	return func(r *Registry) (*Registry, error) {
+-		if enabled != r.pbdb.JSONFieldNames() {
+-			newDB := pb.NewDb(pb.JSONFieldNames(enabled))
+-			files := r.pbdb.FileDescriptions()
+-			for _, fd := range files {
+-				_, err := newDB.RegisterDescriptor(fd.FileDescriptor())
+-				if err != nil {
+-					return nil, err
+-				}
+-			}
+-			r.pbdb = newDB
+-		}
+-		return r, nil
++		err := r.WithJSONFieldNames(enabled)
++		return r, err
+ 	}
+ }
+ 
+-// ProtoTypes creates a RegistryOption which registers the individual proto messages with the registry.
+-func ProtoTypes(types ...proto.Message) RegistryOption {
++// ProtoTypeDefs creates a RegistryOption which registers the individual proto messages with the registry.
++func ProtoTypeDefs(types ...proto.Message) RegistryOption {
+ 	return func(r *Registry) (*Registry, error) {
+ 		for _, msgType := range types {
+ 			err := r.RegisterMessage(msgType)
+@@ -191,6 +181,28 @@ func (p *Registry) Copy() *Registry {
+ 	return copy
+ }
+ 
++// JSONFieldNames returns whether json field names are enabled in this registry.
++func (p *Registry) JSONFieldNames() bool {
++	return p.pbdb.JSONFieldNames()
++}
++
++// WithJSONFieldNames configures the registry with the JSON field name support enabled or disabled.
++func (p *Registry) WithJSONFieldNames(enabled bool) error {
++	if enabled == p.pbdb.JSONFieldNames() {
++		return nil
++	}
++	newDB := pb.NewDb(pb.JSONFieldNames(enabled))
++	files := p.pbdb.FileDescriptions()
++	for _, fd := range files {
++		_, err := newDB.RegisterDescriptor(fd.FileDescriptor())
++		if err != nil {
++			return err
++		}
++	}
++	p.pbdb = newDB
++	return nil
++}
++
+ // EnumValue returns the numeric value of the given enum value name.
+ func (p *Registry) EnumValue(enumName string) ref.Val {
+ 	enumVal, found := p.pbdb.DescribeEnum(enumName)

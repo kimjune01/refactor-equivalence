@@ -1,0 +1,22 @@
+# PR #24941 — Generalize evals infra to support more types of evals, organization and queuing of named suites
+
+## PR body
+
+Generalizes the evals infrastructure to:
+- Support grouping of evals into named 'suites' which can be run by name.
+- Support categorization of evals into behavioral (what we have today), hero (small number of larger and more representative evals), and component level (benchmarks for a specific component's effectiveness).
+- Helpers for component level evals.
+
+This is a precursor to having component level evaluation suites, such as one for compression, which measures the effectiveness of that component in isolation.
+
+It also paves the way for having more and varied tests.
+
+Only the behavioral evals tests are run by default. Other suites can be run on demand by feature maintainers or autonomously at PR time via https://github.com/google-gemini/gemini-cli/pull/24877
+
+Here's what the run queue UI looks like:
+
+<img width="710" height="854" alt="image" src="https://github.com/user-attachments/assets/eca0f4bc-1e74-44cb-9382-4ec5aa58eb4d" />
+
+
+## Linked issues
+(none)

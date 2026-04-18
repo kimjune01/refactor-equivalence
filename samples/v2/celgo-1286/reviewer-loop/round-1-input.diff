@@ -1,47 +1,133 @@
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/env.go /tmp/refactor-eq-workdir/bb-merged-1286/cel/env.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/env.go	2026-03-13 13:59:02
-+++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/env.go	2026-04-17 09:05:24
-@@ -854,8 +854,7 @@
++++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/env.go	2026-04-17 22:06:53
+@@ -848,14 +848,13 @@
+ 		return nil, err
+ 	}
+ 
+-	// Enable JSON field names is using a proto-based *types.Registry
+-	if e.HasFeature(featureJSONFieldNames) {
++	// Configure JSON field names when explicitly set on a proto-based *types.Registry.
++	if e.appliedFeatures[featureJSONFieldNames] {
+ 		reg, isReg := e.provider.(*types.Registry)
  		if !isReg {
  			return nil, fmt.Errorf("JSONFieldNames() option is only compatible with *types.Registry providers")
  		}
 -		err := reg.WithJSONFieldNames(true)
 -		if err != nil {
-+		if err := reg.WithJSONFieldNames(true); err != nil {
++		if err := reg.WithJSONFieldNames(e.HasFeature(featureJSONFieldNames)); err != nil {
  			return nil, err
  		}
  	}
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/options.go /tmp/refactor-eq-workdir/bb-merged-1286/cel/options.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/options.go	2026-03-13 13:59:02
-+++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/options.go	2026-04-17 09:05:27
-@@ -434,11 +434,7 @@
- 	return err
- }
++++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/options.go	2026-04-17 22:07:31
+@@ -436,9 +436,8 @@
  
--// JSONFieldNames supports accessing protocol buffer fields by json-name.
--//
+ // JSONFieldNames supports accessing protocol buffer fields by json-name.
+ //
 -// Enabling JSON field name support will create a copy of the types.Registry with fields indexed
 -// by JSON name, and whether JSON name or Proto-style names are supported will be inferred from
 -// the AST extensions metadata.
-+// JSONFieldNames enables protobuf field access by JSON names for environments backed by *types.Registry.
++// Enabling JSON field name support allows environments backed by *types.Registry
++// providers to access protobuf fields by JSON names.
  func JSONFieldNames(enabled bool) EnvOption {
  	return features(featureJSONFieldNames, enabled)
  }
+@@ -910,6 +909,9 @@
+ func features(flag int, enabled bool) EnvOption {
+ 	return func(e *Env) (*Env, error) {
+ 		e.features[flag] = enabled
++		if flag == featureJSONFieldNames {
++			e.appliedFeatures[flag] = true
++		}
+ 		return e, nil
+ 	}
+ }
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/program.go /tmp/refactor-eq-workdir/bb-merged-1286/cel/program.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1286/cel/program.go	2026-03-13 13:59:02
-+++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/program.go	2026-04-17 09:05:26
-@@ -224,7 +224,7 @@
++++ /tmp/refactor-eq-workdir/bb-merged-1286/cel/program.go	2026-04-17 21:37:03
+@@ -224,7 +224,6 @@
  			return nil, errors.New("the AST extension 'json_name' requires the option cel.JSONFieldNames(true)")
  		}
  	}
 -	// Configure the type provider, considering whether the AST indicates whether it supports JSON field names
-+	// Select the attribute factory based on whether partial evaluation is enabled.
  	if p.evalOpts&OptPartialEval == OptPartialEval {
  		attrFactory = interpreter.NewPartialAttributeFactory(e.Container, e.adapter, e.provider, attrFactorOpts...)
  	} else {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/checker/checker.go /tmp/refactor-eq-workdir/bb-merged-1286/checker/checker.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/1286/checker/checker.go	2026-03-13 13:59:02
++++ /tmp/refactor-eq-workdir/bb-merged-1286/checker/checker.go	2026-04-17 21:43:59
+@@ -230,7 +230,7 @@
+ 		// Objects yield their field type declaration as the selection result type, but only if
+ 		// the field is defined.
+ 		messageType := targetType
+-		if fieldType, found := c.lookupFieldType(e.ID(), messageType.TypeName(), field); found {
++		if fieldType, found := c.lookupFieldType(e.ID(), messageType.TypeName(), field, false); found {
+ 			resultType = fieldType
+ 		}
+ 	case types.TypeParamKind:
+@@ -526,7 +526,7 @@
+ 		c.check(value)
+ 
+ 		fieldType := types.ErrorType
+-		ft, found := c.lookupFieldType(f.ID(), typeName, fieldName)
++		ft, found := c.lookupFieldType(f.ID(), typeName, fieldName, c.env.jsonFieldNames)
+ 		if found {
+ 			fieldType = ft
+ 		}
+@@ -715,22 +715,24 @@
+ 	return c.SourceInfo().GetStartLocation(id)
+ }
+ 
+-func (c *checker) lookupFieldType(exprID int64, structType, fieldName string) (*types.Type, bool) {
++func (c *checker) lookupFieldType(exprID int64, structType, fieldName string, requireJSONName bool) (*types.Type, bool) {
+ 	if _, found := c.env.provider.FindStructType(structType); !found {
+ 		// This should not happen, anyway, report an error.
+ 		c.errors.unexpectedFailedResolution(exprID, c.locationByID(exprID), structType)
+ 		return nil, false
+ 	}
+ 
+-	if ft, found := c.env.provider.FindStructFieldType(structType, fieldName); found {
+-		if c.env.jsonFieldNames && !ft.IsJSONField {
+-			c.errors.undefinedField(exprID, c.locationByID(exprID), fieldName)
+-		}
+-		return ft.Type, found
++	ft, found := c.env.provider.FindStructFieldType(structType, fieldName)
++	if !found {
++		c.errors.undefinedField(exprID, c.locationByID(exprID), fieldName)
++		return nil, false
+ 	}
++	if requireJSONName && !ft.IsJSONField {
++		c.errors.undefinedField(exprID, c.locationByID(exprID), fieldName)
++		return nil, false
++	}
+ 
+-	c.errors.undefinedField(exprID, c.locationByID(exprID), fieldName)
+-	return nil, false
++	return ft.Type, true
+ }
+ 
+ func isWellKnownType(t *types.Type) bool {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/common/ast/ast.go /tmp/refactor-eq-workdir/bb-merged-1286/common/ast/ast.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/1286/common/ast/ast.go	2026-03-13 13:59:02
++++ /tmp/refactor-eq-workdir/bb-merged-1286/common/ast/ast.go	2026-04-17 21:47:56
+@@ -441,7 +441,11 @@
+ // HasExtension returns whether the source info contains the extension which satisfies the minimum version requirement.
+ func (s *SourceInfo) HasExtension(id string, minVersion ExtensionVersion) bool {
+ 	for _, ext := range s.Extensions() {
+-		return ext.ID == id && ext.Version.Major >= minVersion.Major && ext.Version.Minor >= minVersion.Minor
++		if ext.ID != id {
++			continue
++		}
++		return ext.Version.Major > minVersion.Major ||
++			(ext.Version.Major == minVersion.Major && ext.Version.Minor >= minVersion.Minor)
+ 	}
+ 	return false
+ }
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/common/types/provider.go /tmp/refactor-eq-workdir/bb-merged-1286/common/types/provider.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1286/common/types/provider.go	2026-03-13 13:59:02
-+++ /tmp/refactor-eq-workdir/bb-merged-1286/common/types/provider.go	2026-04-17 09:05:24
++++ /tmp/refactor-eq-workdir/bb-merged-1286/common/types/provider.go	2026-04-17 21:47:56
 @@ -105,8 +105,7 @@
  // JSONFieldNames configures JSON field name support within the protobuf types in the registry.
  func JSONFieldNames(enabled bool) RegistryOption {
@@ -52,3 +138,15 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1286/common/types/provider.
  	}
  }
  
+@@ -121,6 +120,11 @@
+ 		}
+ 		return r, nil
+ 	}
++}
++
++// ProtoTypes creates a RegistryOption which registers the individual proto messages with the registry.
++func ProtoTypes(types ...proto.Message) RegistryOption {
++	return ProtoTypeDefs(types...)
+ }
+ 
+ // NewProtoRegistry creates a proto-based registry with a set of configurable options.

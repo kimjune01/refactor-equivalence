@@ -1,0 +1,1455 @@
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index fe87fb1d5d..94215e4795 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,6 +335,8 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
++          # Only run always passes behavioral tests.
++          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index 9acc1de050..fbb770ac84 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,10 +5,18 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+     inputs:
+-      run_all:
+-        description: 'Run all evaluations (including usually passing)'
+-        type: 'boolean'
+-        default: true
++      suite_type:
++        description: 'Suite type to run'
++        type: 'choice'
++        options:
++          - 'behavioral'
++          - 'component-level'
++          - 'hero-scenario'
++        default: 'behavioral'
++      suite_name:
++        description: 'Specific suite name to run'
++        required: false
++        type: 'string'
+       test_name_pattern:
+         description: 'Test name pattern or file name'
+         required: false
+@@ -59,7 +67,9 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: '${{ matrix.model }}'
+-          RUN_EVALS: "${{ github.event.inputs.run_all != 'false' }}"
++          RUN_EVALS: 'true'
++          EVAL_SUITE_TYPE: "${{ github.event.inputs.suite_type || 'behavioral' }}"
++          EVAL_SUITE_NAME: '${{ github.event.inputs.suite_name }}'
+           TEST_NAME_PATTERN: '${{ github.event.inputs.test_name_pattern }}'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+diff --git a/evals/answer-vs-act.eval.ts b/evals/answer-vs-act.eval.ts
+index ff87d12564..1d19294363 100644
+--- a/evals/answer-vs-act.eval.ts
++++ b/evals/answer-vs-act.eval.ts
+@@ -19,6 +19,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file, but instead asks for permission.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked to inspect for bugs',
+     prompt: 'Inspect app.ts for bugs',
+     files: FILES,
+@@ -42,6 +44,8 @@ describe('Answer vs. ask eval', () => {
+    * does modify the file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should edit files when asked to fix bug',
+     prompt: 'Fix the bug in app.ts - it should add numbers not subtract',
+     files: FILES,
+@@ -66,6 +70,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file, but instead asks for permission.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit when asking "any bugs"',
+     prompt: 'Any bugs in app.ts?',
+     files: FILES,
+@@ -89,6 +95,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked a general question',
+     prompt: 'How does app.ts work?',
+     files: FILES,
+@@ -112,6 +120,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked about style',
+     prompt: 'Is app.ts following good style?',
+     files: FILES,
+@@ -135,6 +145,8 @@ describe('Answer vs. ask eval', () => {
+    * the agent does NOT automatically modify the file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when user notes an issue',
+     prompt: 'The add function subtracts numbers.',
+     files: FILES,
+diff --git a/evals/app-test-helper.ts b/evals/app-test-helper.ts
+index 8ea842aa38..1794573fe1 100644
+--- a/evals/app-test-helper.ts
++++ b/evals/app-test-helper.ts
+@@ -10,10 +10,13 @@ import {
+   runEval,
+   prepareLogDir,
+   symlinkNodeModules,
++  withEvalRetries,
++  prepareWorkspace,
++  type BaseEvalCase,
++  EVAL_MODEL,
+ } from './test-helper.js';
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { DEFAULT_GEMINI_MODEL } from '@google/gemini-cli-core';
+ 
+ /**
+  * Config overrides for evals, with tool-restriction fields explicitly
+@@ -29,15 +32,13 @@ interface EvalConfigOverrides {
+   allowedTools?: never;
+   /** Restricting tools via mainAgentTools in evals is forbidden. */
+   mainAgentTools?: never;
++
+   [key: string]: unknown;
+ }
+ 
+-export interface AppEvalCase {
+-  name: string;
++export interface AppEvalCase extends BaseEvalCase {
+   configOverrides?: EvalConfigOverrides;
+   prompt: string;
+-  timeout?: number;
+-  files?: Record<string, string>;
+   setup?: (rig: AppRig) => Promise<void>;
+   assert: (rig: AppRig, output: string) => Promise<void>;
+ }
+@@ -48,56 +49,55 @@ export interface AppEvalCase {
+  */
+ export function appEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+   const fn = async () => {
+-    const rig = new AppRig({
+-      configOverrides: {
+-        model: DEFAULT_GEMINI_MODEL,
+-        ...evalCase.configOverrides,
+-      },
+-    });
++    await withEvalRetries(evalCase.name, async () => {
++      const rig = new AppRig({
++        configOverrides: {
++          model: EVAL_MODEL,
++          ...evalCase.configOverrides,
++        },
++      });
+ 
+-    const { logDir, sanitizedName } = await prepareLogDir(evalCase.name);
+-    const logFile = path.join(logDir, `${sanitizedName}.log`);
++      const { logDir, sanitizedName } = await prepareLogDir(evalCase.name);
++      const logFile = path.join(logDir, `${sanitizedName}.log`);
+ 
+-    try {
+-      await rig.initialize();
++      try {
++        await rig.initialize();
+ 
+-      const testDir = rig.getTestDir();
+-      symlinkNodeModules(testDir);
++        const testDir = rig.getTestDir();
++        symlinkNodeModules(testDir);
+ 
+-      // Setup initial files
+-      if (evalCase.files) {
+-        for (const [filePath, content] of Object.entries(evalCase.files)) {
+-          const fullPath = path.join(testDir, filePath);
+-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+-          fs.writeFileSync(fullPath, content);
++        // Setup initial files
++        if (evalCase.files) {
++          // Note: AppRig does not use a separate homeDir, so we use testDir twice
++          await prepareWorkspace(testDir, testDir, evalCase.files);
+         }
+-      }
+ 
+-      // Run custom setup if provided (e.g. for breakpoints)
+-      if (evalCase.setup) {
+-        await evalCase.setup(rig);
+-      }
++        // Run custom setup if provided (e.g. for breakpoints)
++        if (evalCase.setup) {
++          await evalCase.setup(rig);
++        }
+ 
+-      // Render the app!
+-      await rig.render();
++        // Render the app!
++        await rig.render();
+ 
+-      // Wait for initial ready state
+-      await rig.waitForIdle();
++        // Wait for initial ready state
++        await rig.waitForIdle();
+ 
+-      // Send the initial prompt
+-      await rig.sendMessage(evalCase.prompt);
++        // Send the initial prompt
++        await rig.sendMessage(evalCase.prompt);
+ 
+-      // Run assertion. Interaction-heavy tests can do their own waiting/steering here.
+-      const output = rig.getStaticOutput();
+-      await evalCase.assert(rig, output);
+-    } finally {
+-      const output = rig.getStaticOutput();
+-      if (output) {
+-        await fs.promises.writeFile(logFile, output);
++        // Run assertion. Interaction-heavy tests can do their own waiting/steering here.
++        const output = rig.getStaticOutput();
++        await evalCase.assert(rig, output);
++      } finally {
++        const output = rig.getStaticOutput();
++        if (output) {
++          await fs.promises.writeFile(logFile, output);
++        }
++        await rig.unmount();
+       }
+-      await rig.unmount();
+-    }
++    });
+   };
+ 
+-  runEval(policy, evalCase.name, fn, (evalCase.timeout ?? 60000) + 10000);
++  runEval(policy, evalCase, fn, (evalCase.timeout ?? 60000) + 10000);
+ }
+diff --git a/evals/ask_user.eval.ts b/evals/ask_user.eval.ts
+index 6495cb3f22..60d89f7b5b 100644
+--- a/evals/ask_user.eval.ts
++++ b/evals/ask_user.eval.ts
+@@ -5,17 +5,21 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import { appEvalTest, AppEvalCase } from './app-test-helper.js';
+-import { EvalPolicy } from './test-helper.js';
++import { ApprovalMode, isRecord } from '@google/gemini-cli-core';
++import { appEvalTest, type AppEvalCase } from './app-test-helper.js';
++import { type EvalPolicy } from './test-helper.js';
+ 
+ function askUserEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
++  const existingGeneral = evalCase.configOverrides?.['general'];
++  const generalBase = isRecord(existingGeneral) ? existingGeneral : {};
++
+   return appEvalTest(policy, {
+     ...evalCase,
+     configOverrides: {
+       ...evalCase.configOverrides,
++      approvalMode: ApprovalMode.DEFAULT,
+       general: {
+-        ...evalCase.configOverrides?.general,
+-        approvalMode: 'default',
++        ...generalBase,
+         enableAutoUpdate: false,
+         enableAutoUpdateNotification: false,
+       },
+@@ -28,6 +32,8 @@ function askUserEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+ 
+ describe('ask_user', () => {
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool to present multiple choice options',
+     prompt: `Use the ask_user tool to ask me what my favorite color is. Provide 3 options: red, green, or blue.`,
+     setup: async (rig) => {
+@@ -43,6 +49,8 @@ describe('ask_user', () => {
+   });
+ 
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool to clarify ambiguous requirements',
+     files: {
+       'package.json': JSON.stringify({ name: 'my-app', version: '1.0.0' }),
+@@ -61,6 +69,8 @@ describe('ask_user', () => {
+   });
+ 
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool before performing significant ambiguous rework',
+     files: {
+       'packages/core/src/index.ts': '// index\nexport const version = "1.0.0";',
+@@ -82,8 +92,8 @@ describe('ask_user', () => {
+       ]);
+       expect(confirmation, 'Expected a tool call confirmation').toBeDefined();
+ 
+-      if (confirmation?.name === 'enter_plan_mode') {
+-        rig.acceptConfirmation('enter_plan_mode');
++      if (confirmation?.toolName === 'enter_plan_mode') {
++        await rig.resolveTool('enter_plan_mode');
+         confirmation = await rig.waitForPendingConfirmation('ask_user');
+       }
+ 
+@@ -101,6 +111,8 @@ describe('ask_user', () => {
+   // updates to clarify that shell command confirmation is handled by the UI.
+   // See fix: https://github.com/google-gemini/gemini-cli/pull/20504
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent does NOT use AskUser to confirm shell commands',
+     files: {
+       'package.json': JSON.stringify({
+diff --git a/evals/automated-tool-use.eval.ts b/evals/automated-tool-use.eval.ts
+index 87f88a1ff3..27e43708dc 100644
+--- a/evals/automated-tool-use.eval.ts
++++ b/evals/automated-tool-use.eval.ts
+@@ -14,6 +14,8 @@ describe('Automated tool use', () => {
+    * a repro by guiding the agent into using the existing deficient script.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use automated tools (eslint --fix) to fix code style issues',
+     files: {
+       'package.json': JSON.stringify(
+@@ -102,6 +104,8 @@ describe('Automated tool use', () => {
+    * instead of trying to edit the files itself.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use automated tools (prettier --write) to fix formatting issues',
+     files: {
+       'package.json': JSON.stringify(
+diff --git a/evals/cli_help_delegation.eval.ts b/evals/cli_help_delegation.eval.ts
+index 8be3bf1c51..e1714c0636 100644
+--- a/evals/cli_help_delegation.eval.ts
++++ b/evals/cli_help_delegation.eval.ts
+@@ -3,6 +3,8 @@ import { evalTest } from './test-helper.js';
+ 
+ describe('CliHelpAgent Delegation', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should delegate to cli_help agent for subagent creation questions',
+     params: {
+       settings: {
+diff --git a/evals/component-test-helper.ts b/evals/component-test-helper.ts
+new file mode 100644
+index 0000000000..9be68e6936
+--- /dev/null
++++ b/evals/component-test-helper.ts
+@@ -0,0 +1,136 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import {
++  type EvalPolicy,
++  runEval,
++  prepareLogDir,
++  withEvalRetries,
++  prepareWorkspace,
++  type BaseEvalCase,
++} from './test-helper.js';
++import fs from 'node:fs';
++import path from 'node:path';
++import os from 'node:os';
++import { randomUUID } from 'node:crypto';
++import {
++  Config,
++  type ConfigParameters,
++  AuthType,
++  ApprovalMode,
++  createPolicyEngineConfig,
++  ExtensionLoader,
++  IntegrityDataStatus,
++  makeFakeConfig,
++  type GeminiCLIExtension,
++} from '@google/gemini-cli-core';
++import { createMockSettings } from '../packages/cli/src/test-utils/settings.js';
++
++// A minimal mock ExtensionManager to bypass integrity checks
++class MockExtensionManager extends ExtensionLoader {
++  override getExtensions(): GeminiCLIExtension[] {
++    return [];
++  }
++  setRequestConsent = (): void => {};
++  setRequestSetting = (): void => {};
++  integrityManager = {
++    verifyExtensionIntegrity: async (): Promise<IntegrityDataStatus> =>
++      IntegrityDataStatus.VERIFIED,
++    storeExtensionIntegrity: async (): Promise<void> => undefined,
++  };
++}
++
++export interface ComponentEvalCase extends BaseEvalCase {
++  configOverrides?: Partial<ConfigParameters>;
++  setup?: (config: Config) => Promise<void>;
++  assert: (config: Config) => Promise<void>;
++}
++
++export class ComponentRig {
++  public config: Config | undefined;
++  public testDir: string;
++  public sessionId: string;
++
++  constructor(
++    private options: { configOverrides?: Partial<ConfigParameters> } = {},
++  ) {
++    const uniqueId = randomUUID();
++    this.testDir = fs.mkdtempSync(
++      path.join(os.tmpdir(), `gemini-component-rig-${uniqueId.slice(0, 8)}-`),
++    );
++    this.sessionId = `test-session-${uniqueId}`;
++  }
++
++  async initialize() {
++    const settings = createMockSettings();
++    const policyEngineConfig = await createPolicyEngineConfig(
++      settings.merged,
++      ApprovalMode.DEFAULT,
++    );
++
++    const configParams: ConfigParameters = {
++      sessionId: this.sessionId,
++      targetDir: this.testDir,
++      cwd: this.testDir,
++      debugMode: false,
++      model: 'test-model',
++      interactive: false,
++      approvalMode: ApprovalMode.DEFAULT,
++      policyEngineConfig,
++      enableEventDrivenScheduler: false, // Don't need scheduler for direct component tests
++      extensionLoader: new MockExtensionManager(),
++      useAlternateBuffer: false,
++      ...this.options.configOverrides,
++    };
++
++    this.config = makeFakeConfig(configParams);
++    await this.config.initialize();
++
++    // Refresh auth using USE_GEMINI to initialize the real BaseLlmClient
++    await this.config.refreshAuth(AuthType.USE_GEMINI);
++  }
++
++  async cleanup() {
++    fs.rmSync(this.testDir, { recursive: true, force: true });
++  }
++}
++
++/**
++ * A helper for running behavioral evaluations directly against backend components.
++ * It provides a fully initialized Config with real API access, bypassing the UI.
++ */
++export function componentEvalTest(
++  policy: EvalPolicy,
++  evalCase: ComponentEvalCase,
++) {
++  const fn = async () => {
++    await withEvalRetries(evalCase.name, async () => {
++      const rig = new ComponentRig({
++        configOverrides: evalCase.configOverrides,
++      });
++
++      await prepareLogDir(evalCase.name);
++
++      try {
++        await rig.initialize();
++
++        if (evalCase.files) {
++          await prepareWorkspace(rig.testDir, rig.testDir, evalCase.files);
++        }
++
++        if (evalCase.setup) {
++          await evalCase.setup(rig.config!);
++        }
++
++        await evalCase.assert(rig.config!);
++      } finally {
++        await rig.cleanup();
++      }
++    });
++  };
++
++  runEval(policy, evalCase, fn, (evalCase.timeout ?? 60000) + 10000);
++}
+diff --git a/evals/concurrency-safety.eval.ts b/evals/concurrency-safety.eval.ts
+index f2f9e24be9..3aae68b5c4 100644
+--- a/evals/concurrency-safety.eval.ts
++++ b/evals/concurrency-safety.eval.ts
+@@ -20,6 +20,8 @@ You are the mutation agent. Do the mutation requested.
+ 
+ describe('concurrency safety eval test cases', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'mutation agents are run in parallel when explicitly requested',
+     params: {
+       settings: {
+diff --git a/evals/edit-locations-eval.eval.ts b/evals/edit-locations-eval.eval.ts
+index 60e34e6df7..4acc4f2cf9 100644
+--- a/evals/edit-locations-eval.eval.ts
++++ b/evals/edit-locations-eval.eval.ts
+@@ -13,6 +13,8 @@ describe('Edits location eval', () => {
+    * instead of creating a new one.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should update existing test file instead of creating a new one',
+     files: {
+       'package.json': JSON.stringify(
+diff --git a/evals/frugalReads.eval.ts b/evals/frugalReads.eval.ts
+index 47578039a6..4dd5f912b8 100644
+--- a/evals/frugalReads.eval.ts
++++ b/evals/frugalReads.eval.ts
+@@ -15,6 +15,8 @@ describe('Frugal reads eval', () => {
+    * nearby ranges into a single contiguous read to save tool calls.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use ranged read when nearby lines are targeted',
+     files: {
+       'package.json': JSON.stringify({
+@@ -135,6 +137,8 @@ describe('Frugal reads eval', () => {
+    * apart to avoid the need to read the whole file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use ranged read when targets are far apart',
+     files: {
+       'package.json': JSON.stringify({
+@@ -204,6 +208,8 @@ describe('Frugal reads eval', () => {
+    * (e.g.: 10), as it's more efficient than many small ranged reads.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should read the entire file when there are many matches',
+     files: {
+       'package.json': JSON.stringify({
+diff --git a/evals/frugalSearch.eval.ts b/evals/frugalSearch.eval.ts
+index 1c49fc2ed4..d5962b1534 100644
+--- a/evals/frugalSearch.eval.ts
++++ b/evals/frugalSearch.eval.ts
+@@ -13,18 +13,6 @@ import { evalTest } from './test-helper.js';
+  * This ensures the agent doesn't flood the context window with unnecessary search results.
+  */
+ describe('Frugal Search', () => {
+-  const getGrepParams = (call: any): any => {
+-    let args = call.toolRequest.args;
+-    if (typeof args === 'string') {
+-      try {
+-        args = JSON.parse(args);
+-      } catch (e) {
+-        // Ignore parse errors
+-      }
+-    }
+-    return args;
+-  };
+-
+   /**
+    * Ensure that the agent makes use of either grep or ranged reads in fulfilling this task.
+    * The task is specifically phrased to not evoke "view" or "search" specifically because
+@@ -33,6 +21,8 @@ describe('Frugal Search', () => {
+    * ranged reads.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use grep or ranged read for large files',
+     prompt: 'What year was legacy_processor.ts written?',
+     files: {
+diff --git a/evals/generalist_agent.eval.ts b/evals/generalist_agent.eval.ts
+index 8161e33156..b8313079e9 100644
+--- a/evals/generalist_agent.eval.ts
++++ b/evals/generalist_agent.eval.ts
+@@ -11,6 +11,8 @@ import fs from 'node:fs/promises';
+ 
+ describe('generalist_agent', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should be able to use generalist agent by explicitly asking the main agent to invoke it',
+     params: {
+       settings: {
+diff --git a/evals/generalist_delegation.eval.ts b/evals/generalist_delegation.eval.ts
+index 81252880eb..d731747826 100644
+--- a/evals/generalist_delegation.eval.ts
++++ b/evals/generalist_delegation.eval.ts
+@@ -11,6 +11,8 @@ describe('generalist_delegation', () => {
+   // --- Positive Evals (Should Delegate) ---
+ 
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should delegate batch error fixing to generalist agent',
+     configOverrides: {
+       agents: {
+@@ -54,6 +56,8 @@ describe('generalist_delegation', () => {
+   });
+ 
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should autonomously delegate complex batch task to generalist agent',
+     configOverrides: {
+       agents: {
+@@ -94,6 +98,8 @@ describe('generalist_delegation', () => {
+   // --- Negative Evals (Should NOT Delegate - Assertive Handling) ---
+ 
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should NOT delegate simple read and fix to generalist agent',
+     configOverrides: {
+       agents: {
+@@ -128,6 +134,8 @@ describe('generalist_delegation', () => {
+   });
+ 
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should NOT delegate simple direct question to generalist agent',
+     configOverrides: {
+       agents: {
+diff --git a/evals/gitRepo.eval.ts b/evals/gitRepo.eval.ts
+index 6415b9c20d..b5dbd8a760 100644
+--- a/evals/gitRepo.eval.ts
++++ b/evals/gitRepo.eval.ts
+@@ -26,6 +26,8 @@ describe('git repo eval', () => {
+    * be more consistent.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not git add commit changes unprompted',
+     prompt:
+       'Finish this up for me by just making a targeted fix for the bug in index.ts. Do not build, install anything, or add tests',
+@@ -55,6 +57,8 @@ describe('git repo eval', () => {
+    * instructed to not do so by default.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should git commit changes when prompted',
+     prompt:
+       'Make a targeted fix for the bug in index.ts without building, installing anything, or adding tests. Then, commit your changes.',
+diff --git a/evals/grep_search_functionality.eval.ts b/evals/grep_search_functionality.eval.ts
+index f1224b8221..5c1da827e1 100644
+--- a/evals/grep_search_functionality.eval.ts
++++ b/evals/grep_search_functionality.eval.ts
+@@ -15,6 +15,8 @@ describe('grep_search_functionality', () => {
+   const TEST_PREFIX = 'Grep Search Functionality: ';
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should find a simple string in a file',
+     files: {
+       'test.txt': `hello
+@@ -33,6 +35,8 @@ describe('grep_search_functionality', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should perform a case-sensitive search',
+     files: {
+       'test.txt': `Hello
+@@ -63,6 +67,8 @@ describe('grep_search_functionality', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should return only file names when names_only is used',
+     files: {
+       'file1.txt': 'match me',
+@@ -93,6 +99,8 @@ describe('grep_search_functionality', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should search only within the specified include_pattern glob',
+     files: {
+       'file.js': 'my_function();',
+@@ -123,6 +131,8 @@ describe('grep_search_functionality', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should search within a specific subdirectory',
+     files: {
+       'src/main.js': 'unique_string_1',
+@@ -153,6 +163,8 @@ describe('grep_search_functionality', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should report no matches correctly',
+     files: {
+       'file.txt': 'nothing to see here',
+diff --git a/evals/hierarchical_memory.eval.ts b/evals/hierarchical_memory.eval.ts
+index dd4f8fbbd1..7b673af6d6 100644
+--- a/evals/hierarchical_memory.eval.ts
++++ b/evals/hierarchical_memory.eval.ts
+@@ -5,13 +5,14 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import { evalTest } from './test-helper.js';
+-import { assertModelHasOutput } from '../integration-tests/test-helper.js';
++import { evalTest, assertModelHasOutput } from './test-helper.js';
+ 
+ describe('Hierarchical Memory', () => {
+   const conflictResolutionTest =
+     'Agent follows hierarchy for contradictory instructions';
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: conflictResolutionTest,
+     params: {
+       settings: {
+@@ -48,6 +49,8 @@ What is my favorite fruit? Tell me just the name of the fruit.`,
+ 
+   const provenanceAwarenessTest = 'Agent is aware of memory provenance';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: provenanceAwarenessTest,
+     params: {
+       settings: {
+@@ -87,6 +90,8 @@ Provide the answer as an XML block like this:
+ 
+   const extensionVsGlobalTest = 'Extension memory wins over Global memory';
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: extensionVsGlobalTest,
+     params: {
+       settings: {
+diff --git a/evals/interactive-hang.eval.ts b/evals/interactive-hang.eval.ts
+index 0cf56acf98..72a5067fcc 100644
+--- a/evals/interactive-hang.eval.ts
++++ b/evals/interactive-hang.eval.ts
+@@ -8,6 +8,8 @@ describe('interactive_commands', () => {
+    * intervention.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not use interactive commands',
+     prompt: 'Execute tests.',
+     files: {
+@@ -49,6 +51,8 @@ describe('interactive_commands', () => {
+    * Validates that the agent uses non-interactive flags when scaffolding a new project.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use non-interactive flags when scaffolding a new app',
+     prompt: 'Create a new react application named my-app using vite.',
+     assert: async (rig, result) => {
+diff --git a/evals/model_steering.eval.ts b/evals/model_steering.eval.ts
+index 2cb87edcc2..4033b3a88f 100644
+--- a/evals/model_steering.eval.ts
++++ b/evals/model_steering.eval.ts
+@@ -5,14 +5,14 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import { act } from 'react';
+ import path from 'node:path';
+ import fs from 'node:fs';
+ import { appEvalTest } from './app-test-helper.js';
+-import { PolicyDecision } from '@google/gemini-cli-core';
+ 
+ describe('Model Steering Behavioral Evals', () => {
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Corrective Hint: Model switches task based on hint during tool turn',
+     configOverrides: {
+       modelSteering: true,
+@@ -52,6 +52,8 @@ describe('Model Steering Behavioral Evals', () => {
+   });
+ 
+   appEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Suggestive Hint: Model incorporates user guidance mid-stream',
+     configOverrides: {
+       modelSteering: true,
+diff --git a/evals/plan_mode.eval.ts b/evals/plan_mode.eval.ts
+index 6eea0c62ba..d52415a26d 100644
+--- a/evals/plan_mode.eval.ts
++++ b/evals/plan_mode.eval.ts
+@@ -33,6 +33,8 @@ describe('plan_mode', () => {
+       .filter(Boolean);
+ 
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should refuse file modification when in plan mode',
+     approvalMode: ApprovalMode.PLAN,
+     params: {
+@@ -68,6 +70,8 @@ describe('plan_mode', () => {
+   });
+ 
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should refuse saving new documentation to the repo when in plan mode',
+     approvalMode: ApprovalMode.PLAN,
+     params: {
+@@ -105,6 +109,8 @@ describe('plan_mode', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should enter plan mode when asked to create a plan',
+     approvalMode: ApprovalMode.DEFAULT,
+     params: {
+@@ -122,6 +128,8 @@ describe('plan_mode', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should exit plan mode when plan is complete and implementation is requested',
+     approvalMode: ApprovalMode.PLAN,
+     params: {
+@@ -169,6 +177,8 @@ describe('plan_mode', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should allow file modification in plans directory when in plan mode',
+     approvalMode: ApprovalMode.PLAN,
+     params: {
+@@ -201,6 +211,8 @@ describe('plan_mode', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should create a plan in plan mode and implement it for a refactoring task',
+     params: {
+       settings,
+diff --git a/evals/redundant_casts.eval.ts b/evals/redundant_casts.eval.ts
+index 83750e44d4..fc991b5ba7 100644
+--- a/evals/redundant_casts.eval.ts
++++ b/evals/redundant_casts.eval.ts
+@@ -11,6 +11,8 @@ import fs from 'node:fs/promises';
+ 
+ describe('redundant_casts', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not add redundant or unsafe casts when modifying typescript code',
+     files: {
+       'src/cast_example.ts': `
+diff --git a/evals/sandbox_recovery.eval.ts b/evals/sandbox_recovery.eval.ts
+index ad6b630236..073379e94f 100755
+--- a/evals/sandbox_recovery.eval.ts
++++ b/evals/sandbox_recovery.eval.ts
+@@ -3,6 +3,8 @@ import { evalTest } from './test-helper.js';
+ 
+ describe('Sandbox recovery', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'attempts to use additional_permissions when operation not permitted',
+     prompt:
+       'Run ./script.sh. It will fail with "Operation not permitted". When it does, you must retry running it by passing the appropriate additional_permissions.',
+diff --git a/evals/save_memory.eval.ts b/evals/save_memory.eval.ts
+index 25e081a819..5a228ed065 100644
+--- a/evals/save_memory.eval.ts
++++ b/evals/save_memory.eval.ts
+@@ -5,16 +5,18 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import { evalTest } from './test-helper.js';
+ import {
++  evalTest,
+   assertModelHasOutput,
+   checkModelOutputContent,
+-} from '../integration-tests/test-helper.js';
++} from './test-helper.js';
+ 
+ describe('save_memory', () => {
+   const TEST_PREFIX = 'Save memory test: ';
+   const rememberingFavoriteColor = "Agent remembers user's favorite color";
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingFavoriteColor,
+ 
+     prompt: `remember that my favorite color is  blue.
+@@ -35,6 +37,8 @@ describe('save_memory', () => {
+   });
+   const rememberingCommandRestrictions = 'Agent remembers command restrictions';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingCommandRestrictions,
+ 
+     prompt: `I don't want you to ever run npm commands.`,
+@@ -54,6 +58,8 @@ describe('save_memory', () => {
+ 
+   const rememberingWorkflow = 'Agent remembers workflow preferences';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingWorkflow,
+ 
+     prompt: `I want you to always lint after building.`,
+@@ -74,6 +80,8 @@ describe('save_memory', () => {
+   const ignoringTemporaryInformation =
+     'Agent ignores temporary conversation details';
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: ignoringTemporaryInformation,
+ 
+     prompt: `I'm going to get a coffee.`,
+@@ -97,6 +105,8 @@ describe('save_memory', () => {
+ 
+   const rememberingPetName = "Agent remembers user's pet's name";
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingPetName,
+ 
+     prompt: `Please remember that my dog's name is Buddy.`,
+@@ -116,6 +126,8 @@ describe('save_memory', () => {
+ 
+   const rememberingCommandAlias = 'Agent remembers custom command aliases';
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingCommandAlias,
+ 
+     prompt: `When I say 'start server', you should run 'npm run dev'.`,
+@@ -136,6 +148,8 @@ describe('save_memory', () => {
+   const ignoringDbSchemaLocation =
+     "Agent ignores workspace's database schema location";
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: ignoringDbSchemaLocation,
+     prompt: `The database schema for this workspace is located in \`db/schema.sql\`.`,
+     assert: async (rig, result) => {
+@@ -155,6 +169,8 @@ describe('save_memory', () => {
+   const rememberingCodingStyle =
+     "Agent remembers user's coding style preference";
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingCodingStyle,
+ 
+     prompt: `I prefer to use tabs instead of spaces for indentation.`,
+@@ -175,6 +191,8 @@ describe('save_memory', () => {
+   const ignoringBuildArtifactLocation =
+     'Agent ignores workspace build artifact location';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: ignoringBuildArtifactLocation,
+     prompt: `In this workspace, build artifacts are stored in the \`dist/artifacts\` directory.`,
+     assert: async (rig, result) => {
+@@ -193,6 +211,8 @@ describe('save_memory', () => {
+ 
+   const ignoringMainEntryPoint = "Agent ignores workspace's main entry point";
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: ignoringMainEntryPoint,
+     prompt: `The main entry point for this workspace is \`src/index.js\`.`,
+     assert: async (rig, result) => {
+@@ -211,6 +231,8 @@ describe('save_memory', () => {
+ 
+   const rememberingBirthday = "Agent remembers user's birthday";
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: rememberingBirthday,
+ 
+     prompt: `My birthday is on June 15th.`,
+@@ -231,6 +253,8 @@ describe('save_memory', () => {
+   const proactiveMemoryFromLongSession =
+     'Agent saves preference from earlier in conversation history';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: proactiveMemoryFromLongSession,
+     params: {
+       settings: {
+@@ -309,6 +333,8 @@ describe('save_memory', () => {
+   const memoryManagerRoutingPreferences =
+     'Agent routes global and project preferences to memory';
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: memoryManagerRoutingPreferences,
+     params: {
+       settings: {
+diff --git a/evals/shell-efficiency.eval.ts b/evals/shell-efficiency.eval.ts
+index dc555d5298..936af245fd 100644
+--- a/evals/shell-efficiency.eval.ts
++++ b/evals/shell-efficiency.eval.ts
+@@ -21,6 +21,8 @@ describe('Shell Efficiency', () => {
+   };
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use --silent/--quiet flags when installing packages',
+     prompt: 'Install the "lodash" package using npm.',
+     assert: async (rig) => {
+@@ -50,6 +52,8 @@ describe('Shell Efficiency', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use --no-pager with git commands',
+     prompt: 'Show the git log.',
+     assert: async (rig) => {
+@@ -73,6 +77,8 @@ describe('Shell Efficiency', () => {
+   });
+ 
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should NOT use efficiency flags when enableShellOutputEfficiency is disabled',
+     params: {
+       settings: {
+diff --git a/evals/subagents.eval.ts b/evals/subagents.eval.ts
+index 7053290fba..853d08f211 100644
+--- a/evals/subagents.eval.ts
++++ b/evals/subagents.eval.ts
+@@ -45,6 +45,8 @@ describe('subagent eval test cases', () => {
+    * This tests the system prompt's subagent specific clauses.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should delegate to user provided agent with relevant expertise',
+     params: {
+       settings: {
+@@ -69,6 +71,8 @@ describe('subagent eval test cases', () => {
+    * subagents are available. This helps catch orchestration overuse.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should avoid delegating trivial direct edit work',
+     params: {
+       settings: {
+@@ -113,6 +117,8 @@ describe('subagent eval test cases', () => {
+    * This is meant to codify the "overusing Generalist" failure mode.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should prefer relevant specialist over generalist',
+     params: {
+       settings: {
+@@ -149,6 +155,8 @@ describe('subagent eval test cases', () => {
+    * naturally spans docs and tests, so multiple specialists should be used.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should use multiple relevant specialists for multi-surface task',
+     params: {
+       settings: {
+@@ -193,6 +201,8 @@ describe('subagent eval test cases', () => {
+    * from a large pool of available subagents (10 total).
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should select the correct subagent from a pool of 10 different agents',
+     prompt: 'Please add a new SQL table migration for a user profile.',
+     files: {
+@@ -243,6 +253,8 @@ describe('subagent eval test cases', () => {
+    * This test includes stress tests the subagent delegation with ~80 tools.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should select the correct subagent from a pool of 10 different agents with MCP tools present',
+     prompt: 'Please add a new SQL table migration for a user profile.',
+     setup: async (rig) => {
+diff --git a/evals/test-helper.ts b/evals/test-helper.ts
+index 2bf9188eee..7369a6919c 100644
+--- a/evals/test-helper.ts
++++ b/evals/test-helper.ts
+@@ -16,10 +16,19 @@ import {
+   Storage,
+   getProjectHash,
+   SESSION_FILE_PREFIX,
++  PREVIEW_GEMINI_FLASH_MODEL,
++  getErrorMessage,
+ } from '@google/gemini-cli-core';
+ 
+ export * from '@google/gemini-cli-test-utils';
+ 
++/**
++ * The default model used for all evaluations.
++ * Can be overridden by setting the GEMINI_MODEL environment variable.
++ */
++export const EVAL_MODEL =
++  process.env['GEMINI_MODEL'] || PREVIEW_GEMINI_FLASH_MODEL;
++
+ // Indicates the consistency expectation for this test.
+ // - ALWAYS_PASSES - Means that the test is expected to pass 100% of the time. These
+ //   These tests are typically trivial and test basic functionality with unambiguous
+@@ -39,19 +48,49 @@ export * from '@google/gemini-cli-test-utils';
+ export type EvalPolicy = 'ALWAYS_PASSES' | 'USUALLY_PASSES';
+ 
+ export function evalTest(policy: EvalPolicy, evalCase: EvalCase) {
+-  runEval(
+-    policy,
+-    evalCase.name,
+-    () => internalEvalTest(evalCase),
+-    evalCase.timeout,
+-  );
++  runEval(policy, evalCase, () => internalEvalTest(evalCase));
+ }
+ 
+-export async function internalEvalTest(evalCase: EvalCase) {
++export async function withEvalRetries(
++  name: string,
++  attemptFn: (attempt: number) => Promise<void>,
++) {
+   const maxRetries = 3;
+   let attempt = 0;
+ 
+   while (attempt <= maxRetries) {
++    try {
++      await attemptFn(attempt);
++      return; // Success! Exit the retry loop.
++    } catch (error: unknown) {
++      const errorMessage = getErrorMessage(error);
++      const errorCode = getApiErrorCode(errorMessage);
++
++      if (errorCode) {
++        const status = attempt < maxRetries ? 'RETRY' : 'SKIP';
++        logReliabilityEvent(name, attempt, status, errorCode, errorMessage);
++
++        if (attempt < maxRetries) {
++          attempt++;
++          console.warn(
++            `[Eval] Attempt ${attempt} failed with ${errorCode} Error. Retrying...`,
++          );
++          continue; // Retry
++        }
++
++        console.warn(
++          `[Eval] '${name}' failed after ${maxRetries} retries due to persistent API errors. Skipping failure to avoid blocking PR.`,
++        );
++        return; // Gracefully exit without failing the test
++      }
++
++      throw error; // Real failure
++    }
++  }
++}
++
++export async function internalEvalTest(evalCase: EvalCase) {
++  await withEvalRetries(evalCase.name, async () => {
+     const rig = new TestRig();
+     const { logDir, sanitizedName } = await prepareLogDir(evalCase.name);
+     const activityLogFile = path.join(logDir, `${sanitizedName}.jsonl`);
+@@ -59,14 +98,21 @@ export async function internalEvalTest(evalCase: EvalCase) {
+     let isSuccess = false;
+ 
+     try {
+-      rig.setup(evalCase.name, evalCase.params);
++      const setupOptions = {
++        ...evalCase.params,
++        settings: {
++          model: { name: EVAL_MODEL },
++          ...evalCase.params?.settings,
++        },
++      };
++      rig.setup(evalCase.name, setupOptions);
+ 
+       if (evalCase.setup) {
+         await evalCase.setup(rig);
+       }
+ 
+       if (evalCase.files) {
+-        await setupTestFiles(rig, evalCase.files);
++        await prepareWorkspace(rig.testDir!, rig.homeDir!, evalCase.files);
+       }
+ 
+       symlinkNodeModules(rig.testDir || '');
+@@ -139,37 +185,6 @@ export async function internalEvalTest(evalCase: EvalCase) {
+ 
+       await evalCase.assert(rig, result);
+       isSuccess = true;
+-      return; // Success! Exit the retry loop.
+-    } catch (error: unknown) {
+-      const errorMessage =
+-        error instanceof Error ? error.message : String(error);
+-      const errorCode = getApiErrorCode(errorMessage);
+-
+-      if (errorCode) {
+-        const status = attempt < maxRetries ? 'RETRY' : 'SKIP';
+-        logReliabilityEvent(
+-          evalCase.name,
+-          attempt,
+-          status,
+-          errorCode,
+-          errorMessage,
+-        );
+-
+-        if (attempt < maxRetries) {
+-          attempt++;
+-          console.warn(
+-            `[Eval] Attempt ${attempt} failed with ${errorCode} Error. Retrying...`,
+-          );
+-          continue; // Retry
+-        }
+-
+-        console.warn(
+-          `[Eval] '${evalCase.name}' failed after ${maxRetries} retries due to persistent API errors. Skipping failure to avoid blocking PR.`,
+-        );
+-        return; // Gracefully exit without failing the test
+-      }
+-
+-      throw error; // Real failure
+     } finally {
+       if (isSuccess) {
+         await fs.promises.unlink(activityLogFile).catch((err) => {
+@@ -188,7 +203,7 @@ export async function internalEvalTest(evalCase: EvalCase) {
+       );
+       await rig.cleanup();
+     }
+-  }
++  });
+ }
+ 
+ function getApiErrorCode(message: string): '500' | '503' | undefined {
+@@ -226,7 +241,7 @@ function logReliabilityEvent(
+   const reliabilityLog = {
+     timestamp: new Date().toISOString(),
+     testName,
+-    model: process.env.GEMINI_MODEL || 'unknown',
++    model: process.env['GEMINI_MODEL'] || 'unknown',
+     attempt,
+     status,
+     errorCode,
+@@ -252,9 +267,13 @@ function logReliabilityEvent(
+  * intentionally uses synchronous filesystem and child_process operations
+  * for simplicity and to ensure sequential environment preparation.
+  */
+-async function setupTestFiles(rig: TestRig, files: Record<string, string>) {
++export async function prepareWorkspace(
++  testDir: string,
++  homeDir: string,
++  files: Record<string, string>,
++) {
+   const acknowledgedAgents: Record<string, Record<string, string>> = {};
+-  const projectRoot = fs.realpathSync(rig.testDir!);
++  const projectRoot = fs.realpathSync(testDir);
+ 
+   for (const [filePath, content] of Object.entries(files)) {
+     if (filePath.includes('..') || path.isAbsolute(filePath)) {
+@@ -290,7 +309,7 @@ async function setupTestFiles(rig: TestRig, files: Record<string, string>) {
+ 
+   if (Object.keys(acknowledgedAgents).length > 0) {
+     const ackPath = path.join(
+-      rig.homeDir!,
++      homeDir,
+       '.gemini',
+       'acknowledgments',
+       'agents.json',
+@@ -299,7 +318,7 @@ async function setupTestFiles(rig: TestRig, files: Record<string, string>) {
+     fs.writeFileSync(ackPath, JSON.stringify(acknowledgedAgents, null, 2));
+   }
+ 
+-  const execOptions = { cwd: rig.testDir!, stdio: 'inherit' as const };
++  const execOptions = { cwd: testDir, stdio: 'ignore' as const };
+   execSync('git init --initial-branch=main', execOptions);
+   execSync('git config user.email "test@example.com"', execOptions);
+   execSync('git config user.name "Test User"', execOptions);
+@@ -320,14 +339,30 @@ async function setupTestFiles(rig: TestRig, files: Record<string, string>) {
+  */
+ export function runEval(
+   policy: EvalPolicy,
+-  name: string,
++  evalCase: BaseEvalCase,
+   fn: () => Promise<void>,
+-  timeout?: number,
++  timeoutOverride?: number,
+ ) {
+-  if (policy === 'USUALLY_PASSES' && !process.env['RUN_EVALS']) {
+-    it.skip(name, fn);
++  const { name, timeout, suiteName, suiteType } = evalCase;
++  const targetSuiteType = process.env['EVAL_SUITE_TYPE'];
++  const targetSuiteName = process.env['EVAL_SUITE_NAME'];
++
++  const meta = { suiteType, suiteName };
++
++  const skipBySuiteType =
++    targetSuiteType && suiteType && suiteType !== targetSuiteType;
++  const skipBySuiteName =
++    targetSuiteName && suiteName && suiteName !== targetSuiteName;
++
++  const options = { timeout: timeoutOverride ?? timeout, meta };
++  if (
++    (policy === 'USUALLY_PASSES' && !process.env['RUN_EVALS']) ||
++    skipBySuiteType ||
++    skipBySuiteName
++  ) {
++    it.skip(name, options, fn);
+   } else {
+-    it(name, fn, timeout);
++    it(name, options, fn);
+   }
+ }
+ 
+@@ -366,15 +401,20 @@ interface ForbiddenToolSettings {
+   };
+ }
+ 
+-export interface EvalCase {
++export interface BaseEvalCase {
++  suiteName: string;
++  suiteType: 'behavioral' | 'component-level' | 'hero-scenario';
+   name: string;
++  timeout?: number;
++  files?: Record<string, string>;
++}
++
++export interface EvalCase extends BaseEvalCase {
+   params?: {
+     settings?: ForbiddenToolSettings & Record<string, unknown>;
+     [key: string]: unknown;
+   };
+   prompt: string;
+-  timeout?: number;
+-  files?: Record<string, string>;
+   setup?: (rig: TestRig) => Promise<void> | void;
+   /** Conversation history to pre-load via --resume. Each entry is a message object with type, content, etc. */
+   messages?: Record<string, unknown>[];
+diff --git a/evals/tool_output_masking.eval.ts b/evals/tool_output_masking.eval.ts
+index dff639e421..ccaa279877 100644
+--- a/evals/tool_output_masking.eval.ts
++++ b/evals/tool_output_masking.eval.ts
+@@ -31,6 +31,8 @@ describe('Tool Output Masking Behavioral Evals', () => {
+    * It should recognize the <tool_output_masked> tag and use a tool to read the file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should attempt to read the redirected full output file when information is masked',
+     params: {
+       security: {
+@@ -167,6 +169,8 @@ Output too large. Full output available at: ${outputFilePath}
+    * Scenario: Information is in the preview.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should NOT read the full output file when the information is already in the preview',
+     params: {
+       security: {
+diff --git a/evals/tracker.eval.ts b/evals/tracker.eval.ts
+index 49bc903b0a..44fbdc46e0 100644
+--- a/evals/tracker.eval.ts
++++ b/evals/tracker.eval.ts
+@@ -25,6 +25,8 @@ const FILES = {
+ 
+ describe('tracker_mode', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should manage tasks in the tracker when explicitly requested during a bug fix',
+     params: {
+       settings: { experimental: { taskTracker: true } },
+@@ -78,6 +80,8 @@ describe('tracker_mode', () => {
+   });
+ 
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should implicitly create tasks when asked to build a feature plan',
+     params: {
+       settings: { experimental: { taskTracker: true } },
+diff --git a/evals/validation_fidelity.eval.ts b/evals/validation_fidelity.eval.ts
+index 8cfb4f6626..2a69b88740 100644
+--- a/evals/validation_fidelity.eval.ts
++++ b/evals/validation_fidelity.eval.ts
+@@ -9,6 +9,8 @@ import { evalTest } from './test-helper.js';
+ 
+ describe('validation_fidelity', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should perform exhaustive validation autonomously when guided by system instructions',
+     files: {
+       'src/types.ts': `
+diff --git a/evals/validation_fidelity_pre_existing_errors.eval.ts b/evals/validation_fidelity_pre_existing_errors.eval.ts
+index 4990b7bc91..0b100e5668 100644
+--- a/evals/validation_fidelity_pre_existing_errors.eval.ts
++++ b/evals/validation_fidelity_pre_existing_errors.eval.ts
+@@ -9,6 +9,8 @@ import { evalTest } from './test-helper.js';
+ 
+ describe('validation_fidelity_pre_existing_errors', () => {
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should handle pre-existing project errors gracefully during validation',
+     files: {
+       'src/math.ts': `
+diff --git a/evals/vitest.config.ts b/evals/vitest.config.ts
+index 50733a999c..b0ad05c9e9 100644
+--- a/evals/vitest.config.ts
++++ b/evals/vitest.config.ts
+@@ -24,7 +24,10 @@ export default defineConfig({
+     environment: 'node',
+     globals: true,
+     alias: {
+-      react: path.resolve(__dirname, '../node_modules/react'),
++      '@google/gemini-cli-core': path.resolve(
++        __dirname,
++        '../packages/core/index.ts',
++      ),
+     },
+     setupFiles: [path.resolve(__dirname, '../packages/cli/test-setup.ts')],
+     server: {

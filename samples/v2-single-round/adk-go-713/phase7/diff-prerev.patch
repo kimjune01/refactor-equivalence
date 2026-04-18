@@ -1,0 +1,1158 @@
+diff --git a/cmd/launcher/full/full.go b/cmd/launcher/full/full.go
+index a6f46d3b..a4904027 100644
+--- a/cmd/launcher/full/full.go
++++ b/cmd/launcher/full/full.go
+@@ -22,11 +22,12 @@ import (
+ 	"google.golang.org/adk/cmd/launcher/web"
+ 	"google.golang.org/adk/cmd/launcher/web/a2a"
+ 	"google.golang.org/adk/cmd/launcher/web/api"
++	"google.golang.org/adk/cmd/launcher/web/triggers/eventarc"
+ 	"google.golang.org/adk/cmd/launcher/web/triggers/pubsub"
+ 	"google.golang.org/adk/cmd/launcher/web/webui"
+ )
+ 
+ // NewLauncher returnes the most versatile universal launcher with all options built-in.
+ func NewLauncher() launcher.Launcher {
+-	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), api.NewLauncher()))
++	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), eventarc.NewLauncher(), api.NewLauncher()))
+ }
+diff --git a/cmd/launcher/web/triggers/eventarc/eventarc.go b/cmd/launcher/web/triggers/eventarc/eventarc.go
+new file mode 100644
+index 00000000..abc68d23
+--- /dev/null
++++ b/cmd/launcher/web/triggers/eventarc/eventarc.go
+@@ -0,0 +1,136 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++// Package eventarc provides a sublauncher that adds Eventarc trigger capabilities to ADK web server.
++package eventarc
++
++import (
++	"flag"
++	"fmt"
++	"net/http"
++	"strings"
++	"time"
++
++	"github.com/gorilla/mux"
++
++	"google.golang.org/adk/cmd/launcher"
++	"google.golang.org/adk/cmd/launcher/web"
++	"google.golang.org/adk/internal/cli/util"
++	"google.golang.org/adk/server/adkrest/controllers/triggers"
++)
++
++type eventarcConfig struct {
++	pathPrefix        string
++	triggerMaxRetries int
++	triggerBaseDelay  time.Duration
++	triggerMaxDelay   time.Duration
++	triggerMaxRuns    int
++}
++
++type eventarcLauncher struct {
++	flags  *flag.FlagSet
++	config *eventarcConfig
++}
++
++// NewLauncher creates a new eventarc launcher. It extends Web launcher.
++func NewLauncher() web.Sublauncher {
++	config := &eventarcConfig{}
++
++	fs := flag.NewFlagSet("eventarc", flag.ContinueOnError)
++	fs.StringVar(&config.pathPrefix, "path_prefix", "/api", "Path prefix for the Eventarc trigger endpoint. Default is '/api'.")
++	fs.IntVar(&config.triggerMaxRetries, "trigger_max_retries", 3, "Maximum retries for HTTP 429 errors from triggers")
++	fs.DurationVar(&config.triggerBaseDelay, "trigger_base_delay", 1*time.Second, "Base delay for trigger retry exponential backoff")
++	fs.DurationVar(&config.triggerMaxDelay, "trigger_max_delay", 10*time.Second, "Maximum delay for trigger retry exponential backoff")
++	fs.IntVar(&config.triggerMaxRuns, "trigger_max_concurrent_runs", 100, "Maximum concurrent trigger runs")
++
++	return &eventarcLauncher{
++		config: config,
++		flags:  fs,
++	}
++}
++
++// Keyword implements web.Sublauncher. Returns the command-line keyword for eventarc launcher.
++func (e *eventarcLauncher) Keyword() string {
++	return "eventarc"
++}
++
++// Parse parses the command-line arguments for the eventarc launcher.
++func (e *eventarcLauncher) Parse(args []string) ([]string, error) {
++	err := e.flags.Parse(args)
++	if err != nil || !e.flags.Parsed() {
++		return nil, fmt.Errorf("failed to parse eventarc flags: %v", err)
++	}
++	if e.config.triggerMaxRetries <= 0 {
++		return nil, fmt.Errorf("trigger_max_retries must be > 0")
++	}
++	if e.config.triggerBaseDelay < 0 {
++		return nil, fmt.Errorf("trigger_base_delay must be >= 0")
++	}
++	if e.config.triggerMaxDelay <= 0 {
++		return nil, fmt.Errorf("trigger_max_delay must be > 0")
++	}
++	if e.config.triggerMaxRuns <= 0 {
++		return nil, fmt.Errorf("trigger_max_concurrent_runs must be > 0")
++	}
++
++	prefix := e.config.pathPrefix
++	if !strings.HasPrefix(prefix, "/") {
++		prefix = "/" + prefix
++	}
++	e.config.pathPrefix = strings.TrimSuffix(prefix, "/")
++
++	return e.flags.Args(), nil
++}
++
++// CommandLineSyntax returns the command-line syntax for the eventarc launcher.
++func (e *eventarcLauncher) CommandLineSyntax() string {
++	return util.FormatFlagUsage(e.flags)
++}
++
++// SimpleDescription implements web.Sublauncher.
++func (e *eventarcLauncher) SimpleDescription() string {
++	return "starts ADK Eventarc trigger endpoint server"
++}
++
++// SetupSubrouters adds the Eventarc trigger endpoint to the parent router.
++func (e *eventarcLauncher) SetupSubrouters(router *mux.Router, config *launcher.Config) error {
++	triggerConfig := triggers.TriggerConfig{
++		MaxRetries:        e.config.triggerMaxRetries,
++		BaseDelay:         e.config.triggerBaseDelay,
++		MaxDelay:          e.config.triggerMaxDelay,
++		MaxConcurrentRuns: e.config.triggerMaxRuns,
++	}
++
++	controller := triggers.NewEventarcController(
++		config.SessionService,
++		config.AgentLoader,
++		config.MemoryService,
++		config.ArtifactService,
++		config.PluginConfig,
++		triggerConfig,
++	)
++
++	subrouter := router
++	if e.config.pathPrefix != "" && e.config.pathPrefix != "/" {
++		subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
++	}
++
++	subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++	return nil
++}
++
++// UserMessage implements web.Sublauncher.
++func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
++	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++}
+diff --git a/go.mod b/go.mod
+index 37438ba7..ae0075e1 100644
+--- a/go.mod
++++ b/go.mod
+@@ -36,8 +36,6 @@ require (
+ 	rsc.io/ordered v1.1.1
+ )
+ 
+-require github.com/hashicorp/golang-lru/v2 v2.0.7
+-
+ require (
+ 	cel.dev/expr v0.25.1 // indirect
+ 	cloud.google.com/go/auth v0.17.0 // indirect
+diff --git a/go.sum b/go.sum
+index 51a556ea..155b5abd 100644
+--- a/go.sum
++++ b/go.sum
+@@ -94,8 +94,6 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
+ github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 h1:X+2YciYSxvMQK0UZ7sg45ZVabVZBeBuvMkmuI2V3Fak=
+ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7/go.mod h1:lW34nIZuQ8UDPdkon5fmfp2l3+ZkQ2me/+oecHYLOII=
+-github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
+-github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
+ github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
+ github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
+diff --git a/internal/telemetry/telemetry.go b/internal/telemetry/telemetry.go
+index 68ccca91..aab356d8 100644
+--- a/internal/telemetry/telemetry.go
++++ b/internal/telemetry/telemetry.go
+@@ -42,12 +42,10 @@ const (
+ )
+ 
+ var (
+-	gcpVertexAgentToolCallArgsName        = attribute.Key("gcp.vertex.agent.tool_call_args")
+-	gcpVertexAgentEventID                 = attribute.Key("gcp.vertex.agent.event_id")
+-	gcpVertexAgentToolResponseName        = attribute.Key("gcp.vertex.agent.tool_response")
+-	gcpVertexAgentInvocationID            = attribute.Key("gcp.vertex.agent.invocation_id")
+-	genAIUsageCacheReadInputTokens        = attribute.Key("gen_ai.usage.cache_read.input_tokens")
+-	genAIUsageExperimentalReasoningTokens = attribute.Key("gen_ai.usage.experimental.reasoning_tokens")
++	gcpVertexAgentToolCallArgsName = attribute.Key("gcp.vertex.agent.tool_call_args")
++	gcpVertexAgentEventID          = attribute.Key("gcp.vertex.agent.event_id")
++	gcpVertexAgentToolResponseName = attribute.Key("gcp.vertex.agent.tool_response")
++	gcpVertexAgentInvocationID     = attribute.Key("gcp.vertex.agent.invocation_id")
+ )
+ 
+ // tracer is the tracer instance for ADK go.
+@@ -127,8 +125,6 @@ func TraceGenerateContentResult(span trace.Span, params TraceGenerateContentResu
+ 		span.SetAttributes(
+ 			semconv.GenAIUsageInputTokens(int(params.Response.UsageMetadata.PromptTokenCount)),
+ 			semconv.GenAIUsageOutputTokens(int(params.Response.UsageMetadata.CandidatesTokenCount)),
+-			genAIUsageCacheReadInputTokens.Int(int(params.Response.UsageMetadata.CachedContentTokenCount)),
+-			genAIUsageExperimentalReasoningTokens.Int(int(params.Response.UsageMetadata.ThoughtsTokenCount)),
+ 		)
+ 	}
+ }
+diff --git a/server/adkrest/controllers/triggers/eventarc.go b/server/adkrest/controllers/triggers/eventarc.go
+new file mode 100644
+index 00000000..b51d39a5
+--- /dev/null
++++ b/server/adkrest/controllers/triggers/eventarc.go
+@@ -0,0 +1,137 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package triggers
++
++import (
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++
++	"google.golang.org/adk/agent"
++	"google.golang.org/adk/artifact"
++	"google.golang.org/adk/memory"
++	"google.golang.org/adk/runner"
++	"google.golang.org/adk/server/adkrest/internal/models"
++	"google.golang.org/adk/session"
++)
++
++const eventArcDefaultUserID = "eventarc-caller"
++
++// EventarcController handles the Eventarc trigger endpoints.
++type EventarcController struct {
++	runner    *RetriableRunner
++	semaphore chan struct{}
++}
++
++// NewEventarcController creates a new EventarcController.
++func NewEventarcController(sessionService session.Service, agentLoader agent.Loader, memoryService memory.Service, artifactService artifact.Service, pluginConfig runner.PluginConfig, triggerConfig TriggerConfig) *EventarcController {
++	return &EventarcController{
++		runner: &RetriableRunner{
++			sessionService:  sessionService,
++			agentLoader:     agentLoader,
++			memoryService:   memoryService,
++			artifactService: artifactService,
++			pluginConfig:    pluginConfig,
++			triggerConfig:   triggerConfig,
++		},
++		semaphore: make(chan struct{}, triggerConfig.MaxConcurrentRuns),
++	}
++}
++
++// EventarcTriggerHandler handles the Eventarc trigger endpoint.
++func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++	var event models.EventarcTriggerRequest
++	contentType := r.Header.Get("Content-Type")
++	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++	if contentType == "application/cloudevents+json" {
++		// --- STRUCTURED MODE ---
++		// The entire event is in the body. Decode it.
++		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++			http.Error(w, "Bad Request", http.StatusBadRequest)
++			return
++		}
++	} else {
++		// --- BINARY MODE ---
++		// Metadata is in the headers.
++		event.ID = r.Header.Get("ce-id")
++		event.Type = r.Header.Get("ce-type")
++		event.Source = r.Header.Get("ce-source")
++		event.SpecVersion = r.Header.Get("ce-specversion")
++		event.Time = r.Header.Get("ce-time")
++
++		// The entire body is the payload.
++		// We just read it as raw bytes into event.Data.
++		bodyBytes, err := io.ReadAll(r.Body)
++		if err != nil {
++			http.Error(w, "Failed to read body", http.StatusInternalServerError)
++			return
++		}
++		event.Data = bodyBytes
++	}
++
++	var messageContent string
++
++	// Handle Pub/Sub Specifically ---
++	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++		var pubsub models.PubSubTriggerRequest
++		var err error
++		// Unmarshal the raw bytes into our specific Pub/Sub struct
++		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++			return
++		}
++		messageContent, err = messageContentFromPubSub(pubsub)
++		if err != nil {
++			respondError(w, http.StatusBadRequest, err.Error())
++			return
++		}
++		// Otherwise just marshal the whole event as an input data.
++		// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++	} else {
++		messageBytes, err := json.Marshal(event)
++		if err != nil {
++			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++			return
++		}
++		messageContent = string(messageBytes)
++	}
++
++	appName, err := appName(r)
++	if err != nil {
++		respondError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++
++	userID := event.Source
++	if userID == "" {
++		userID = eventArcDefaultUserID
++	}
++
++	// Semaphore limits concurrent agent calls based on the TriggerConfig.
++	if c.semaphore != nil {
++		c.semaphore <- struct{}{}
++		defer func() { <-c.semaphore }()
++	}
++
++	if _, err := c.runner.RunAgent(r.Context(), appName, userID, messageContent); err != nil {
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
++		return
++	}
++
++	respondSuccess(w)
++}
+diff --git a/server/adkrest/controllers/triggers/pubsub.go b/server/adkrest/controllers/triggers/pubsub.go
+index fea0912c..241f5422 100644
+--- a/server/adkrest/controllers/triggers/pubsub.go
++++ b/server/adkrest/controllers/triggers/pubsub.go
+@@ -27,7 +27,7 @@ import (
+ 	"google.golang.org/adk/session"
+ )
+ 
+-const defaultUserID = "pubsub-caller"
++const pubSubDefaultUserID = "pubsub-caller"
+ 
+ // PubSubController handles the PubSub trigger endpoints.
+ type PubSubController struct {
+@@ -52,22 +52,47 @@ func NewPubSubController(sessionService session.Service, agentLoader agent.Loade
+ 
+ // PubSubTriggerHandler handles the PubSub trigger endpoint.
+ func (c *PubSubController) PubSubTriggerHandler(w http.ResponseWriter, r *http.Request) {
++	// Parse the request to the request model.
++	var req models.PubSubTriggerRequest
++	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
++		respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to decode request: %v", err))
++		return
++	}
++
++	agentMessage, err := messageContentFromPubSub(req)
++	if err != nil {
++		respondError(w, http.StatusBadRequest, err.Error())
++		return
++	}
++
++	appName, err := appName(r)
++	if err != nil {
++		respondError(w, http.StatusInternalServerError, err.Error())
++		return
++	}
++
++	userID := req.Subscription
++	if userID == "" {
++		userID = pubSubDefaultUserID
++	}
++
++	// Semaphore limits concurrent agent calls based on the TriggerConfig.
+ 	if c.semaphore != nil {
+ 		c.semaphore <- struct{}{}
+ 		defer func() { <-c.semaphore }()
+ 	}
+ 
+-	// Parse the request to the request model.
+-	var req models.PubSubTriggerRequest
+-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+-		respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to decode request: %v", err))
++	if _, err := c.runner.RunAgent(r.Context(), appName, userID, agentMessage); err != nil {
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
+ 		return
+ 	}
+ 
+-	// Decode base64 message data.
++	respondSuccess(w)
++}
++
++func messageContentFromPubSub(req models.PubSubTriggerRequest) (string, error) {
+ 	messageContent := make(map[string]any)
+ 	if len(req.Message.Data) > 0 {
+-		// Avoids encoding the data twice later with json.Marshal.
+ 		messageContent["data"] = string(req.Message.Data)
+ 	}
+ 	// Add attributes to the messageContent if present
+@@ -76,26 +101,12 @@ func (c *PubSubController) PubSubTriggerHandler(w http.ResponseWriter, r *http.R
+ 	}
+ 
+ 	if len(messageContent) == 0 {
+-		respondError(w, http.StatusBadRequest, "empty message data and attributes")
+-		return
++		return "", fmt.Errorf("empty message data and attributes")
+ 	}
+ 
+ 	agentMessage, err := json.Marshal(messageContent)
+ 	if err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
+-		return
+-	}
+-
+-	appName, err := appName(r)
+-	if err != nil {
+-		respondError(w, http.StatusInternalServerError, err.Error())
+-		return
+-	}
+-
+-	if _, err := c.runner.RunAgent(r.Context(), appName, req.Subscription, string(agentMessage)); err != nil {
+-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
+-		return
++		return "", fmt.Errorf("failed to marshal agent message: %v", err)
+ 	}
+-
+-	respondSuccess(w)
++	return string(agentMessage), nil
+ }
+diff --git a/server/adkrest/controllers/triggers/triggers.go b/server/adkrest/controllers/triggers/triggers.go
+index 6bf6e9ac..32beaa50 100644
+--- a/server/adkrest/controllers/triggers/triggers.go
++++ b/server/adkrest/controllers/triggers/triggers.go
+@@ -45,10 +45,6 @@ type RetriableRunner struct {
+ }
+ 
+ func (r *RetriableRunner) RunAgent(ctx context.Context, appName, userID, messageContent string) ([]*session.Event, error) {
+-	if userID == "" {
+-		userID = defaultUserID
+-	}
+-
+ 	// Each retry = new session
+ 	sessReq := &session.CreateRequest{
+ 		AppName: appName,
+diff --git a/server/adkrest/handler.go b/server/adkrest/handler.go
+index b0dc54a6..01ece477 100644
+--- a/server/adkrest/handler.go
++++ b/server/adkrest/handler.go
+@@ -15,7 +15,6 @@
+ package adkrest
+ 
+ import (
+-	"fmt"
+ 	"net/http"
+ 	"time"
+ 
+@@ -35,12 +34,7 @@ import (
+ 
+ // NewServer creates a new ADK REST API server which implements [http.Handler] interface.
+ func NewServer(cfg ServerConfig) (*Server, error) {
+-	debugTelemetry, err := services.NewDebugTelemetryWithConfig(&services.DebugTelemetryConfig{
+-		TraceCapacity: cfg.DebugConfig.TraceCapacity,
+-	})
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create debug telemetry service: %w", err)
+-	}
++	debugTelemetry := services.NewDebugTelemetry()
+ 
+ 	router := mux.NewRouter().StrictSlash(true)
+ 	// TODO: Allow taking a prefix to allow customizing the path
+@@ -67,14 +61,6 @@ type ServerConfig struct {
+ 	ArtifactService artifact.Service
+ 	SSEWriteTimeout time.Duration
+ 	PluginConfig    runner.PluginConfig
+-	DebugConfig     *DebugTelemetryConfig
+-}
+-
+-// DebugTelemetryConfig contains parameters for the debug telemetry.
+-type DebugTelemetryConfig struct {
+-	// Maximum number of traces to keep in memory.
+-	// If <= 0, the default capacity 10_000 is used.
+-	TraceCapacity int
+ }
+ 
+ // Server is an HTTP server that serves the ADK REST API.
+diff --git a/server/adkrest/internal/models/triggers.go b/server/adkrest/internal/models/triggers.go
+index 08e6e5a1..c8dc8417 100644
+--- a/server/adkrest/internal/models/triggers.go
++++ b/server/adkrest/internal/models/triggers.go
+@@ -14,6 +14,8 @@
+ 
+ package models
+ 
++import "encoding/json"
++
+ // PubSubTriggerRequest represents the request for the PubSub trigger.
+ // See: https://cloud.google.com/pubsub/docs/push#receive_push
+ type PubSubTriggerRequest struct {
+@@ -37,6 +39,37 @@ type PubSubMessage struct {
+ 	OrderingKey string `json:"orderingKey,omitempty"`
+ }
+ 
++// EventarcTriggerRequest represents the request for the Eventarc trigger.
++// Eventarc / CloudEvents request format.
++//
++// Eventarc delivers events as CloudEvents over HTTP in two modes:
++//
++//  1. **Structured content mode** (JSON body): All CloudEvents attributes
++//     and the event data are in the JSON body.  Used by direct HTTP callers.
++//  2. **Binary content mode** (Eventarc default): CloudEvents attributes are
++//     sent as “ce-*“ HTTP headers, and the body contains only the event
++//     data — typically a Pub/Sub message wrapper for Pub/Sub-sourced events:
++//     “{"message": {"data": "<base64>", ...}, "subscription": "..."}“.
++//
++// See: https://cloud.google.com/eventarc/docs/cloudevents
++type EventarcTriggerRequest struct {
++	// Unique identifier for the event
++	ID string `json:"id"`
++	// Identifies the source of the event
++	Source string `json:"source"`
++	// The type of event data
++	Type string `json:"type"`
++	// The CloudEvents specification version used for this event
++	SpecVersion string `json:"specversion"`
++	// Event generation time, in RFC 3339 format (optional)
++	Time string `json:"time,omitempty"`
++	// In structured mode, ``data`` is always present.
++	// In binary mode, the entire body is the data (often a Pub/Sub wrapper).
++	// json.RawMessage captures the raw JSON payload (Storage, PubSub, whatever)
++	// without needing to know its internal structure!
++	Data json.RawMessage `json:"data,omitempty"`
++}
++
+ // TriggerResponse represents the standard response for Pub/Sub and Eventarc triggers.
+ type TriggerResponse struct {
+ 	// Processing status: 'success' or error message.
+diff --git a/server/adkrest/internal/services/debugtelemetry.go b/server/adkrest/internal/services/debugtelemetry.go
+index b2823a72..affafc5d 100644
+--- a/server/adkrest/internal/services/debugtelemetry.go
++++ b/server/adkrest/internal/services/debugtelemetry.go
+@@ -15,15 +15,11 @@
+ package services
+ 
+ import (
+-	"cmp"
+ 	"context"
+-	"fmt"
+ 	"slices"
+ 	"sync"
+ 	"time"
+ 
+-	lru "github.com/hashicorp/golang-lru/v2"
+-
+ 	"go.opentelemetry.io/otel/attribute"
+ 	sdklog "go.opentelemetry.io/otel/sdk/log"
+ 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+@@ -33,35 +29,18 @@ import (
+ 	"google.golang.org/adk/internal/telemetry"
+ )
+ 
+-const (
+-	defaultTraceCapacity = 10_000
+-	eventIDKey           = "gcp.vertex.agent.event_id"
+-)
++const eventIDKey = "gcp.vertex.agent.event_id"
+ 
+ // DebugTelemetry stores the in memory spans and logs, grouped by session and event.
+ type DebugTelemetry struct {
+ 	store *spanStore
+ }
+ 
+-type DebugTelemetryConfig struct {
+-	// Maximum number of traces to keep in memory.
+-	// If <= 0, default capacity (10_000) is used.
+-	TraceCapacity int
+-}
+-
+-// NewDebugTelemetryWithConfig returns a new DebugTelemetry instance with custom capacity.
+-func NewDebugTelemetryWithConfig(cfg *DebugTelemetryConfig) (*DebugTelemetry, error) {
+-	capacity := defaultTraceCapacity
+-	if cfg != nil && cfg.TraceCapacity > 0 {
+-		capacity = cfg.TraceCapacity
+-	}
+-	store, err := newSpanStore(capacity)
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create span store: %w", err)
+-	}
++// NewDebugTelemetry returns a new DebugTelemetry instance.
++func NewDebugTelemetry() *DebugTelemetry {
+ 	return &DebugTelemetry{
+-		store: store,
+-	}, nil
++		store: newSpanStore(),
++	}
+ }
+ 
+ func (d *DebugTelemetry) SpanProcessor() sdktrace.SpanProcessor {
+@@ -85,7 +64,7 @@ func (d *DebugTelemetry) GetSpansBySessionID(sessionID string) []DebugSpan {
+ }
+ 
+ func convertAttrs(in []attribute.KeyValue) map[string]string {
+-	out := make(map[string]string, len(in))
++	out := make(map[string]string)
+ 	for _, attr := range in {
+ 		out[string(attr.Key)] = attr.Value.Emit()
+ 	}
+@@ -115,40 +94,40 @@ type DebugLog struct {
+ 
+ // spanRecord stores a span and its associated logs.
+ type spanRecord struct {
++	Span *inMemorySpan
++	Logs []DebugLog
++}
++
++// inMemorySpan stores spans in memory for debug telemetry.
++type inMemorySpan struct {
+ 	Name         string
+ 	StartTime    time.Time
+ 	EndTime      time.Time
+ 	Context      trace.SpanContext
+ 	ParentSpanID trace.SpanID
+ 	Attributes   map[string]string
+-	Logs         []DebugLog
+ }
+ 
+ // spanStore stores spans and logs in memory for debug telemetry.
+ type spanStore struct {
+ 	mu sync.RWMutex
+-	// recordsByTraceID is the main store for spans, indexed by trace id.
+-	recordsByTraceID *lru.Cache[string, []*spanRecord]
+ 	// recordsBySpanID stores spans indexed by span id.
+ 	recordsBySpanID map[string]*spanRecord
+ 	// traceIDsBySessionID stores trace ids indexed by session id for easy lookup.
+ 	traceIDsBySessionID map[string]map[string]struct{}
+ 	// recordsByEventID stores spans indexed by event id for easy lookup.
+ 	recordsByEventID map[string][]*spanRecord
++	// recordsByTraceID stores spans indexed by trace id for easy lookup.
++	recordsByTraceID map[string][]*spanRecord
+ }
+ 
+-func newSpanStore(capacity int) (*spanStore, error) {
+-	store := &spanStore{
++func newSpanStore() *spanStore {
++	return &spanStore{
+ 		recordsBySpanID:     make(map[string]*spanRecord),
+ 		traceIDsBySessionID: make(map[string]map[string]struct{}),
+ 		recordsByEventID:    make(map[string][]*spanRecord),
++		recordsByTraceID:    make(map[string][]*spanRecord),
+ 	}
+-	var err error
+-	store.recordsByTraceID, err = lru.NewWithEvict(capacity, store.evict)
+-	if err != nil {
+-		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
+-	}
+-	return store, nil
+ }
+ 
+ func (s *spanStore) getSpansByEventID(id string) []DebugSpan {
+@@ -156,65 +135,50 @@ func (s *spanStore) getSpansByEventID(id string) []DebugSpan {
+ 	defer s.mu.RUnlock()
+ 	// Create a copy of the slice to avoid race conditions.
+ 	records := slices.Clone(s.recordsByEventID[id])
+-	s.touchTraces(records)
+ 	return convertRecords(records)
+ }
+ 
+-// touchTraces marks traces as recently used. Required because fetching by event ID bypasses the trace LRU cache.
+-func (s *spanStore) touchTraces(records []*spanRecord) {
+-	// touchedTraces is used to avoid touching the same trace multiple times.
+-	touchedTraces := make(map[string]bool)
+-	for _, r := range records {
+-		traceIDStr := r.Context.TraceID().String()
+-		if traceIDStr != "" && !touchedTraces[traceIDStr] {
+-			touchedTraces[traceIDStr] = true
+-			// Get the trace to update its access time in the LRU cache, ignore the result.
+-			s.recordsByTraceID.Get(traceIDStr)
+-		}
+-	}
+-}
+-
+ func (s *spanStore) getSpansBySessionID(sessionID string) []DebugSpan {
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+ 	traces := s.traceIDsBySessionID[sessionID]
+ 	var records []*spanRecord
+ 	for traceID := range traces {
+-		if traceRecords, ok := s.recordsByTraceID.Get(traceID); ok {
+-			records = append(records, traceRecords...)
++		if r, ok := s.recordsByTraceID[traceID]; ok {
++			records = append(records, r...)
+ 		}
+ 	}
+ 	return convertRecords(records)
+ }
+ 
+ func convertRecords(records []*spanRecord) []DebugSpan {
+-	records = filterUnclosedAndSort(records)
++	records = filterNilsAndSort(records)
+ 	debugSpans := make([]DebugSpan, len(records))
+ 	for i, r := range records {
+ 		// Clone the logs to avoid race conditions.
+ 		logs := slices.Clone(r.Logs)
+ 		debugSpans[i] = DebugSpan{
+-			Name:         r.Name,
+-			StartTime:    r.StartTime.UnixNano(),
+-			EndTime:      r.EndTime.UnixNano(),
+-			SpanID:       r.Context.SpanID().String(),
+-			TraceID:      r.Context.TraceID().String(),
+-			ParentSpanID: r.ParentSpanID.String(),
+-			Attributes:   r.Attributes,
++			Name:         r.Span.Name,
++			StartTime:    r.Span.StartTime.UnixNano(),
++			EndTime:      r.Span.EndTime.UnixNano(),
++			TraceID:      r.Span.Context.TraceID().String(),
++			SpanID:       r.Span.Context.SpanID().String(),
++			ParentSpanID: r.Span.ParentSpanID.String(),
++			Attributes:   r.Span.Attributes,
+ 			Logs:         logs,
+ 		}
+ 	}
+ 	return debugSpans
+ }
+ 
+-func filterUnclosedAndSort(records []*spanRecord) []*spanRecord {
++func filterNilsAndSort(records []*spanRecord) []*spanRecord {
+ 	filtered := slices.DeleteFunc(records, func(s *spanRecord) bool {
+ 		// Logs are emitted before the span is closed and sent to the processor.
+ 		// Skip them in the response.
+-		return s == nil || !s.Context.TraceID().IsValid()
++		return s == nil || s.Span == nil
+ 	})
+-	slices.SortStableFunc(filtered, func(a, b *spanRecord) int {
+-		return cmp.Compare(a.StartTime.UnixNano(), b.StartTime.UnixNano())
++	slices.SortFunc(filtered, func(a, b *spanRecord) int {
++		return a.Span.StartTime.Compare(b.Span.StartTime)
+ 	})
+ 	return filtered
+ }
+@@ -258,20 +222,21 @@ func (s *spanStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySp
+ 			s.recordsBySpanID[spanID] = record
+ 		}
+ 
+-		record.Name = span.Name()
+-		record.StartTime = span.StartTime()
+-		record.EndTime = span.EndTime()
+-		record.Context = span.SpanContext()
+-		record.ParentSpanID = span.Parent().SpanID()
+-		record.Attributes = attrs
++		record.Span = &inMemorySpan{
++			Name:         span.Name(),
++			StartTime:    span.StartTime(),
++			EndTime:      span.EndTime(),
++			Context:      span.SpanContext(),
++			ParentSpanID: span.Parent().SpanID(),
++			Attributes:   attrs,
++		}
+ 
+-		s.updateSpanIndexes(record)
++		s.updateSpanIndexes(record.Span, record)
+ 	}
+ 	return nil
+ }
+ 
+-func (s *spanStore) updateSpanIndexes(span *spanRecord) {
+-	traceIDStr := span.Context.TraceID().String()
++func (s *spanStore) updateSpanIndexes(span *inMemorySpan, record *spanRecord) {
+ 	// Update session id -> trace id mapping.
+ 	sessionIDKey := string(semconv.GenAIConversationIDKey)
+ 	if sessionID, ok := span.Attributes[sessionIDKey]; ok {
+@@ -280,54 +245,16 @@ func (s *spanStore) updateSpanIndexes(span *spanRecord) {
+ 			traces = make(map[string]struct{})
+ 			s.traceIDsBySessionID[sessionID] = traces
+ 		}
+-		traces[traceIDStr] = struct{}{}
++		traceID := span.Context.TraceID().String()
++		traces[traceID] = struct{}{}
+ 	}
+ 	// Update event id -> span id mapping.
+ 	if eventID, ok := span.Attributes[eventIDKey]; ok {
+-		s.recordsByEventID[eventID] = append(s.recordsByEventID[eventID], span)
+-	}
+-
+-	// Update trace id -> span id mapping (LRU).
+-	records, _ := s.recordsByTraceID.Get(traceIDStr)
+-	s.recordsByTraceID.Add(traceIDStr, append(records, span))
+-}
+-
+-func (s *spanStore) evict(traceID string, spans []*spanRecord) {
+-	for _, span := range spans {
+-		if span.Context.TraceID().IsValid() {
+-			delete(s.recordsBySpanID, span.Context.SpanID().String())
+-
+-			if eventID, ok := span.Attributes[eventIDKey]; ok {
+-				s.evictRecordsByEventID(eventID, span)
+-			}
+-
+-			if sessionID, ok := span.Attributes[string(semconv.GenAIConversationIDKey)]; ok {
+-				s.evictTraceIDsBySessionID(sessionID, traceID)
+-			}
+-		}
+-	}
+-}
+-
+-func (s *spanStore) evictRecordsByEventID(eventID string, span *spanRecord) {
+-	records := s.recordsByEventID[eventID]
+-	records = slices.DeleteFunc(records, func(r *spanRecord) bool {
+-		return r.Context.SpanID() == span.Context.SpanID()
+-	})
+-	if len(records) == 0 {
+-		delete(s.recordsByEventID, eventID)
+-	} else {
+-		s.recordsByEventID[eventID] = records
+-	}
+-}
+-
+-func (s *spanStore) evictTraceIDsBySessionID(sessionID, traceID string) {
+-	traces := s.traceIDsBySessionID[sessionID]
+-	if traces != nil {
+-		delete(traces, traceID)
+-		if len(traces) == 0 {
+-			delete(s.traceIDsBySessionID, sessionID)
+-		}
++		s.recordsByEventID[eventID] = append(s.recordsByEventID[eventID], record)
+ 	}
++	// Update trace id -> span id mapping.
++	traceID := span.Context.TraceID().String()
++	s.recordsByTraceID[traceID] = append(s.recordsByTraceID[traceID], record)
+ }
+ 
+ // ForceFlush implements sdklog.Exporter and sdktrace.SpanProcessor.
+diff --git a/tool/skilltoolset/skill/filesystem_source.go b/tool/skilltoolset/skill/filesystem_source.go
+deleted file mode 100644
+index 77341a0b..00000000
+--- a/tool/skilltoolset/skill/filesystem_source.go
++++ /dev/null
+@@ -1,228 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package skill
+-
+-import (
+-	"bufio"
+-	"context"
+-	"errors"
+-	"fmt"
+-	"io"
+-	"io/fs"
+-	"path"
+-	"strings"
+-)
+-
+-// NewFileSystemSource creates a Source implementation backed by an fs.FS.
+-//
+-// The provided filesystem is expected to have skills organized as immediate
+-// subdirectories. A valid skill directory MUST contain a "SKILL.md" file
+-// with valid YAML frontmatter, and the directory name must exactly match
+-// the name defined in that frontmatter.
+-//
+-// Expected layout example:
+-//
+-//	  skill-1/
+-//		   SKILL.md
+-//		   assets/
+-//	  skill-2/
+-//		   SKILL.md
+-//		   references/
+-//		   scripts/
+-func NewFileSystemSource(filesystem fs.FS) Source {
+-	return &fileSystemSource{filesystem: filesystem}
+-}
+-
+-type fileSystemSource struct {
+-	filesystem fs.FS
+-}
+-
+-// ListFrontmatters scans the immediate subdirectories of the root filesystem.
+-// It does not traverse recursively. Directories without a valid SKILL.md
+-// are silently ignored.
+-func (f *fileSystemSource) ListFrontmatters(ctx context.Context) ([]*Frontmatter, error) {
+-	var frontmatters []*Frontmatter
+-
+-	entries, err := fs.ReadDir(f.filesystem, ".")
+-	if err != nil {
+-		return nil, fmt.Errorf("read root directory: %w", err)
+-	}
+-
+-	for _, entry := range entries {
+-		if !entry.IsDir() {
+-			continue // Skills must be directories
+-		}
+-		frontmatter, _, closer, err := f.readSkill(entry.Name())
+-		if err != nil {
+-			if errors.Is(err, ErrSkillNotFound) {
+-				continue // Directory doesn't contain SKILL.md - not a skill.
+-			}
+-			return nil, err
+-		}
+-		// Avoid holding files open in the loop by closing without defer.
+-		_ = closer.Close() // Ignore error as read success is what matters.
+-		frontmatters = append(frontmatters, frontmatter)
+-	}
+-	return frontmatters, nil
+-}
+-
+-// LoadFrontmatter opens and parses the SKILL.md file located at the root
+-// of the specified skill directory.
+-func (f *fileSystemSource) LoadFrontmatter(ctx context.Context, name string) (*Frontmatter, error) {
+-	frontmatter, _, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return nil, err
+-	}
+-	_ = closer.Close() // Ignore error as read success is what matters.
+-	return frontmatter, nil
+-}
+-
+-// LoadInstructions parses the SKILL.md file and returns the markdown content
+-// immediately following the frontmatter delimiter.
+-func (f *fileSystemSource) LoadInstructions(ctx context.Context, name string) (string, error) {
+-	_, reader, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return "", err
+-	}
+-	defer func() {
+-		_ = closer.Close() // Ignore error as read success is what matters.
+-	}()
+-
+-	instructions, err := io.ReadAll(reader)
+-	if err != nil {
+-		return "", fmt.Errorf("read instructions: %w", err)
+-	}
+-	return string(instructions), nil
+-}
+-
+-// LoadResource reads a specific file from the skill's directory.
+-//
+-// For security, the resourcePath is sanitized using path.Clean. Access is
+-// strictly limited to files within the 'references/', 'assets/', or
+-// 'scripts/' subdirectories to prevent path traversal attacks.
+-func (f *fileSystemSource) LoadResource(ctx context.Context, name, resourcePath string) (io.ReadCloser, error) {
+-	if err := f.validateSkill(name); err != nil {
+-		return nil, err
+-	}
+-
+-	cleanPath := path.Clean(resourcePath)
+-	if !strings.HasPrefix(cleanPath, "references/") && !strings.HasPrefix(cleanPath, "assets/") && !strings.HasPrefix(cleanPath, "scripts/") {
+-		return nil, fmt.Errorf("%w: %q must be within 'references/', 'assets/', or 'scripts/' (relative to skill directory)", ErrInvalidResourcePath, resourcePath)
+-	}
+-
+-	fullPath := path.Join(name, cleanPath)
+-	file, err := f.filesystem.Open(fullPath)
+-	if err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, cleanPath)
+-		}
+-		return nil, fmt.Errorf("open resource file %q: %w", fullPath, err)
+-	}
+-	return file, nil
+-}
+-
+-// ListResources walks the specified resource directory within the skill.
+-//
+-// If resourceDirectoryPath is empty or ".", it walks the 'references/',
+-// 'assets/', and 'scripts/' directories. It restricts traversal to these
+-// approved directories and returns sanitized paths relative to the skill root.
+-func (f *fileSystemSource) ListResources(ctx context.Context, name, resourceDirectoryPath string) ([]string, error) {
+-	if err := f.validateSkill(name); err != nil {
+-		return nil, err
+-	}
+-
+-	cleanPath := path.Clean(resourceDirectoryPath)
+-	isRoot := cleanPath == "." || cleanPath == ""
+-
+-	if !isRoot {
+-		switch strings.SplitN(cleanPath, "/", 2)[0] {
+-		case "references", "assets", "scripts": // Valid top level directories.
+-		default:
+-			return nil, fmt.Errorf("%w: %q must be empty, root (.), or within 'references/', 'assets/', or 'scripts/'", ErrInvalidResourcePath, resourceDirectoryPath)
+-		}
+-	}
+-
+-	skillFS, err := fs.Sub(f.filesystem, name)
+-	if err != nil {
+-		return nil, fmt.Errorf("create sub-filesystem for %q: %w", name, err)
+-	}
+-
+-	if _, err := fs.Stat(skillFS, cleanPath); err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, cleanPath)
+-		}
+-		return nil, fmt.Errorf("stat %q: %w", cleanPath, err)
+-	}
+-
+-	targets := []string{cleanPath}
+-	if isRoot { // Limit the walk to these top-level directories.
+-		targets = []string{"references", "assets", "scripts"}
+-	}
+-
+-	var resources []string
+-	for _, target := range targets {
+-		err := fs.WalkDir(skillFS, target, func(p string, d fs.DirEntry, err error) error {
+-			if err != nil {
+-				if errors.Is(err, fs.ErrNotExist) {
+-					return nil
+-				}
+-				return err
+-			}
+-			if !d.IsDir() {
+-				resources = append(resources, p)
+-			}
+-			return nil
+-		})
+-		if err != nil {
+-			return nil, fmt.Errorf("walk target %q: %w", target, err)
+-		}
+-	}
+-
+-	return resources, nil
+-}
+-
+-func (f *fileSystemSource) validateSkill(name string) error {
+-	_, _, closer, err := f.readSkill(name)
+-	if err != nil {
+-		return err
+-	}
+-	_ = closer.Close() // Ignore error as read success is what matters.
+-	return nil
+-}
+-
+-// readSkill reads and validates the frontmatter from the SKILL.md file and
+-// returns the frontmatter, a buffered reader for the rest of the file, and a
+-// closer for the file.
+-func (f *fileSystemSource) readSkill(name string) (*Frontmatter, *bufio.Reader, io.Closer, error) {
+-	skillFilePath := path.Join(name, "SKILL.md")
+-	file, err := f.filesystem.Open(skillFilePath)
+-	if err != nil {
+-		if errors.Is(err, fs.ErrNotExist) {
+-			return nil, nil, nil, fmt.Errorf("%w: %q", ErrSkillNotFound, name)
+-		}
+-		return nil, nil, nil, fmt.Errorf("open %q: %w", skillFilePath, err)
+-	}
+-	reader := bufio.NewReader(file)
+-	frontmatter, err := Parse(reader)
+-	if err != nil {
+-		_ = file.Close()
+-		return nil, nil, nil, fmt.Errorf("%w: parse frontmatter: %w", ErrInvalidFrontmatter, err)
+-	}
+-	if frontmatter.Name != name {
+-		_ = file.Close()
+-		return nil, nil, nil, fmt.Errorf("%w: name in SKILL.md (%q) does not match directory name (%q)", ErrInvalidSkillName, frontmatter.Name, name)
+-	}
+-	return frontmatter, reader, file, nil
+-}
+diff --git a/tool/skilltoolset/skill/source.go b/tool/skilltoolset/skill/source.go
+deleted file mode 100644
+index 154c59ed..00000000
+--- a/tool/skilltoolset/skill/source.go
++++ /dev/null
+@@ -1,61 +0,0 @@
+-// Copyright 2026 Google LLC
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//     http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package skill
+-
+-import (
+-	"context"
+-	"errors"
+-	"io"
+-)
+-
+-// Common errors returned by Source implementations.
+-var (
+-	ErrInvalidSkillName    = errors.New("invalid skill name")
+-	ErrInvalidFrontmatter  = errors.New("invalid frontmatter")
+-	ErrSkillNotFound       = errors.New("skill not found")
+-	ErrDuplicateSkill      = errors.New("duplicate skill")
+-	ErrInvalidResourcePath = errors.New("invalid resource path")
+-	ErrResourceNotFound    = errors.New("resource not found")
+-)
+-
+-// Source is the interface for accessing skill components.
+-//
+-// Implementations must:
+-//   - be safe for concurrent use.
+-//   - return the sentinel error values defined in this package
+-//     (ErrInvalidSkillName, ErrInvalidFrontmatter, ErrSkillNotFound,
+-//     ErrDuplicateSkill, ErrInvalidResourcePath, ErrResourceNotFound, etc.)
+-//     when appropriate.
+-type Source interface {
+-	// ListFrontmatters returns frontmatters for all available skills.
+-	ListFrontmatters(ctx context.Context) ([]*Frontmatter, error)
+-
+-	// ListResources returns resource paths for a given skill and subpath.
+-	// subpath is a relative path to the skill, as are the returned resource
+-	// paths.
+-	ListResources(ctx context.Context, name, subpath string) ([]string, error)
+-
+-	// LoadFrontmatter returns the frontmatter for a single skill by name.
+-	LoadFrontmatter(ctx context.Context, name string) (*Frontmatter, error)
+-
+-	// LoadInstructions returns the instruction body for a single skill by name.
+-	LoadInstructions(ctx context.Context, name string) (string, error)
+-
+-	// LoadResource returns a stream for a specific resource within a given skill.
+-	// resourcePath is a relative path to the skill.
+-	//
+-	// NOTE: The caller is responsible for closing the returned io.ReadCloser.
+-	LoadResource(ctx context.Context, name, resourcePath string) (io.ReadCloser, error)
+-}

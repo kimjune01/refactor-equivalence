@@ -1,0 +1,952 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9dec-4afa-7292-bd07-11ced2e18875
+--------
+user
+# Hunt-spec — adversarial review of refactor claims (iterative)
+
+You are adversarially reviewing a sharpened refactor spec BEFORE any code is written. Find defects that would force the implementer to guess, that would break tests, or that misrepresent the goal.
+
+## Inputs
+
+- **Goal** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md` — what the PR aims to accomplish.
+- **Sharpened spec** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md` (latest round to critique).
+- **Artifact** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch`.
+- **Allowed edit set** at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt`.
+- **Cleanroom source tree** at `/tmp/refactor-eq-workdir/cleanroom-v2/24489/`.
+- **Tests** visible inside `/tmp/refactor-eq-workdir/cleanroom-v2/24489/` — assume they represent the behavioral contract.
+
+## What to look for
+
+For EACH claim in the spec, check:
+
+1. **Behavior preservation.** Pay attention to exact error/message/log strings asserted in tests. A claim that renames a user-visible string is a blocker if the string is asserted.
+2. **API-shape correctness.** Symbols, imports, exports exist at the stated paths in C_test. A claim referencing a non-existent symbol is a blocker.
+3. **Scope adherence.** Claims only touch `allowed-files.txt` and never `*.test.{ts,tsx,py,go,rs}`.
+4. **Goal alignment.** The claim serves the stated goal. A claim that improves a dimension unrelated to the goal (or orthogonal tidying) is a warning, not a blocker, unless it conflicts with the goal.
+5. **Internal consistency.** Claims applied in order don't undo each other.
+6. **Underspecified edges.** Where the implementer will have to guess.
+7. **Missing rejections.** Something the spec proposes that SHOULD have been rejected.
+
+## Severity labels
+
+Use exactly these:
+
+- **blocker** — test-breaking, behavior-changing, or referring to nonexistent code. Forces the reconcile step to REJECT the claim (not narrow).
+- **warning** — underspecified, ambiguous, or orthogonal-to-goal. Reconcile may narrow, clarify, or reject.
+- **note** — optional stylistic feedback. Reconcile may ignore.
+
+## Output
+
+Write findings to `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md`. If zero defects across all severity levels, write:
+
+```
+No findings.
+```
+
+Otherwise:
+
+```
+## Finding F1 — <title>
+**Severity**: blocker | warning | note
+**Claim**: C<num> (or global)
+**What**: <defect>
+**Evidence**: <file:line or test name or code snippet>
+**Fix**: <remove claim / narrow it thus / clarify this edge>
+```
+
+Do not edit any source file. Do not propose new refactor claims.
+mcp startup: no servers
+codex
+I’ll review the goal, latest claims, patch, allowed files, and relevant tests/source, then write only the requested hunt report. No source edits.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/goal/GOAL.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+# PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
+
+## PR body
+
+## Summary
+
+Refactors specialized subagent tools into a single, unified `invoke_agent` tool and updates the Policy Engine to support virtual tool aliases for subagents.
+
+## Details
+
+- **Unified Tooling**: Introduced `invoke_agent` in `packages/core` as the standard mechanism for subagent delegation, replacing the previous 1:1 tool-to-agent mapping.
+- **Policy Engine Enhancement**: Updated `PolicyEngine` to automatically treat the `agent_name` argument of `invoke_agent` as a virtual tool name. This ensures that existing safety policies (e.g., denying `codebase_investigator`) remain functional without requiring rule updates.
+- **Prompt Refactoring**: Updated both modern and legacy prompt snippets to instruct the model to use `invoke_agent`.
+- **Testing**: Added unit tests in `policy-engine.test.ts` for virtual alias matching and updated `subagents.eval.ts` to verify successful delegation via the new unified tool.
+- **Documentation**: Updated `subagents.md` and `policy-engine.md` to reflect the new invocation pattern and policy syntax.
+
+## Related Issues
+
+Related to the effort of simplifying the main agent's toolset and improving context efficiency.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,220p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/allowed-files.txt" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Use Virtual Subagent Tool Names In Plan Policy
+**File**: packages/core/src/policy/policies/plan.toml:108
+**Change**: In the "Allow specific subagents in Plan mode" rule, replace `toolName = "invoke_agent"` plus the `argsPattern` regex with `toolName = ["codebase_investigator", "cli_help"]`, and update the adjacent comment to say the rule relies on `invoke_agent` virtual alias matching.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual tool alias for subagents.
+**Justification**: Expressing the allowlist as subagent tool names removes duplicated JSON-argument regex matching and makes the policy depend directly on the alias mechanism introduced for unified `invoke_agent`.
+
+### C2 — Use Virtual Subagent Tool Names For Dynamic Remote Agent Policy
+**File**: packages/core/src/agents/registry.ts:394
+**Change**: In `AgentRegistry.addAgentPolicy`, change the remote-agent dynamic rule from `toolName: AgentTool.Name` with an `argsPattern` matching `"agent_name"` to `toolName: definition.name`, and remove the now-unused `argsPattern` construction and `AgentTool` import if no longer referenced in the file.
+**Goal link**: This clarifies that remote-agent confirmation policy is also mediated through the same virtual tool alias path used for existing subagent policies.
+**Justification**: Using the agent name as the policy key removes a second, registry-local way of parsing `invoke_agent` arguments and keeps policy matching centralized in `PolicyEngine`.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts`: although the production registration path no longer uses per-agent tools, existing tests import and exercise `SubagentTool`, so deleting it would break the current suite unless test files were also changed.
+- Refactor `AgentTool.DelegateInvocation.buildChildInvocation` to instantiate `SubagentToolWrapper` directly: this would require coordinating the wrapper's browser-agent branch and would currently conflict with `agent-tool.test.ts` expectations for a browser definition shaped as a remote agent.
+- Rename `DelegateInvocation` in `packages/core/src/agents/agent-tool.ts`: this is behavior-preserving, but the private class name is not user-visible and the rename would be a cosmetic cleanup rather than a clearer expression of the unified invocation goal.
+- Change prompt snippets to add explicit instructions about passing the task text in `prompt`: this would alter model-visible behavior and prompt snapshot expectations, so it is not a bounded behavior-preserving refactor claim.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+.github/workflows/chained_e2e.yml
+.github/workflows/evals-nightly.yml
+.github/workflows/perf-nightly.yml
+.gitignore
+GEMINI.md
+evals/answer-vs-act.eval.ts
+evals/app-test-helper.ts
+evals/ask_user.eval.ts
+evals/automated-tool-use.eval.ts
+evals/cli_help_delegation.eval.ts
+evals/component-test-helper.ts
+evals/concurrency-safety.eval.ts
+evals/edit-locations-eval.eval.ts
+evals/frugalReads.eval.ts
+evals/frugalSearch.eval.ts
+evals/generalist_agent.eval.ts
+evals/generalist_delegation.eval.ts
+evals/gitRepo.eval.ts
+evals/grep_search_functionality.eval.ts
+evals/hierarchical_memory.eval.ts
+ succeeded in 0ms:
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index 94215e4795..fe87fb1d5d 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,8 +335,6 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
+-          # Only run always passes behavioral tests.
+-          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index fbb770ac84..9acc1de050 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,18 +5,10 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+codex
+The latest spec has only two accepted claims, both in core policy paths. I’m checking those exact symbols and existing test assertions now, especially how virtual alias matching is implemented and whether the proposed TOML shape is valid.
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policies/plan.toml | sed -n '80,130p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+    80	modes = ["plan"]
+    81	denyMessage = "You are in Plan Mode with access to read-only tools. Execution of scripts (including those from skills) is blocked."
+    82	
+    83	# Explicitly Allow Read-Only Tools in Plan mode.
+    84	[[rule]]
+    85	toolName = ["activate_skill"]
+    86	decision = "allow"
+    87	priority = 50
+    88	modes = ["plan"]
+    89	
+    90	[[rule]]
+    91	toolName = "*"
+    92	mcpName = "*"
+    93	toolAnnotations = { readOnlyHint = true }
+    94	decision = "ask_user"
+    95	priority = 50
+    96	modes = ["plan"]
+    97	interactive = true
+    98	
+    99	[[rule]]
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '1,70p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import * as crypto from 'node:crypto';
+     8	import { Storage } from '../config/storage.js';
+     9	import { CoreEvent, coreEvents } from '../utils/events.js';
+    10	import type { AgentOverride, Config } from '../config/config.js';
+    11	import type { AgentDefinition, LocalAgentDefinition } from './types.js';
+    12	import { getAgentCardLoadOptions, getRemoteAgentTargetUrl } from './types.js';
+    13	import { loadAgentsFromDirectory } from './agentLoader.js';
+    14	import { CodebaseInvestigatorAgent } from './codebase-investigator.js';
+    15	import { CliHelpAgent } from './cli-help-agent.js';
+    16	import { GeneralistAgent } from './generalist-agent.js';
+    17	import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
+    18	import { MemoryManagerAgent } from './memory-manager-agent.js';
+    19	import { AgentTool } from './agent-tool.js';
+    20	import { A2AAuthProviderFactory } from './auth-provider/factory.js';
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.ts | sed -n '360,430p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   360	          `[AgentRegistry] Skipping disabled agent '${definition.name}'`,
+   361	        );
+   362	      }
+   363	      return;
+   364	    }
+   365	
+   366	    if (this.agents.has(definition.name) && this.config.getDebugMode()) {
+   367	      debugLogger.log(`[AgentRegistry] Overriding agent '${definition.name}'`);
+   368	    }
+   369	
+   370	    const mergedDefinition = this.applyOverrides(definition, settingsOverrides);
+   371	    this.agents.set(mergedDefinition.name, mergedDefinition);
+   372	
+   373	    this.registerModelConfigs(mergedDefinition);
+   374	    this.addAgentPolicy(mergedDefinition);
+   375	  }
+   376	
+   377	  private addAgentPolicy(definition: AgentDefinition<z.ZodTypeAny>): void {
+   378	    const policyEngine = this.config.getPolicyEngine();
+   379	    if (!policyEngine) {
+exec
+/bin/zsh -lc "rg -n \"invoke_agent|agent_name|virtual|toolName|argsPattern|codebase_investigator|cli_help\" packages/core/src packages/core/test packages/core -g '*.ts' -g '*.toml'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 exited 2 in 0ms:
+rg: packages/core/test: No such file or directory (os error 2)
+packages/core/src/policy/policy-engine.ts:57:  toolName: string,
+packages/core/src/policy/policy-engine.ts:76:    return toolName.startsWith(`${MCP_TOOL_PREFIX}${expectedServerName}_`);
+packages/core/src/policy/policy-engine.ts:80:  return toolName === pattern;
+packages/core/src/policy/policy-engine.ts:119:  if (rule.toolName !== undefined) {
+packages/core/src/policy/policy-engine.ts:121:    if (rule.toolName === '*') {
+packages/core/src/policy/policy-engine.ts:123:    } else if (isWildcardPattern(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:126:        !matchesWildcard(rule.toolName, toolCall.name, serverName)
+packages/core/src/policy/policy-engine.ts:130:    } else if (toolCall.name !== rule.toolName) {
+packages/core/src/policy/policy-engine.ts:135:        if (rule.mcpName && !isMcpToolName(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:137:            toolCall.name === formatMcpToolName(rule.mcpName, rule.toolName)
+packages/core/src/policy/policy-engine.ts:143:        if (!mcpMatch && isMcpToolName(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:144:          if (rule.toolName === formatMcpToolName(serverName, toolCall.name)) {
+packages/core/src/policy/policy-engine.ts:169:  if (rule.argsPattern) {
+packages/core/src/policy/policy-engine.ts:177:      !rule.argsPattern.test(stringifiedArgs)
+packages/core/src/policy/policy-engine.ts:220:      if (rule.toolName === undefined || rule.toolName === '') {
+packages/core/src/policy/policy-engine.ts:222:          `Invalid policy rule: toolName is required. Use '*' for all tools. Rule source: ${rule.source || 'unknown'}`,
+packages/core/src/policy/policy-engine.ts:239:      if (checker.toolName === undefined || checker.toolName === '') {
+packages/core/src/policy/policy-engine.ts:241:          `Invalid safety checker rule: toolName is required. Use '*' for all tools. Checker source: ${checker.source || 'unknown'}`,
+packages/core/src/policy/policy-engine.ts:337:    toolName: string,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/config.test.ts | sed -n '690,745p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/config.ts | sed -n '520,570p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/config.ts | sed -n '360,440p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   520	        priority: ALLOWED_MCP_SERVER_PRIORITY,
+   521	        source: 'Settings (MCP Allowed)',
+   522	      });
+   523	    }
+   524	  }
+   525	
+   526	  return {
+   527	    rules,
+   528	    checkers,
+   529	    defaultDecision: interactive
+   530	      ? PolicyDecision.ASK_USER
+   531	      : PolicyDecision.DENY,
+   532	    nonInteractive: !interactive,
+   533	    approvalMode,
+   534	    disableAlwaysAllow: settings.disableAlwaysAllow,
+   535	  };
+   536	}
+   537	interface TomlRule {
+   538	  toolName?: string;
+   539	  mcpName?: string;
+ succeeded in 0ms:
+   690	    expect(rule?.priority).toBeCloseTo(4.3, 5); // Command line allow
+   691	
+   692	    vi.doUnmock('node:fs/promises');
+   693	  });
+   694	
+   695	  it('should allow overriding Plan Mode deny with user policy', async () => {
+   696	    const userPolicyDir = '/tmp/gemini-cli-test/user/policies';
+   697	    vi.spyOn(Storage, 'getUserPoliciesDir').mockReturnValue(userPolicyDir);
+   698	
+   699	    mockPolicyFile(
+   700	      nodePath.join(userPolicyDir, 'user-plan.toml'),
+   701	      `
+   702	[[rule]]
+   703	toolName = "run_shell_command"
+   704	commandPrefix = ["git status", "git diff"]
+   705	decision = "allow"
+   706	priority = 100
+   707	modes = ["plan"]
+   708	
+   709	[[rule]]
+ succeeded in 0ms:
+   360	  // coreEvents has a buffer that will display these once the UI is ready
+   361	  if (errors.length > 0) {
+   362	    for (const error of errors) {
+   363	      coreEvents.emitFeedback(
+   364	        error.severity ?? 'error',
+   365	        formatPolicyError(error),
+   366	      );
+   367	    }
+   368	  }
+   369	
+   370	  const rules: PolicyRule[] = [...tomlRules];
+   371	  const checkers = [...tomlCheckers];
+   372	
+   373	  // Priority system for policy rules:
+   374	
+   375	  // - Higher priority numbers win over lower priority numbers
+   376	  // - When multiple rules match, the highest priority rule is applied
+   377	  // - Rules are evaluated in order of priority (highest first)
+   378	  //
+   379	  // Priority bands (tiers):
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/types.ts | sed -n '1,120p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import type { SafetyCheckInput } from '../safety/protocol.js';
+     8	import type { SandboxManager } from '../services/sandboxManager.js';
+     9	
+    10	export enum PolicyDecision {
+    11	  ALLOW = 'allow',
+    12	  DENY = 'deny',
+    13	  ASK_USER = 'ask_user',
+    14	}
+    15	
+    16	/**
+    17	 * Valid sources for hook execution
+    18	 */
+    19	export type HookSource = 'project' | 'user' | 'system' | 'extension';
+    20	
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/config.ts | sed -n '150,230p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/config.ts | sed -n '80,150p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/types.ts | sed -n '114,170p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+    80	
+    81	// These are added to the tier base (e.g., USER_POLICY_TIER).
+    82	// Workspace tier (3) + high priority (950/1000) = ALWAYS_ALLOW_PRIORITY
+    83	export const ALWAYS_ALLOW_PRIORITY =
+    84	  WORKSPACE_POLICY_TIER + ALWAYS_ALLOW_PRIORITY_OFFSET;
+    85	
+    86	/**
+    87	 * Returns the fractional priority of ALWAYS_ALLOW_PRIORITY scaled to 1000.
+    88	 */
+    89	export function getAlwaysAllowPriorityFraction(): number {
+    90	  return Math.round((ALWAYS_ALLOW_PRIORITY % 1) * 1000);
+    91	}
+    92	
+    93	/**
+    94	 * Gets the list of directories to search for policy files, in order of increasing priority
+    95	 * (Default -> Extension -> Workspace -> User -> Admin).
+    96	 *
+    97	 * Note: Extension policies are loaded separately by the extension manager.
+    98	 *
+    99	 * @param defaultPoliciesDir Optional path to a directory containing default policies.
+ succeeded in 0ms:
+   150	    return ADMIN_POLICY_TIER;
+   151	  }
+   152	  if (normalizedDir === context.userPoliciesDir) {
+   153	    return USER_POLICY_TIER;
+   154	  }
+   155	  if (
+   156	    context.workspacePoliciesDir &&
+   157	    normalizedDir === path.resolve(context.workspacePoliciesDir)
+   158	  ) {
+   159	    return WORKSPACE_POLICY_TIER;
+   160	  }
+   161	  if (
+   162	    context.defaultPoliciesDir &&
+   163	    normalizedDir === path.resolve(context.defaultPoliciesDir)
+   164	  ) {
+   165	    return DEFAULT_POLICY_TIER;
+   166	  }
+   167	  if (normalizedDir === path.resolve(DEFAULT_CORE_POLICIES_DIR)) {
+   168	    return DEFAULT_POLICY_TIER;
+   169	  }
+ succeeded in 0ms:
+   114	export interface PolicyRule {
+   115	  /**
+   116	   * A unique name for the policy rule, useful for identification and debugging.
+   117	   */
+   118	  name?: string;
+   119	
+   120	  /**
+   121	   * The name of the tool this rule applies to.
+   122	   * Use '*' to match all tools.
+   123	   */
+   124	  toolName: string;
+   125	
+   126	  /**
+   127	   * The name of the subagent this rule applies to.
+   128	   * If undefined, the rule applies regardless of whether it's the main agent or a subagent.
+   129	   */
+   130	  subagent?: string;
+   131	
+   132	  /**
+   133	   * Identifies the MCP server this rule applies to.
+exec
+/bin/zsh -lc "rg -n \"TomlRule|toolName\\?\\: string|rule\\.toolName|Array\\.isArray|toolName = \\[\" packages/core/src/policy/config.ts packages/core/src/policy -g '*.ts' -g '*.toml'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/config.ts:242:        `[PolicyConfig] Extension "${extensionName}" attempted to contribute an ALLOW rule for tool "${rule.toolName}". Ignoring this rule for security.`,
+packages/core/src/policy/config.ts:537:interface TomlRule {
+packages/core/src/policy/config.ts:538:  toolName?: string;
+packages/core/src/policy/config.ts:554:  rules: TomlRule[],
+packages/core/src/policy/config.ts:561:): TomlRule | undefined {
+packages/core/src/policy/config.ts:575:function createTomlRule(toolName: string, message: UpdatePolicy): TomlRule {
+packages/core/src/policy/config.ts:576:  const rule: TomlRule = {
+packages/core/src/policy/config.ts:696:            let existingData: { rule?: TomlRule[] } = {};
+packages/core/src/policy/config.ts:703:                (!('rule' in parsed) || Array.isArray(parsed['rule']))
+packages/core/src/policy/config.ts:705:                existingData = parsed as { rule?: TomlRule[] };
+packages/core/src/policy/config.ts:747:                createTomlRule(normalizedToolName, message),
+packages/core/src/policy/policy-engine.ts:119:  if (rule.toolName !== undefined) {
+packages/core/src/policy/policy-engine.ts:121:    if (rule.toolName === '*') {
+packages/core/src/policy/policy-engine.ts:123:    } else if (isWildcardPattern(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:126:        !matchesWildcard(rule.toolName, toolCall.name, serverName)
+packages/core/src/policy/policy-engine.ts:130:    } else if (toolCall.name !== rule.toolName) {
+packages/core/src/policy/policy-engine.ts:135:        if (rule.mcpName && !isMcpToolName(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:137:            toolCall.name === formatMcpToolName(rule.mcpName, rule.toolName)
+packages/core/src/policy/policy-engine.ts:143:        if (!mcpMatch && isMcpToolName(rule.toolName)) {
+packages/core/src/policy/policy-engine.ts:144:          if (rule.toolName === formatMcpToolName(serverName, toolCall.name)) {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '800,835p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '520,610p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/toml-loader.ts | sed -n '390,490p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   520	    ) {
+   521	      stringifiedArgs = stableStringify(toolCall.args);
+   522	    }
+   523	
+   524	    debugLogger.debug(
+   525	      `[PolicyEngine.check] toolCall.name: ${toolCall.name}, stringifiedArgs: ${stringifiedArgs}`,
+   526	    );
+   527	
+   528	    // Check for shell commands upfront to handle splitting
+   529	    let isShellCommand = false;
+   530	    let command: string | undefined;
+   531	    let shellDirPath: string | undefined;
+   532	
+   533	    const toolName = toolCall.name;
+   534	
+   535	    if (toolName && SHELL_TOOL_NAMES.includes(toolName)) {
+   536	      isShellCommand = true;
+   537	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   538	      const args = toolCall.args as { command?: string; dir_path?: string };
+   539	      command = args?.command;
+ succeeded in 0ms:
+   800	   * Remove rules for a specific tool.
+   801	   * If source is provided, only rules matching that source are removed.
+   802	   */
+   803	  removeRulesForTool(toolName: string, source?: string): void {
+   804	    this.rules = this.rules.filter(
+   805	      (rule) =>
+   806	        rule.toolName !== toolName ||
+   807	        (source !== undefined && rule.source !== source),
+   808	    );
+   809	  }
+   810	
+   811	  /**
+   812	   * Get all current rules.
+   813	   */
+   814	  getRules(): readonly PolicyRule[] {
+   815	    return this.rules;
+   816	  }
+   817	
+   818	  /**
+   819	   * Check if a rule for a specific tool already exists.
+ succeeded in 0ms:
+   390	
+   391	        // Validate shell command convenience syntax
+   392	        const tomlRules = validationResult.data.rule ?? [];
+   393	
+   394	        for (let i = 0; i < tomlRules.length; i++) {
+   395	          const rule = tomlRules[i];
+   396	          const validationError = validateShellCommandSyntax(rule, i);
+   397	          if (validationError) {
+   398	            errors.push({
+   399	              filePath,
+   400	              fileName: file,
+   401	              tier: tierName,
+   402	              ruleIndex: i,
+   403	              errorType: 'rule_validation',
+   404	              message: 'Invalid shell command syntax',
+   405	              details: validationError,
+   406	            });
+   407	            // Continue to next rule, don't skip the entire file
+   408	          }
+   409	        }
+exec
+/bin/zsh -lc "rg -n \"addAgentPolicy|AgentRegistry|DYNAMIC_RULE_SOURCE|remote agent|hasRuleForTool|definition.name|AgentTool.Name\" packages/core/src/agents packages/core/src/policy -g '*.test.ts' -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-engine.ts:820:   * If ignoreDynamic is true, it only returns true if a rule exists that was NOT added by AgentRegistry.
+packages/core/src/policy/policy-engine.ts:822:  hasRuleForTool(toolName: string, ignoreDynamic = false): boolean {
+packages/core/src/policy/policy-engine.ts:826:        (!ignoreDynamic || rule.source !== 'AgentRegistry (Dynamic)'),
+packages/core/src/agents/local-executor.test.ts:125:import { getModelConfigAlias, type AgentRegistry } from './registry.js';
+packages/core/src/agents/local-executor.test.ts:468:    vi.spyOn(mockConfig, 'getAgentRegistry').mockReturnValue({
+packages/core/src/agents/local-executor.test.ts:470:    } as unknown as AgentRegistry);
+packages/core/src/agents/local-executor.test.ts:759:        mockConfig.getAgentRegistry(),
+packages/core/src/agents/local-executor.test.ts:790:        mockConfig.getAgentRegistry(),
+packages/core/src/agents/local-executor.test.ts:2771:      expect(recoveryEvent.agent_name).toBe(definition.name);
+packages/core/src/agents/local-executor.test.ts:2818:        vi.spyOn(configWithHints, 'getAgentRegistry').mockReturnValue({
+packages/core/src/agents/local-executor.test.ts:2820:        } as unknown as AgentRegistry);
+packages/core/src/agents/local-executor.test.ts:3036:        vi.spyOn(configWithHints, 'getAgentRegistry').mockReturnValue({
+packages/core/src/agents/local-executor.test.ts:3038:        } as unknown as AgentRegistry);
+packages/core/src/agents/local-executor.ts:160:    const subagentMessageBus = parentMessageBus.derive(definition.name);
+packages/core/src/agents/local-executor.ts:508:          this.definition.name,
+packages/core/src/agents/local-executor.ts:575:      new AgentStartEvent(this.agentId, this.definition.name),
+packages/core/src/agents/local-executor.ts:852:          this.definition.name,
+packages/core/src/agents/local-executor.ts:919:        overrideScope: this.definition.name,
+packages/core/src/agents/local-executor.ts:953:        overrideScope: this.definition.name,
+packages/core/src/agents/local-executor.ts:1036:        `Error initializing Gemini chat for agent ${this.definition.name}.`,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/agents/registry.test.ts | sed -n '1060,1175p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/toml-loader.test.ts | sed -n '990,1025p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   990	        await fs.writeFile(
+   991	          path.join(tempPolicyDir, 'read-only.toml'),
+   992	          readOnlyContent,
+   993	        );
+   994	        const getPolicyTier = () => 1; // Default tier
+   995	
+   996	        // 1. Load the actual Plan Mode policies
+   997	        const result = await loadPoliciesFromToml(
+   998	          [tempPolicyDir],
+   999	          getPolicyTier,
+  1000	        );
+  1001	
+  1002	        // 2. Initialize Policy Engine with these rules
+  1003	        const engine = new PolicyEngine({
+  1004	          rules: result.rules,
+  1005	          approvalMode: ApprovalMode.PLAN,
+  1006	        });
+  1007	
+  1008	        // 3. Simulate an unknown Subagent being registered (Dynamic Rule)
+  1009	        engine.addRule({
+ succeeded in 0ms:
+  1060	          name: `Agent${i}`,
+  1061	        }),
+  1062	      );
+  1063	
+  1064	      await Promise.all(promises);
+  1065	      expect(registry.getAllDefinitions()).toHaveLength(100);
+  1066	    });
+  1067	
+  1068	    it('should result in ASK_USER policy for remote agents at runtime', async () => {
+  1069	      const remoteAgent: AgentDefinition = {
+  1070	        kind: 'remote',
+  1071	        name: 'RemotePolicyAgent',
+  1072	        description: 'A remote agent',
+  1073	        agentCardUrl: 'https://example.com/card',
+  1074	        inputConfig: { inputSchema: { type: 'object' } },
+  1075	      };
+  1076	
+  1077	      vi.spyOn(mockConfig, 'getA2AClientManager').mockReturnValue({
+  1078	        loadAgent: vi.fn().mockResolvedValue({ name: 'RemotePolicyAgent' }),
+  1079	      } as unknown as A2AClientManager);
+exec
+/bin/zsh -lc 'rg -n "RemoteAgent|AgentTool.Name|invoke_agent|argsPattern|ASK_USER|dynamic" packages/core/src/agents/registry.test.ts packages/core/src/policy/*.test.ts packages/core/src/scheduler/*.test.ts' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-updater.test.ts:84:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:95:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:102:  it('should pass mcpName to policyEngine.addRule for argsPattern updates', async () => {
+packages/core/src/policy/policy-updater.test.ts:108:      argsPattern: '"foo":"bar"',
+packages/core/src/policy/policy-updater.test.ts:117:        argsPattern: /"foo":"bar"/,
+packages/core/src/policy/policy-updater.test.ts:174:        argsPattern: new RegExp(
+packages/core/src/policy/policy-updater.test.ts:241:      argsPattern: '(a+)+',
+packages/core/src/policy/toml-loader.test.ts:97:        result.rules[0].argsPattern?.test('{"command":"git status"}'),
+packages/core/src/policy/toml-loader.test.ts:99:      expect(result.rules[1].argsPattern?.test('{"command":"git log"}')).toBe(
+packages/core/src/policy/toml-loader.test.ts:134:      expect(result.rules[0].decision).toBe(PolicyDecision.ASK_USER);
+packages/core/src/policy/toml-loader.test.ts:152:    it('should transform commandRegex to argsPattern', async () => {
+packages/core/src/policy/toml-loader.test.ts:163:        result.rules[0].argsPattern?.test('{"command":"git status"}'),
+packages/core/src/policy/toml-loader.test.ts:166:        result.rules[0].argsPattern?.test('{"command":"git log --all"}'),
+packages/core/src/policy/toml-loader.test.ts:169:        result.rules[0].argsPattern?.test('{"command":"git branch"}'),
+packages/core/src/policy/toml-loader.test.ts:187:        result.rules[0].argsPattern?.test('{"command":"git status"}'),
+packages/core/src/policy/toml-loader.test.ts:382:    it('should reject commandPrefix + argsPattern combination', async () => {
+packages/core/src/policy/toml-loader.test.ts:387:argsPattern = "test"
+packages/core/src/policy/toml-loader.test.ts:424:        result.rules[0].argsPattern?.test('{"command":"git log file.txt"}'),
+packages/core/src/policy/toml-loader.test.ts:427:        result.rules[0].argsPattern?.test('{"command":"git log *.txt"}'),
+packages/core/src/policy/toml-loader.test.ts:645:    it('should return a regex_compilation error for invalid argsPattern', async () => {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.test.ts | sed -n '260,300p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   260	    it('should match tool call using one legacy name against policy for another legacy name (same canonical tool)', async () => {
+   261	      const legacyName1 = 'legacy_test_tool';
+   262	      const legacyName2 = 'another_legacy_test_tool';
+   263	
+   264	      const rules: PolicyRule[] = [
+   265	        { toolName: legacyName2, decision: PolicyDecision.DENY },
+   266	      ];
+   267	
+   268	      engine = new PolicyEngine({ rules });
+   269	
+   270	      // Call using legacyName1, should be denied because legacyName2 has a deny rule
+   271	      // and they both point to the same canonical tool.
+   272	      const { decision } = await engine.check({ name: legacyName1 }, undefined);
+   273	      expect(decision).toBe(PolicyDecision.DENY);
+   274	    });
+   275	
+   276	    it('should match subagent name as alias for invoke_agent', async () => {
+   277	      const rules: PolicyRule[] = [
+   278	        { toolName: 'codebase_investigator', decision: PolicyDecision.DENY },
+   279	      ];
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/toml-loader.test.ts | sed -n '1025,1065p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+  1025	        expect(
+  1026	          checkResult.decision,
+  1027	          'Unknown subagent should be DENIED in Plan Mode',
+  1028	        ).toBe(PolicyDecision.DENY);
+  1029	
+  1030	        // 5. Verify Explicit Allows still work
+  1031	        // e.g. 'read_file' should be allowed because its priority in read-only.toml (50) is higher than the deny (40)
+  1032	        const readResult = await engine.check({ name: 'read_file' }, undefined);
+  1033	        expect(
+  1034	          readResult.decision,
+  1035	          'Explicitly allowed tools (read_file) should be ALLOWED in Plan Mode',
+  1036	        ).toBe(PolicyDecision.ALLOW);
+  1037	
+  1038	        // 6. Verify Built-in Research Subagents are ALLOWED
+  1039	        // codebase_investigator is priority 50 in read-only.toml
+  1040	        const codebaseResult = await engine.check(
+  1041	          {
+  1042	            name: 'invoke_agent',
+  1043	            args: { agent_name: 'codebase_investigator' },
+  1044	          },
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.test.ts | sed -n '1725,1765p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "sed -n '1,220p' packages/core/src/policy/policies/agents.toml" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+# Default policy for subagent invocation.
+# Subagents are trusted to handle their own confirmations for destructive actions.
+# Therefore, invoking them is allowed by default.
+
+[[rule]]
+name = "Allow invoke_agent"
+toolName = "invoke_agent"
+decision = "allow"
+priority = 50
+modes = ["default", "autoEdit", "yolo"]
+ succeeded in 0ms:
+  1725	        undefined,
+  1726	      );
+  1727	
+  1728	      expect(result.decision).toBe(PolicyDecision.ALLOW);
+  1729	    });
+  1730	  });
+  1731	
+  1732	  describe('Plan Mode vs Subagent Priority (Regression)', () => {
+  1733	    it('should DENY subagents in Plan Mode despite dynamic allow rules', async () => {
+  1734	      // Plan Mode Deny (1.04) > Subagent Allow (1.03)
+  1735	
+  1736	      const fixedRules: PolicyRule[] = [
+  1737	        {
+  1738	          toolName: '*',
+  1739	          decision: PolicyDecision.DENY,
+  1740	          priority: 1.04,
+  1741	          modes: [ApprovalMode.PLAN],
+  1742	        },
+  1743	        {
+  1744	          toolName: 'unknown_subagent',
+codex
+The loader already expands TOML `toolName` arrays, so C1’s array syntax itself is valid. The main risk surface is semantic: replacing an `invoke_agent` plus `agent_name` predicate with a bare virtual name also matches direct tool calls with that same name.
+exec
+/bin/zsh -lc 'rg -n "codebase_investigator|cli_help|invoke_agent|agent_name|SubagentTool|AgentTool" /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/inputs/diff-base-to-test.patch' in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "rg -n \"toolName = \\[|toolName = \\\"invoke_agent\\\"|argsPattern = \\\"\\\\\\\"agent_name\" packages/core/src/policy/policies packages/core/src/policy/*.test.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/toml-loader.test.ts:195:toolName = ["glob", "grep", "read"]
+packages/core/src/policy/toml-loader.test.ts:213:toolName = ["calendar.list", "calendar.get"]
+packages/core/src/policy/toml-loader.test.ts:796:toolName = ["grob", "glob", "replce"]
+packages/core/src/policy/policies/agents.toml:7:toolName = "invoke_agent"
+packages/core/src/policy/policies/plan.toml:85:toolName = ["activate_skill"]
+packages/core/src/policy/policies/plan.toml:112:toolName = "invoke_agent"
+packages/core/src/policy/policies/plan.toml:119:toolName = ["ask_user", "save_memory", "web_fetch"]
+packages/core/src/policy/policies/plan.toml:126:toolName = ["ask_user", "save_memory", "web_fetch"]
+packages/core/src/policy/policies/plan.toml:136:toolName = ["write_file", "replace"]
+packages/core/src/policy/policies/plan.toml:144:toolName = ["write_file", "replace"]
+packages/core/src/policy/policies/plan.toml:152:toolName = ["write_file", "replace"]
+packages/core/src/policy/policies/yolo.toml:44:toolName = ["enter_plan_mode", "exit_plan_mode"]
+packages/core/src/policy/policies/write.toml:97:toolName = [
+packages/core/src/policy/policies/memory-manager.toml:7:toolName = ["read_file", "list_directory", "glob", "grep_search"]
+packages/core/src/policy/policies/memory-manager.toml:16:toolName = ["write_file", "replace"]
+packages/core/src/policy/policies/read-only.toml:31:toolName = [
+ succeeded in 0ms:
+207:   /** Restricting tools via mainAgentTools in evals is forbidden. */
+208:   mainAgentTools?: never;
+417:diff --git a/evals/cli_help_delegation.eval.ts b/evals/cli_help_delegation.eval.ts
+419:--- a/evals/cli_help_delegation.eval.ts
+420:+++ b/evals/cli_help_delegation.eval.ts
+427:     name: 'should delegate to cli_help agent for subagent creation questions',
+1157:+        return parsed.agent_name === agentName;
+1173:+        return args.agent_name === agentName;
+1713:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll check the dynamic content page on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/dynamic.html, wait for the dynamic content to load, then capture the accessibility tree and report what content appeared"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1723:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll fill out the contact form on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/form.html, fill in the name field with 'Test User', the email field with 'test@example.com', the message field with 'Hello World', and submit the form"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1733:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll go through the multi-step flow on the localhost server."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/multi-step/step1.html, fill in 'testuser' as the username, click Next, then on step 2 select 'Option B' and click Finish. Report the final result page content."}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1743:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to the localhost page and read its content using the browser agent."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/index.html and tell me the page title and list all links on the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1753:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll take a screenshot of the localhost test page."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to http://127.0.0.1:18923/index.html and take a screenshot of the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":35,"totalTokenCount":135}}]}
+1763:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll open https://example.com and check the page title for you."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Open https://example.com and get the page title"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":35,"totalTokenCount":135}}]}
+1773:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll launch two browser agents concurrently to check both repositories."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and get the page title"}}},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and get the page title"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1783:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to https://example.com and analyze the links on the page."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Go to https://example.com and find all links on the page, then describe them"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+1793:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll help you open https://example.com and analyze the page. Let me use the browser agent to navigate and capture the page information."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and capture the accessibility tree to get the page title and main content"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"totalTokenCount":150}}]}
+1810:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I will invoke the browser agent to get the page title of example.com."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":16,"totalTokenCount":10587,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"thoughtsTokenCount":80}},{"candidates":[{"content":{"parts":[{"functionCall":{"name":"invoke_agent","args":{"prompt":"Navigate to example.com and return the page title.","agent_name":"browser_agent"},"id":"1zgnzmz8"},"thoughtSignature":"EpgDCpUDAb4+9vtATVUpO7R/Du3cyW+qLtXqHV5MxjoY/uOyN6tesv96PEfcvXarQ/u24REH9DCw2AIG00h9WM2jRtfgbU544f4lEQn0dLEkAJCQaiBcxx8yPND+qKmwq8PFHo6ESQs3nssi3XOqfiA7YMxxY2vEx4GDZfieEeS/nyTe3F7A7dEoMnE2VnMWRVdAAW1F2K2ZeDQZSDrJxtelkn0dGd/MS0R6iNDENWg9QWJQlok4xttspRJFLS5BvkvnkBcUWQFQlo60AQb1Vbo8MQvV8WHUPORRePj4iW3IyxOohmb7uMfDo7UiRyv3Li8AAga7+oSUU9HSf5XZrjSL0juzJpYxxCqnIuj1/ZIY5SBSwGAWKuLQwmbo433bKij9HnY8n/MeNiDgwMiBX56mNlAOIqVLR9Qskod14H4hB+xAbvFy8j8hwf3hksLGjhM9BTBlcBQ2dbor5OUmZ/C7XsnLZvnhw+in7ji2tHz/68/4gmIN08khU1BRvfZdxtX8eQoVLcCfvwkGX7/drD9bM0TrjZuWXh9o"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":52,"totalTokenCount":10623,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"thoughtsTokenCount":80}},{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10491,"candidatesTokenCount":52,"totalTokenCount":10623,"cachedContentTokenCount":8126,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10491}],"cacheTokensDetails":[{"modality":"TEXT","tokenCount":8126}],"thoughtsTokenCount":80}}]}
+1821:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I will invoke the browser agent a"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":7,"totalTokenCount":10649,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"text":" second time to check for links on example.com."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":19,"totalTokenCount":10661,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"functionCall":{"name":"invoke_agent","args":{"prompt":"Navigate to example.com and list all the links on the page.","agent_name":"browser_agent"},"id":"rn9rpbw6"},"thoughtSignature":"EosCCogCAb4+9vt0QmjCmkrGoIi1HLtLRARGxmKpP3a2ZF8HrZLv4bfHC1a7d5a1BlPllShIkkAjL1RZmTe9tjpulNV7xsavrWINRdkfrNqC/on1h+F3nhQAa3HBbf4AWWH/AHmVPlUsVDr19hq4NLLL3hxFg04Fb1YEgRDHrjWOs3Oy9SmzdG+MiWv5GFVUM6spjOujO76dKzHZGe7chmMsmE8NhjQ9c/lbWUoXBxJ/72Qs+mRQHpd3p1ufkL0UV8bFtfyJdLTF4iJ/R5kJiqsEN1FtS3PpQaQHsmby7ytEjPX29ps7xp6NO1i/je9p3u+tGXEpnomqdJJ4SvdDJm4XyqO9HTIQxC3jg7mi"}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10603,"candidatesTokenCount":58,"totalTokenCount":10700,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10603}],"thoughtsTokenCount":39}},{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10683,"candidatesTokenCount":58,"totalTokenCount":10780,"cachedContentTokenCount":8119,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10683}],"cacheTokensDetails":[{"modality":"TEXT","tokenCount":8119}],"thoughtsTokenCount":39}}]}
+1842:+{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"I'll navigate to https://example.com and take a screenshot for you."},{"functionCall":{"name":"invoke_agent","args":{"agent_name":"browser_agent","prompt":"Navigate to https://example.com and take a screenshot of the page"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}}]}
+exec
+/bin/zsh -lc "rg -n \"name:\\s*['\\\"](codebase_investigator|cli_help|RemotePolicyAgent|unknown_subagent)['\\\"]|toolName:\\s*['\\\"](codebase_investigator|cli_help|RemotePolicyAgent|unknown_subagent)['\\\"]|invoke_agent\" packages/core/src packages/cli/src evals -g '*.ts' -g '*.tsx'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/toml-loader.test.ts:1010:          toolName: 'invoke_agent',
+packages/core/src/policy/toml-loader.test.ts:1021:          { name: 'invoke_agent', args: { agent_name: 'unknown_subagent' } },
+packages/core/src/policy/toml-loader.test.ts:1042:            name: 'invoke_agent',
+packages/core/src/policy/toml-loader.test.ts:1043:            args: { agent_name: 'codebase_investigator' },
+packages/core/src/policy/toml-loader.test.ts:1053:          { name: 'invoke_agent', args: { agent_name: 'cli_help' } },
+packages/core/src/policy/policy-engine.test.ts:276:    it('should match subagent name as alias for invoke_agent', async () => {
+packages/core/src/policy/policy-engine.test.ts:278:        { toolName: 'codebase_investigator', decision: PolicyDecision.DENY },
+packages/core/src/policy/policy-engine.test.ts:284:        name: 'invoke_agent',
+packages/core/src/policy/policy-engine.test.ts:285:        args: { agent_name: 'codebase_investigator', prompt: 'Hello' },
+packages/core/src/policy/policy-engine.test.ts:1744:          toolName: 'unknown_subagent',
+packages/core/src/policy/policy-engine.test.ts:1756:        { name: 'unknown_subagent' },
+packages/cli/src/config/policy-engine.integration.test.ts:71:      // invoke_agent should be allowed by default (via agents.toml)
+packages/cli/src/config/policy-engine.integration.test.ts:73:        (await engine.check({ name: 'invoke_agent' }, undefined)).decision,
+packages/cli/src/config/policy-engine.integration.test.ts:360:            { name: 'invoke_agent', args: { agent_name: 'cli_help' } },
+packages/cli/src/config/policy-engine.integration.test.ts:371:              name: 'invoke_agent',
+packages/cli/src/config/policy-engine.integration.test.ts:372:              args: { agent_name: 'codebase_investigator' },
+packages/cli/src/config/policy-engine.integration.test.ts:383:            { name: 'invoke_agent', args: { agent_name: 'unknown_agent' } },
+packages/core/src/agents/codebase-investigator.ts:66:    name: 'codebase_investigator',
+packages/core/src/agents/cli-help-agent.ts:29:  name: 'cli_help',
+packages/core/src/agents/registry.test.ts:1071:        name: 'RemotePolicyAgent',
+exec
+/bin/zsh -lc "nl -ba packages/cli/src/config/policy-engine.integration.test.ts | sed -n '340,395p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/toml-loader.ts | sed -n '490,525p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   340	        ApprovalMode.PLAN,
+   341	      );
+   342	      const engine = new PolicyEngine(config);
+   343	
+   344	      // Read and search tools should be allowed
+   345	      expect(
+   346	        (await engine.check({ name: 'read_file' }, undefined)).decision,
+   347	      ).toBe(PolicyDecision.ALLOW);
+   348	      expect(
+   349	        (await engine.check({ name: 'google_web_search' }, undefined)).decision,
+   350	      ).toBe(PolicyDecision.ALLOW);
+   351	      expect(
+   352	        (await engine.check({ name: 'list_directory' }, undefined)).decision,
+   353	      ).toBe(PolicyDecision.ALLOW);
+   354	      expect(
+   355	        (await engine.check({ name: 'get_internal_docs' }, undefined)).decision,
+   356	      ).toBe(PolicyDecision.ALLOW);
+   357	      expect(
+   358	        (
+   359	          await engine.check(
+ succeeded in 0ms:
+   490	                  decision: rule.decision,
+   491	                  priority: transformPriority(rule.priority, tier),
+   492	                  modes: rule.modes,
+   493	                  interactive: rule.interactive,
+   494	                  toolAnnotations: rule.toolAnnotations,
+   495	                  allowRedirection:
+   496	                    rule.allowRedirection ?? rule.allow_redirection,
+   497	                  source: `${tierName.charAt(0).toUpperCase() + tierName.slice(1)}: ${file}`,
+   498	                  denyMessage: rule.denyMessage ?? rule.deny_message,
+   499	                };
+   500	
+   501	                // Compile regex pattern
+   502	                if (argsPattern) {
+   503	                  try {
+   504	                    new RegExp(argsPattern);
+   505	                  } catch (e) {
+   506	                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   507	                    const error = e as Error;
+   508	                    errors.push({
+   509	                      filePath,
+exec
+/bin/zsh -lc "rg -n \"DYNAMIC_RULE_SOURCE|AgentRegistry \\(Dynamic\\)|removeRulesBySource|addRule\\(|constructor\\(.*PolicyEngine|rules\\.sort|priority\" packages/core/src/policy/policy-engine.ts packages/core/src/agents/registry.ts" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/agents/registry.ts:41:export const DYNAMIC_RULE_SOURCE = 'AgentRegistry (Dynamic)';
+packages/core/src/agents/registry.ts:123:    this.config.getPolicyEngine()?.removeRulesBySource(DYNAMIC_RULE_SOURCE);
+packages/core/src/agents/registry.ts:396:      policyEngine.addRule({
+packages/core/src/agents/registry.ts:400:        priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+packages/core/src/agents/registry.ts:401:        source: DYNAMIC_RULE_SOURCE,
+packages/core/src/policy/policy-engine.ts:207:  constructor(config: PolicyEngineConfig = {}, checkerRunner?: CheckerRunner) {
+packages/core/src/policy/policy-engine.ts:209:      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+packages/core/src/policy/policy-engine.ts:212:      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+packages/core/src/policy/policy-engine.ts:215:      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+packages/core/src/policy/policy-engine.ts:277:      rule.priority !== undefined &&
+packages/core/src/policy/policy-engine.ts:278:      Math.round((rule.priority % 1) * 1000) === ALWAYS_ALLOW_PRIORITY_FRACTION
+packages/core/src/policy/policy-engine.ts:543:    // Find the first matching rule (already sorted by priority)
+packages/core/src/policy/policy-engine.ts:585:          `[PolicyEngine.check] MATCHED rule: toolName=${rule.toolName}, decision=${rule.decision}, priority=${rule.priority}, argsPattern=${rule.argsPattern?.source || 'none'}`,
+packages/core/src/policy/policy-engine.ts:754:  addRule(rule: PolicyRule): void {
+packages/core/src/policy/policy-engine.ts:756:    // Re-sort rules by priority
+packages/core/src/policy/policy-engine.ts:757:    this.rules.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+packages/core/src/policy/policy-engine.ts:762:    this.checkers.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+packages/core/src/policy/policy-engine.ts:766:   * Remove rules matching a specific tier (priority band).
+packages/core/src/policy/policy-engine.ts:770:      (rule) => Math.floor(rule.priority ?? 0) !== tier,
+packages/core/src/policy/policy-engine.ts:777:  removeRulesBySource(source: string): void {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '748,760p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489exec
+/bin/zsh -lc "nl -ba packages/core/src/policy/policy-engine.ts | sed -n '200,225p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   748	    };
+   749	  }
+   750	
+   751	  /**
+   752	   * Add a new rule to the policy engine.
+   753	   */
+   754	  addRule(rule: PolicyRule): void {
+   755	    this.rules.push(rule);
+   756	    // Re-sort rules by priority
+   757	    this.rules.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+   758	  }
+   759	
+   760	  addChecker(checker: SafetyCheckerRule): void {
+ succeeded in 0ms:
+   200	  private readonly defaultDecision: PolicyDecision;
+   201	  private readonly nonInteractive: boolean;
+   202	  private readonly disableAlwaysAllow: boolean;
+   203	  private readonly checkerRunner?: CheckerRunner;
+   204	  private approvalMode: ApprovalMode;
+   205	  private readonly sandboxManager: SandboxManager;
+   206	
+   207	  constructor(config: PolicyEngineConfig = {}, checkerRunner?: CheckerRunner) {
+   208	    this.rules = (config.rules ?? []).sort(
+   209	      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+   210	    );
+   211	    this.checkers = (config.checkers ?? []).sort(
+   212	      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+   213	    );
+   214	    this.hookCheckers = (config.hookCheckers ?? []).sort(
+   215	      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+   216	    );
+   217	
+   218	    // Validate rules
+   219	    for (const rule of this.rules) {
+exec
+/bin/zsh -lc 'rg -n "PRIORITY_SUBAGENT_TOOL" packages/core/src/policy packages/core/src/agents' in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/types.ts:361:export const PRIORITY_SUBAGENT_TOOL = 1.03;
+packages/core/src/agents/registry.ts:29:import { PolicyDecision, PRIORITY_SUBAGENT_TOOL } from '../policy/types.js';
+packages/core/src/agents/registry.ts:400:        priority: PRIORITY_SUBAGENT_TOOL + 0.1, // Higher priority to override blanket allow
+packages/core/src/policy/toml-loader.test.ts:11:  PRIORITY_SUBAGENT_TOOL,
+packages/core/src/policy/toml-loader.test.ts:1013:          priority: PRIORITY_SUBAGENT_TOOL,
+packages/core/src/policy/policy-engine.test.ts:16:  PRIORITY_SUBAGENT_TOOL,
+packages/core/src/policy/policy-engine.test.ts:1746:          priority: PRIORITY_SUBAGENT_TOOL,
+packages/core/src/agents/browser/browserAgentFactory.test.ts:15:import { PolicyDecision, PRIORITY_SUBAGENT_TOOL } from '../../policy/types.js';
+packages/core/src/agents/browser/browserAgentFactory.test.ts:495:          priority: PRIORITY_SUBAGENT_TOOL,
+packages/core/src/agents/browser/browserAgentFactory.test.ts:503:          priority: PRIORITY_SUBAGENT_TOOL,
+packages/core/src/agents/browser/browserAgentFactory.test.ts:511:          priority: PRIORITY_SUBAGENT_TOOL,
+packages/core/src/agents/browser/browserAgentFactory.ts:42:  PRIORITY_SUBAGENT_TOOL,
+packages/core/src/agents/browser/browserAgentFactory.ts:166:        priority: PRIORITY_SUBAGENT_TOOL,
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-names.ts | sed -n '1,230p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+     1	/**
+     2	 * @license
+     3	 * Copyright 2025 Google LLC
+     4	 * SPDX-License-Identifier: Apache-2.0
+     5	 */
+     6	
+     7	import {
+     8	  GLOB_TOOL_NAME,
+     9	  GREP_TOOL_NAME,
+    10	  LS_TOOL_NAME,
+    11	  READ_FILE_TOOL_NAME,
+    12	  SHELL_TOOL_NAME,
+    13	  WRITE_FILE_TOOL_NAME,
+    14	  EDIT_TOOL_NAME,
+    15	  WEB_SEARCH_TOOL_NAME,
+    16	  WRITE_TODOS_TOOL_NAME,
+    17	  WEB_FETCH_TOOL_NAME,
+    18	  READ_MANY_FILES_TOOL_NAME,
+    19	  MEMORY_TOOL_NAME,
+    20	  GET_INTERNAL_DOCS_TOOL_NAME,
+exec
+/bin/zsh -lc "rg -n \"function getToolAliases|export function getToolAliases|const getToolAliases\" packages/core/src -g '*.ts'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/tools/tool-names.ts:219:export function getToolAliases(name: string): string[] {
+exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-names.ts | sed -n '219,236p'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+   219	export function getToolAliases(name: string): string[] {
+   220	  const aliases = new Set<string>([name]);
+   221	
+   222	  // Determine the canonical (current) name
+   223	  const canonicalName = TOOL_LEGACY_ALIASES[name] ?? name;
+   224	  aliases.add(canonicalName);
+   225	
+   226	  // Find all other legacy aliases that point to the same canonical name
+   227	  for (const [legacyName, currentName] of Object.entries(TOOL_LEGACY_ALIASES)) {
+   228	    if (currentName === canonicalName) {
+   229	      aliases.add(legacyName);
+   230	    }
+   231	  }
+   232	
+   233	  return Array.from(aliases);
+   234	}
+   235	
+   236	/** Prefix used for tools discovered via the tool DiscoveryCommand. */
+codex
+I don’t see a claim that violates the allowed edit set or references a missing symbol. I’m doing one last pass for asserted strings and then I’ll write the hunt report.
+exec
+/bin/zsh -lc "test -f /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md && sed -n '1,200p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md || true" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+
+exec
+/bin/zsh -lc "rg -n \"Allow specific subagents|argsPattern|AgentRegistry|User policy exists|Subagent|Remote agent|invoke_agent|codebase_investigator|cli_help\" packages/core/src packages/cli/src -g '*.test.ts' -g '*.ts' -g '*.tsx'" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+packages/core/src/policy/policy-engine.ts:169:  if (rule.argsPattern) {
+packages/core/src/policy/policy-engine.ts:177:      !rule.argsPattern.test(stringifiedArgs)
+packages/core/src/policy/policy-engine.ts:518:      (this.rules.some((rule) => rule.argsPattern) ||
+packages/core/src/policy/policy-engine.ts:519:        this.checkers.some((checker) => checker.argsPattern))
+packages/core/src/policy/policy-engine.ts:585:          `[PolicyEngine.check] MATCHED rule: toolName=${rule.toolName}, decision=${rule.decision}, priority=${rule.priority}, argsPattern=${rule.argsPattern?.source || 'none'}`,
+packages/core/src/policy/policy-engine.ts:593:          !rule.argsPattern
+packages/core/src/policy/policy-engine.ts:820:   * If ignoreDynamic is true, it only returns true if a rule exists that was NOT added by AgentRegistry.
+packages/core/src/policy/policy-engine.ts:826:        (!ignoreDynamic || rule.source !== 'AgentRegistry (Dynamic)'),
+packages/core/src/policy/policy-engine.ts:852:   * 1. Global rules (no argsPattern)
+packages/core/src/policy/policy-engine.ts:886:        // Create a copy of the rule without argsPattern to see if it targets the tool
+packages/core/src/policy/policy-engine.ts:888:        const ruleWithoutArgs: PolicyRule = { ...rule, argsPattern: undefined };
+packages/core/src/policy/policy-engine.ts:902:          if (rule.argsPattern) {
+packages/core/src/policy/config.test.ts:540:  it('should support argsPattern in policy rules', async () => {
+packages/core/src/policy/config.test.ts:546:  argsPattern = "\\"command\\":\\"git (status|diff|log)\\""
+packages/core/src/policy/config.test.ts:566:    expect(rule?.argsPattern).toBeInstanceOf(RegExp);
+packages/core/src/policy/config.test.ts:567:    expect(rule?.argsPattern?.test('{"command":"git status"}')).toBe(true);
+packages/core/src/policy/config.test.ts:568:    expect(rule?.argsPattern?.test('{"command":"git commit"}')).toBe(false);
+packages/core/src/policy/config.test.ts:710:toolName = "codebase_investigator"
+packages/core/src/policy/config.test.ts:734:        r.toolName === 'codebase_investigator' &&
+packages/core/src/policy/config.ts:459:                argsPattern: new RegExp(pattern),
+codex
+The asserted policy tests line up with the proposed behavior, including the virtual alias path for `invoke_agent`. I’m writing the report as zero findings.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+No findings.
+apply_patch(auto_approved=true) exited 0 in 25ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d6e877b4600102c6fbc3e4ff24d3936484c4cd9
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+@@ -0,0 +1 @@
++No findings.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d6e877b4600102c6fbc3e4ff24d3936484c4cd9
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+@@ -0,0 +1 @@
++No findings.
+
+codex
+Wrote the hunt report to [hunt-spec-round-3.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md).
+
+Result: `No findings.`
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d6e877b4600102c6fbc3e4ff24d3936484c4cd9
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md
+@@ -0,0 +1 @@
++No findings.
+
+tokens used
+85,333
+Wrote the hunt report to [hunt-spec-round-3.md](/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-3.md).
+
+Result: `No findings.`

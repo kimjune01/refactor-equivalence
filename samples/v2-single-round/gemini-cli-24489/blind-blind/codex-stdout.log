@@ -1,0 +1,1074 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-codex-24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9782-09c3-7591-8f0f-3e0054b5f447
+--------
+user
+# Implement the sharpened refactor claims
+
+You are applying a pre-sharpened, pre-hunted refactor spec to the repo at your current working directory.
+
+## Inputs
+
+- **Goal** at `./GOAL.md`
+- **Sharpened spec** at `./SHARPENED_SPEC.md`
+- **Artifact** at `./FORGE_INPUT_DIFF.patch`
+- **Allowed edit set** at `./FORGE_ALLOWED_FILES.txt`
+
+## What to do
+
+Apply every accepted claim in the sharpened spec, in order. For each claim, edit only the files named in it. Do not touch any file outside the allowed edit set. Do not touch any test file (`*.test.ts`, `*.test.tsx`, `*_test.go`, `test_*.py`, `*_test.py`, or equivalent).
+
+You may NOT run tests — `node_modules` is not present in this directory. Trust the spec: every accepted claim has been adversarially reviewed, blockers have been rejected, and warnings have been narrowed.
+
+## Implementation evidence (4e)
+
+You must either:
+
+1. **Apply ≥1 accepted claim with an actual source edit** AND write a summary to `./IMPLEMENT_SUMMARY.md` listing which files you modified and which claims you applied, OR
+2. **Explicitly declare no-op** by writing `./IMPLEMENT_SUMMARY.md` with the single line `NO-OP: <reason>`.
+
+"Applied M/M, no changes made" is internally inconsistent and will be flagged as a trivial no-op failure.
+
+## Do not
+
+- Add claims that are not in the spec.
+- Re-open claims the spec rejected (they were rejected adversarially).
+- Produce commentary, summary, or documentation files beyond `IMPLEMENT_SUMMARY.md`.
+- Change the public API surface.
+
+## Output
+
+Your output is the modified source tree at the current working directory, plus `./IMPLEMENT_SUMMARY.md`. No additional markdown reports.
+mcp startup: no servers
+codex
+I’ll read the goal, sharpened spec, allowed file list, and input diff first, then apply only the accepted claims in their stated order.
+exec
+/bin/zsh -lc "sed -n '1,220p' GOAL.md" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+# PR #24489 — feat(core): refactor subagent tool to unified invoke_subagent tool
+
+## PR body
+
+## Summary
+
+Refactors specialized subagent tools into a single, unified `invoke_agent` tool and updates the Policy Engine to support virtual tool aliases for subagents.
+
+## Details
+
+- **Unified Tooling**: Introduced `invoke_agent` in `packages/core` as the standard mechanism for subagent delegation, replacing the previous 1:1 tool-to-agent mapping.
+- **Policy Engine Enhancement**: Updated `PolicyEngine` to automatically treat the `agent_name` argument of `invoke_agent` as a virtual tool name. This ensures that existing safety policies (e.g., denying `codebase_investigator`) remain functional without requiring rule updates.
+- **Prompt Refactoring**: Updated both modern and legacy prompt snippets to instruct the model to use `invoke_agent`.
+- **Testing**: Added unit tests in `policy-engine.test.ts` for virtual alias matching and updated `subagents.eval.ts` to verify successful delegation via the new unified tool.
+- **Documentation**: Updated `subagents.md` and `policy-engine.md` to reflect the new invocation pattern and policy syntax.
+
+## Related Issues
+
+Related to the effort of simplifying the main agent's toolset and improving context efficiency.
+
+exec
+/bin/zsh -lc 'pwd && rg --files' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-codex-24489
+SECURITY.md
+SHARPENED_SPEC.md
+FORGE_INPUT_DIFF.patch
+sea/sea-launch.cjs
+sea/sea-launch.test.js
+eslint.config.js
+GEMINI.md
+tsconfig.json
+packages/a2a-server/src/index.ts
+packages/a2a-server/src/commands/command-registry.ts
+packages/a2a-server/src/commands/memory.test.ts
+packages/a2a-server/src/commands/memory.ts
+packages/a2a-server/src/commands/extensions.test.ts
+packages/a2a-server/src/commands/command-registry.test.ts
+packages/a2a-server/src/commands/restore.test.ts
+packages/a2a-server/src/commands/types.ts
+packages/a2a-server/src/commands/extensions.ts
+packages/a2a-server/src/commands/init.test.ts
+packages/a2a-server/src/commands/init.ts
+exec
+/bin/zsh -lc "sed -n '1,260p' FORGE_INPUT_DIFF.patch" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "sed -n '1,260p' SHARPENED_SPEC.md" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "sed -n '1,200p' FORGE_ALLOWED_FILES.txt" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Centralize Agent Input Key Selection
+**File**: packages/core/src/agents/agent-tool.ts:106
+**Change**: In `AgentTool`, extract the repeated input-schema property inspection from `mapParams` and `DelegateInvocation.withUserHints` into a shared private helper that returns the target input key while preserving current fallbacks: a single object-schema `properties` entry maps to that property, any object-schema `properties` record with zero or multiple entries falls back to `prompt`, and schemas where `properties` is absent or not an object keep the existing no-remap/no-hints behavior.
+**Goal link**: This clarifies the unified `invoke_agent` adapter's responsibility for translating its generic `prompt` argument into each subagent's schema.
+**Justification**: Reusing one key-selection rule removes duplicated schema probing in the new delegation path without changing the mapped arguments or hint-injection conditions.
+**Hunt note**: Retained as narrowed for F1 because it now explicitly classifies `properties: {}` with the same `prompt` fallback as multi-property object schemas.
+
+### C2 — Reuse Hinted Child Invocation Construction
+**File**: packages/core/src/agents/agent-tool.ts:180
+**Change**: In `DelegateInvocation`, add a private method that applies `withUserHints(this.mappedInputs)` and calls `buildChildInvocation`, then use it from both `shouldConfirmExecute` and `execute`.
+**Goal link**: This keeps the unified `invoke_agent` execution path focused on delegation instead of repeating setup mechanics at each lifecycle entry point.
+**Justification**: The confirmation and execution paths currently duplicate the same hinted-argument construction, and a local helper removes that accidental repetition while preserving the same child invocation type and inputs.
+
+## Rejected
+
+- Delete `packages/core/src/agents/subagent-tool.ts` now that `invoke_agent` is the unified entry point: this would break existing tests and any internal imports that still exercise the legacy per-agent tool class, so it is not test-preserving within the allowed non-test edit scope.
+- Change `packages/core/src/prompts/snippets.ts` and `packages/core/src/prompts/snippets.legacy.ts` memory guidance to use `formatToolName(AGENT_TOOL_NAME)`: this would alter prompt snapshots and require test fixture updates, which are outside the allowed claim scope.
+- Escape `definition.name` before building the dynamic remote-agent `argsPattern` in `packages/core/src/agents/registry.ts`: this would be a behavioral fix for regex metacharacters in agent names rather than a behavior-preserving refactor.
+ succeeded in 0ms:
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index 94215e4795..fe87fb1d5d 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,8 +335,6 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
+-          # Only run always passes behavioral tests.
+-          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index fbb770ac84..9acc1de050 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,18 +5,10 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+ succeeded in 0ms:
+.github/workflows/chained_e2e.yml
+.github/workflows/evals-nightly.yml
+.github/workflows/perf-nightly.yml
+.gitignore
+GEMINI.md
+evals/answer-vs-act.eval.ts
+evals/app-test-helper.ts
+evals/ask_user.eval.ts
+evals/automated-tool-use.eval.ts
+evals/cli_help_delegation.eval.ts
+evals/component-test-helper.ts
+evals/concurrency-safety.eval.ts
+evals/edit-locations-eval.eval.ts
+evals/frugalReads.eval.ts
+evals/frugalSearch.eval.ts
+evals/generalist_agent.eval.ts
+evals/generalist_delegation.eval.ts
+evals/gitRepo.eval.ts
+evals/grep_search_functionality.eval.ts
+evals/hierarchical_memory.eval.ts
+codex
+The accepted scope is narrow: both claims target `packages/core/src/agents/agent-tool.ts`, which is in the allowed set and is not a test. I’m opening that file now and ignoring the unrelated artifact hunks.
+exec
+/bin/zsh -lc "sed -n '1,280p' packages/core/src/agents/agent-tool.ts" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc 'rg -n "class AgentTool|class DelegateInvocation|mapParams|withUserHints|buildChildInvocation|mappedInputs|prompt" packages/core/src/agents/agent-tool.ts' in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+37: * mapping the general 'prompt' parameter to the agent's specific schema,
+40:export class AgentTool extends BaseDeclarativeTool<
+41:  { agent_name: string; prompt: string },
+62:          prompt: {
+68:        required: ['agent_name', 'prompt'],
+77:    params: { agent_name: string; prompt: string },
+81:  ): ToolInvocation<{ agent_name: string; prompt: string }, ToolResult> {
+90:    const mappedInputs = this.mapParams(
+91:      params.prompt,
+97:      mappedInputs,
+106:  private mapParams(prompt: string, schema: unknown): AgentInputs {
+109:      return { prompt };
+115:        return { [keys[0]]: prompt };
+118:    return { prompt };
+122:class DelegateInvocation extends BaseToolInvocation<
+123:  { agent_name: string; prompt: string },
+129:    params: { agent_name: string; prompt: string },
+130:    private readonly mappedInputs: AgentInputs,
+150:  private buildChildInvocation(
+183:    const hintedParams = this.withUserHints(this.mappedInputs);
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  BaseDeclarativeTool,
+  Kind,
+  type ToolInvocation,
+  type ToolResult,
+  BaseToolInvocation,
+  type ToolCallConfirmationDetails,
+  type ToolLiveOutput,
+} from '../tools/tools.js';
+import { type AgentLoopContext } from '../config/agent-loop-context.js';
+import type { MessageBus } from '../confirmation-bus/message-bus.js';
+import type { AgentDefinition, AgentInputs } from './types.js';
+import { LocalSubagentInvocation } from './local-invocation.js';
+import { RemoteAgentInvocation } from './remote-invocation.js';
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-codex-24489 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+codex
+I’m going to make two small source edits: a module-private input-key helper reused by mapping and hint injection, then a DelegateInvocation helper that builds the hinted child invocation for both confirmation and execution. After that I’ll write the required implementation summary.
+file update
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -32,2 +32,16 @@
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+@@ -106,14 +120,4 @@
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+@@ -179,2 +183,7 @@
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+@@ -182,4 +191,3 @@
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+@@ -191,4 +199,3 @@
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+@@ -226,24 +233,16 @@
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+apply_patch(auto_approved=true) exited 0 in 13ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+codex
+The source change is in place. I’m doing a quick readback for the touched file and then adding `IMPLEMENT_SUMMARY.md`; I will not run tests per your constraint.
+exec
+/bin/zsh -lc "sed -n '1,280p' packages/core/src/agents/agent-tool.ts" in /tmp/refactor-eq-workdir/bb-codex-24489exec
+/bin/zsh -lc "find . -maxdepth 1 -name 'IMPLEMENT_SUMMARY.md' -print" in /tmp/refactor-eq-workdir/bb-codex-24489 succeeded in 0ms:
+
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  BaseDeclarativeTool,
+  Kind,
+  type ToolInvocation,
+  type ToolResult,
+  BaseToolInvocation,
+  type ToolCallConfirmationDetails,
+  type ToolLiveOutput,
+} from '../tools/tools.js';
+import { type AgentLoopContext } from '../config/agent-loop-context.js';
+import type { MessageBus } from '../confirmation-bus/message-bus.js';
+import type { AgentDefinition, AgentInputs } from './types.js';
+import { LocalSubagentInvocation } from './local-invocation.js';
+import { RemoteAgentInvocation } from './remote-invocation.js';
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+file update
+A /tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+Applied claims:
+- C1 — Centralize Agent Input Key Selection
+- C2 — Reuse Hinted Child Invocation Construction
+
+Modified files:
+- packages/core/src/agents/agent-tool.ts
+apply_patch(auto_approved=true) exited 0 in 14ms:
+Success. Updated the following files:
+A /tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims:
++- C1 — Centralize Agent Input Key Selection
++- C2 — Reuse Hinted Child Invocation Construction
++
++Modified files:
++- packages/core/src/agents/agent-tool.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims:
++- C1 — Centralize Agent Input Key Selection
++- C2 — Reuse Hinted Child Invocation Construction
++
++Modified files:
++- packages/core/src/agents/agent-tool.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+codex
+Implemented both accepted claims.
+
+Changed:
+- [packages/core/src/agents/agent-tool.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts): added shared input-key selection, reused it in parameter mapping and remote hint injection, and centralized hinted child invocation construction.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md): recorded applied claims and modified source file.
+
+Tests were not run, per instruction.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..76b137001d0a2e5a7b7a2cd35b5cc4cfef2035f6
+--- /dev/null
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md
+@@ -0,0 +1,6 @@
++Applied claims:
++- C1 — Centralize Agent Input Key Selection
++- C2 — Reuse Hinted Child Invocation Construction
++
++Modified files:
++- packages/core/src/agents/agent-tool.ts
+diff --git a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+index 0d4c85a599f15dd81df39632e7174819ae996f1c..d52482fdffe11d3d4671fb7a02ee13a21ef94524
+--- a//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
++++ b//tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts
+@@ -30,6 +30,20 @@
+ } from '../telemetry/constants.js';
+ import { AGENT_TOOL_NAME } from '../tools/tool-names.js';
+ 
++function getAgentInputKey(schema: unknown): string | undefined {
++  if (!isRecord(schema)) {
++    return undefined;
++  }
++
++  const properties = schema['properties'];
++  if (!isRecord(properties)) {
++    return undefined;
++  }
++
++  const keys = Object.keys(properties);
++  return keys.length === 1 ? keys[0] : 'prompt';
++}
++
+ /**
+  * A unified tool for invoking subagents.
+  *
+@@ -104,18 +118,8 @@
+   }
+ 
+   private mapParams(prompt: string, schema: unknown): AgentInputs {
+-    const schemaObj: unknown = schema;
+-    if (!isRecord(schemaObj)) {
+-      return { prompt };
+-    }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      if (keys.length === 1) {
+-        return { [keys[0]]: prompt };
+-      }
+-    }
+-    return { prompt };
++    const inputKey = getAgentInputKey(schema) ?? 'prompt';
++    return { [inputKey]: prompt };
+   }
+ }
+ 
+@@ -177,11 +181,15 @@
+     }
+   }
+ 
++  private buildHintedChildInvocation(): ToolInvocation<AgentInputs, ToolResult> {
++    const hintedParams = this.withUserHints(this.mappedInputs);
++    return this.buildChildInvocation(hintedParams);
++  }
++
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
+   ): Promise<ToolCallConfirmationDetails | false> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+     return invocation.shouldConfirmExecute(abortSignal);
+   }
+ 
+@@ -189,8 +197,7 @@
+     signal: AbortSignal,
+     updateOutput?: (output: ToolLiveOutput) => void,
+   ): Promise<ToolResult> {
+-    const hintedParams = this.withUserHints(this.mappedInputs);
+-    const invocation = this.buildChildInvocation(hintedParams);
++    const invocation = this.buildHintedChildInvocation();
+ 
+     return runInDevTraceSpan(
+       {
+@@ -224,27 +231,19 @@
+       return agentArgs;
+     }
+ 
+-    // Find the primary key to append hints to
+-    const schemaObj: unknown = this.definition.inputConfig.inputSchema;
+-    if (!isRecord(schemaObj)) {
++    const primaryKey = getAgentInputKey(this.definition.inputConfig.inputSchema);
++    if (!primaryKey) {
+       return agentArgs;
+     }
+-    const properties = schemaObj['properties'];
+-    if (isRecord(properties)) {
+-      const keys = Object.keys(properties);
+-      const primaryKey = keys.length === 1 ? keys[0] : 'prompt';
+ 
+-      const value = agentArgs[primaryKey];
+-      if (typeof value !== 'string' || value.trim().length === 0) {
+-        return agentArgs;
+-      }
+-
+-      return {
+-        ...agentArgs,
+-        [primaryKey]: `${formattedHints}\n\n${value}`,
+-      };
++    const value = agentArgs[primaryKey];
++    if (typeof value !== 'string' || value.trim().length === 0) {
++      return agentArgs;
+     }
+ 
+-    return agentArgs;
++    return {
++      ...agentArgs,
++      [primaryKey]: `${formattedHints}\n\n${value}`,
++    };
+   }
+ }
+
+tokens used
+27,553
+Implemented both accepted claims.
+
+Changed:
+- [packages/core/src/agents/agent-tool.ts](/tmp/refactor-eq-workdir/bb-codex-24489/packages/core/src/agents/agent-tool.ts): added shared input-key selection, reused it in parameter mapping and remote hint injection, and centralized hinted child invocation construction.
+- [IMPLEMENT_SUMMARY.md](/tmp/refactor-eq-workdir/bb-codex-24489/IMPLEMENT_SUMMARY.md): recorded applied claims and modified source file.
+
+Tests were not run, per instruction.

@@ -1,0 +1,1164 @@
+diff --git a/pkg/cmd/discussion/client/client.go b/pkg/cmd/discussion/client/client.go
+index b698dc896..a794d13e1 100644
+--- a/pkg/cmd/discussion/client/client.go
++++ b/pkg/cmd/discussion/client/client.go
+@@ -9,8 +9,8 @@ import "github.com/cli/cli/v2/internal/ghrepo"
+ 
+ // DiscussionClient defines operations for interacting with the GitHub Discussions API.
+ type DiscussionClient interface {
+-	List(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error)
+-	Search(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error)
++	List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
++	Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+ 	GetByNumber(repo ghrepo.Interface, number int) (*Discussion, error)
+ 	GetWithComments(repo ghrepo.Interface, number int, commentLimit int, order string) (*Discussion, error)
+ 	ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error)
+diff --git a/pkg/cmd/discussion/client/client_impl.go b/pkg/cmd/discussion/client/client_impl.go
+index e5db32dd5..ed44e49be 100644
+--- a/pkg/cmd/discussion/client/client_impl.go
++++ b/pkg/cmd/discussion/client/client_impl.go
+@@ -3,9 +3,12 @@ package client
+ import (
+ 	"fmt"
+ 	"net/http"
++	"strings"
++	"time"
+ 
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/shurcooL/githubv4"
+ )
+ 
+ type discussionClient struct {
+@@ -19,12 +22,340 @@ func NewDiscussionClient(httpClient *http.Client) DiscussionClient {
+ 	}
+ }
+ 
+-func (c *discussionClient) List(_ ghrepo.Interface, _ ListFilters, _ int) ([]Discussion, int, error) {
+-	return nil, 0, fmt.Errorf("not implemented")
++// actorNode is the GraphQL response shape for an Actor union (User or Bot)
++// used in discussionListNode fields like Author and AnswerChosenBy.
++type actorNode struct {
++	TypeName string `graphql:"__typename"`
++	Login    string
++	User     struct {
++		ID   string
++		Name string
++	} `graphql:"... on User"`
++	Bot struct {
++		ID string
++	} `graphql:"... on Bot"`
+ }
+ 
+-func (c *discussionClient) Search(_ ghrepo.Interface, _ SearchFilters, _ int) ([]Discussion, int, error) {
+-	return nil, 0, fmt.Errorf("not implemented")
++// mapActorFromListNode converts an actorNode into the domain DiscussionActor type.
++func mapActorFromListNode(n actorNode) DiscussionActor {
++	a := DiscussionActor{Login: n.Login}
++	switch n.TypeName {
++	case "User":
++		a.ID = n.User.ID
++		a.Name = n.User.Name
++	case "Bot":
++		a.ID = n.Bot.ID
++	}
++	return a
++}
++
++// discussionListNode is the GraphQL response shape for a discussion in
++// list and search results. It covers high-level fields only (no comments, or
++// other detail-level data that commands like view would need).
++type discussionListNode struct {
++	ID          string
++	Number      int
++	Title       string
++	Body        string
++	URL         string `graphql:"url"`
++	Closed      bool
++	StateReason string
++	Author      actorNode
++	Category    struct {
++		ID           string
++		Name         string
++		Slug         string
++		Emoji        string
++		IsAnswerable bool
++	}
++	Labels struct {
++		Nodes []struct {
++			ID    string
++			Name  string
++			Color string
++		}
++	} `graphql:"labels(first: 20)"`
++	IsAnswered     bool
++	AnswerChosenAt time.Time
++	AnswerChosenBy *actorNode
++	ReactionGroups []struct {
++		Content string
++		Users   struct {
++			TotalCount int
++		}
++	} `graphql:"reactionGroups"`
++	CreatedAt time.Time
++	UpdatedAt time.Time
++	ClosedAt  time.Time
++	Locked    bool
++}
++
++// mapDiscussionFromListNode converts a discussionListNode into the domain Discussion type.
++func mapDiscussionFromListNode(n discussionListNode) Discussion {
++	d := Discussion{
++		ID:          n.ID,
++		Number:      n.Number,
++		Title:       n.Title,
++		Body:        n.Body,
++		URL:         n.URL,
++		Closed:      n.Closed,
++		StateReason: n.StateReason,
++		Author:      mapActorFromListNode(n.Author),
++		Category: DiscussionCategory{
++			ID:           n.Category.ID,
++			Name:         n.Category.Name,
++			Slug:         n.Category.Slug,
++			Emoji:        n.Category.Emoji,
++			IsAnswerable: n.Category.IsAnswerable,
++		},
++		Answered:       n.IsAnswered,
++		AnswerChosenAt: n.AnswerChosenAt,
++		CreatedAt:      n.CreatedAt,
++		UpdatedAt:      n.UpdatedAt,
++		ClosedAt:       n.ClosedAt,
++		Locked:         n.Locked,
++	}
++
++	if n.AnswerChosenBy != nil {
++		a := mapActorFromListNode(*n.AnswerChosenBy)
++		d.AnswerChosenBy = &a
++	}
++
++	d.Labels = make([]DiscussionLabel, len(n.Labels.Nodes))
++	for i, l := range n.Labels.Nodes {
++		d.Labels[i] = DiscussionLabel{ID: l.ID, Name: l.Name, Color: l.Color}
++	}
++
++	return d
++}
++
++func (c *discussionClient) List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
++	if limit <= 0 {
++		return nil, fmt.Errorf("limit argument must be positive: %v", limit)
++	}
++
++	var query struct {
++		Repository struct {
++			HasDiscussionsEnabled bool
++			Discussions           struct {
++				TotalCount int
++				PageInfo   struct {
++					HasNextPage bool
++					EndCursor   string
++				}
++				Nodes []discussionListNode
++			} `graphql:"discussions(first: $first, after: $after, orderBy: $orderBy, categoryId: $categoryId, states: $states, answered: $answered)"`
++		} `graphql:"repository(owner: $owner, name: $name)"`
++	}
++
++	orderField := githubv4.DiscussionOrderFieldUpdatedAt
++	orderDir := githubv4.OrderDirectionDesc
++	if filters.OrderBy != "" {
++		switch filters.OrderBy {
++		case OrderByCreated:
++			orderField = githubv4.DiscussionOrderFieldCreatedAt
++		case OrderByUpdated:
++			orderField = githubv4.DiscussionOrderFieldUpdatedAt
++		default:
++			return nil, fmt.Errorf("unknown order-by field: %q", filters.OrderBy)
++		}
++	}
++	if filters.Direction != "" {
++		switch filters.Direction {
++		case OrderDirectionAsc:
++			orderDir = githubv4.OrderDirectionAsc
++		case OrderDirectionDesc:
++			orderDir = githubv4.OrderDirectionDesc
++		default:
++			return nil, fmt.Errorf("unknown order direction: %q", filters.Direction)
++		}
++	}
++
++	perPage := limit
++	if perPage > 100 {
++		perPage = 100
++	}
++
++	variables := map[string]interface{}{
++		"owner":      githubv4.String(repo.RepoOwner()),
++		"name":       githubv4.String(repo.RepoName()),
++		"first":      githubv4.Int(perPage),
++		"after":      (*githubv4.String)(nil),
++		"orderBy":    githubv4.DiscussionOrder{Field: orderField, Direction: orderDir},
++		"categoryId": (*githubv4.ID)(nil),
++		"states":     (*[]githubv4.DiscussionState)(nil),
++		"answered":   (*githubv4.Boolean)(nil),
++	}
++
++	if after != "" {
++		variables["after"] = githubv4.String(after)
++	}
++
++	if filters.CategoryID != "" {
++		variables["categoryId"] = githubv4.ID(filters.CategoryID)
++	}
++
++	if filters.State != nil {
++		switch *filters.State {
++		case FilterStateOpen:
++			variables["states"] = &[]githubv4.DiscussionState{githubv4.DiscussionStateOpen}
++		case FilterStateClosed:
++			variables["states"] = &[]githubv4.DiscussionState{githubv4.DiscussionStateClosed}
++		default:
++			return nil, fmt.Errorf("unknown state filter: %q; should be one of %q, %q", *filters.State, FilterStateOpen, FilterStateClosed)
++		}
++	}
++
++	if filters.Answered != nil {
++		variables["answered"] = githubv4.Boolean(*filters.Answered)
++	}
++
++	var result DiscussionListResult
++	remaining := limit
++
++	for {
++		if err := c.gql.Query(repo.RepoHost(), "DiscussionList", &query, variables); err != nil {
++			return nil, err
++		}
++
++		if !query.Repository.HasDiscussionsEnabled {
++			// This would be the same over every iteration, so if we're going to return we will at the first page.
++			return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
++		}
++
++		result.TotalCount = query.Repository.Discussions.TotalCount
++		for _, n := range query.Repository.Discussions.Nodes {
++			result.Discussions = append(result.Discussions, mapDiscussionFromListNode(n))
++		}
++
++		remaining -= len(query.Repository.Discussions.Nodes)
++		if remaining <= 0 || !query.Repository.Discussions.PageInfo.HasNextPage {
++			if query.Repository.Discussions.PageInfo.HasNextPage {
++				result.NextCursor = query.Repository.Discussions.PageInfo.EndCursor
++			}
++			break
++		}
++		variables["after"] = githubv4.String(query.Repository.Discussions.PageInfo.EndCursor)
++	}
++
++	return &result, nil
++}
++
++func (c *discussionClient) Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
++	if limit <= 0 {
++		return nil, fmt.Errorf("limit argument must be positive: %v", limit)
++	}
++
++	var query struct {
++		Search struct {
++			DiscussionCount int
++			PageInfo        struct {
++				HasNextPage bool
++				EndCursor   string
++			}
++			Nodes []struct {
++				Discussion discussionListNode `graphql:"... on Discussion"`
++			}
++		} `graphql:"search(query: $query, type: DISCUSSION, first: $first, after: $after)"`
++	}
++
++	qualifiers := []string{fmt.Sprintf("repo:%s/%s", repo.RepoOwner(), repo.RepoName())}
++
++	if filters.State != nil {
++		switch *filters.State {
++		case FilterStateOpen:
++			qualifiers = append(qualifiers, "is:open")
++		case FilterStateClosed:
++			qualifiers = append(qualifiers, "is:closed")
++		default:
++			return nil, fmt.Errorf("unknown state filter: %q; should be one of %q, %q", *filters.State, FilterStateOpen, FilterStateClosed)
++		}
++	}
++
++	if filters.Author != "" {
++		qualifiers = append(qualifiers, fmt.Sprintf("author:%q", filters.Author))
++	}
++	for _, l := range filters.Labels {
++		qualifiers = append(qualifiers, fmt.Sprintf("label:%q", l))
++	}
++	if filters.Category != "" {
++		qualifiers = append(qualifiers, fmt.Sprintf("category:%q", filters.Category))
++	}
++	if filters.Answered != nil {
++		if *filters.Answered {
++			qualifiers = append(qualifiers, "is:answered")
++		} else {
++			qualifiers = append(qualifiers, "is:unanswered")
++		}
++	}
++
++	orderField := "updated"
++	orderDir := "desc"
++	if filters.OrderBy != "" {
++		switch filters.OrderBy {
++		case OrderByCreated:
++			orderField = "created"
++		case OrderByUpdated:
++			orderField = "updated"
++		default:
++			return nil, fmt.Errorf("unknown order-by field: %q", filters.OrderBy)
++		}
++	}
++	if filters.Direction != "" {
++		switch filters.Direction {
++		case OrderDirectionAsc:
++			orderDir = "asc"
++		case OrderDirectionDesc:
++			orderDir = "desc"
++		default:
++			return nil, fmt.Errorf("unknown order direction: %q", filters.Direction)
++		}
++	}
++	qualifiers = append(qualifiers, fmt.Sprintf("sort:%s-%s", orderField, orderDir))
++
++	searchQuery := strings.Join(qualifiers, " ")
++	if filters.Keywords != "" {
++		searchQuery += " " + filters.Keywords
++	}
++
++	perPage := limit
++	if perPage > 100 {
++		perPage = 100
++	}
++
++	variables := map[string]interface{}{
++		"query": githubv4.String(searchQuery),
++		"first": githubv4.Int(perPage),
++		"after": (*githubv4.String)(nil),
++	}
++	if after != "" {
++		variables["after"] = githubv4.String(after)
++	}
++
++	var result DiscussionListResult
++	remaining := limit
++
++	for {
++		if err := c.gql.Query(repo.RepoHost(), "DiscussionListSearch", &query, variables); err != nil {
++			return nil, err
++		}
++
++		result.TotalCount = query.Search.DiscussionCount
++		for _, n := range query.Search.Nodes {
++			result.Discussions = append(result.Discussions, mapDiscussionFromListNode(n.Discussion))
++		}
++
++		remaining -= len(query.Search.Nodes)
++		if remaining <= 0 || !query.Search.PageInfo.HasNextPage {
++			if query.Search.PageInfo.HasNextPage {
++				result.NextCursor = query.Search.PageInfo.EndCursor
++			}
++			break
++		}
++		variables["after"] = githubv4.String(query.Search.PageInfo.EndCursor)
++	}
++
++	return &result, nil
+ }
+ 
+ func (c *discussionClient) GetByNumber(_ ghrepo.Interface, _ int) (*Discussion, error) {
+@@ -35,8 +366,47 @@ func (c *discussionClient) GetWithComments(_ ghrepo.Interface, _ int, _ int, _ s
+ 	return nil, fmt.Errorf("not implemented")
+ }
+ 
+-func (c *discussionClient) ListCategories(_ ghrepo.Interface) ([]DiscussionCategory, error) {
+-	return nil, fmt.Errorf("not implemented")
++func (c *discussionClient) ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error) {
++	var query struct {
++		Repository struct {
++			HasDiscussionsEnabled bool
++			DiscussionCategories  struct {
++				Nodes []struct {
++					ID           string
++					Name         string
++					Slug         string
++					Emoji        string
++					IsAnswerable bool
++				}
++			} `graphql:"discussionCategories(first: 100)"`
++		} `graphql:"repository(owner: $owner, name: $name)"`
++	}
++
++	variables := map[string]interface{}{
++		"owner": githubv4.String(repo.RepoOwner()),
++		"name":  githubv4.String(repo.RepoName()),
++	}
++
++	if err := c.gql.Query(repo.RepoHost(), "DiscussionCategoryList", &query, variables); err != nil {
++		return nil, err
++	}
++
++	if !query.Repository.HasDiscussionsEnabled {
++		return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
++	}
++
++	categories := make([]DiscussionCategory, len(query.Repository.DiscussionCategories.Nodes))
++	for i, n := range query.Repository.DiscussionCategories.Nodes {
++		categories[i] = DiscussionCategory{
++			ID:           n.ID,
++			Name:         n.Name,
++			Slug:         n.Slug,
++			Emoji:        n.Emoji,
++			IsAnswerable: n.IsAnswerable,
++		}
++	}
++
++	return categories, nil
+ }
+ 
+ func (c *discussionClient) Create(_ ghrepo.Interface, _ CreateDiscussionInput) (*Discussion, error) {
+diff --git a/pkg/cmd/discussion/client/client_mock.go b/pkg/cmd/discussion/client/client_mock.go
+index 4f8227d5f..a690f84b1 100644
+--- a/pkg/cmd/discussion/client/client_mock.go
++++ b/pkg/cmd/discussion/client/client_mock.go
+@@ -33,7 +33,7 @@ var _ DiscussionClient = &DiscussionClientMock{}
+ //			GetWithCommentsFunc: func(repo ghrepo.Interface, number int, commentLimit int, order string) (*Discussion, error) {
+ //				panic("mock out the GetWithComments method")
+ //			},
+-//			ListFunc: func(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error) {
++//			ListFunc: func(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
+ //				panic("mock out the List method")
+ //			},
+ //			ListCategoriesFunc: func(repo ghrepo.Interface) ([]DiscussionCategory, error) {
+@@ -48,7 +48,7 @@ var _ DiscussionClient = &DiscussionClientMock{}
+ //			ReopenFunc: func(repo ghrepo.Interface, id string) (*Discussion, error) {
+ //				panic("mock out the Reopen method")
+ //			},
+-//			SearchFunc: func(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error) {
++//			SearchFunc: func(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
+ //				panic("mock out the Search method")
+ //			},
+ //			UnlockFunc: func(repo ghrepo.Interface, id string) error {
+@@ -83,7 +83,7 @@ type DiscussionClientMock struct {
+ 	GetWithCommentsFunc func(repo ghrepo.Interface, number int, commentLimit int, order string) (*Discussion, error)
+ 
+ 	// ListFunc mocks the List method.
+-	ListFunc func(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error)
++	ListFunc func(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
+ 
+ 	// ListCategoriesFunc mocks the ListCategories method.
+ 	ListCategoriesFunc func(repo ghrepo.Interface) ([]DiscussionCategory, error)
+@@ -98,7 +98,7 @@ type DiscussionClientMock struct {
+ 	ReopenFunc func(repo ghrepo.Interface, id string) (*Discussion, error)
+ 
+ 	// SearchFunc mocks the Search method.
+-	SearchFunc func(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error)
++	SearchFunc func(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+ 
+ 	// UnlockFunc mocks the Unlock method.
+ 	UnlockFunc func(repo ghrepo.Interface, id string) error
+@@ -162,6 +162,8 @@ type DiscussionClientMock struct {
+ 			Repo ghrepo.Interface
+ 			// Filters is the filters argument value.
+ 			Filters ListFilters
++			// After is the after argument value.
++			After string
+ 			// Limit is the limit argument value.
+ 			Limit int
+ 		}
+@@ -199,6 +201,8 @@ type DiscussionClientMock struct {
+ 			Repo ghrepo.Interface
+ 			// Filters is the filters argument value.
+ 			Filters SearchFilters
++			// After is the after argument value.
++			After string
+ 			// Limit is the limit argument value.
+ 			Limit int
+ 		}
+@@ -441,23 +445,25 @@ func (mock *DiscussionClientMock) GetWithCommentsCalls() []struct {
+ }
+ 
+ // List calls ListFunc.
+-func (mock *DiscussionClientMock) List(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error) {
++func (mock *DiscussionClientMock) List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
+ 	if mock.ListFunc == nil {
+ 		panic("DiscussionClientMock.ListFunc: method is nil but DiscussionClient.List was just called")
+ 	}
+ 	callInfo := struct {
+ 		Repo    ghrepo.Interface
+ 		Filters ListFilters
++		After   string
+ 		Limit   int
+ 	}{
+ 		Repo:    repo,
+ 		Filters: filters,
++		After:   after,
+ 		Limit:   limit,
+ 	}
+ 	mock.lockList.Lock()
+ 	mock.calls.List = append(mock.calls.List, callInfo)
+ 	mock.lockList.Unlock()
+-	return mock.ListFunc(repo, filters, limit)
++	return mock.ListFunc(repo, filters, after, limit)
+ }
+ 
+ // ListCalls gets all the calls that were made to List.
+@@ -467,11 +473,13 @@ func (mock *DiscussionClientMock) List(repo ghrepo.Interface, filters ListFilter
+ func (mock *DiscussionClientMock) ListCalls() []struct {
+ 	Repo    ghrepo.Interface
+ 	Filters ListFilters
++	After   string
+ 	Limit   int
+ } {
+ 	var calls []struct {
+ 		Repo    ghrepo.Interface
+ 		Filters ListFilters
++		After   string
+ 		Limit   int
+ 	}
+ 	mock.lockList.RLock()
+@@ -625,23 +633,25 @@ func (mock *DiscussionClientMock) ReopenCalls() []struct {
+ }
+ 
+ // Search calls SearchFunc.
+-func (mock *DiscussionClientMock) Search(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error) {
++func (mock *DiscussionClientMock) Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
+ 	if mock.SearchFunc == nil {
+ 		panic("DiscussionClientMock.SearchFunc: method is nil but DiscussionClient.Search was just called")
+ 	}
+ 	callInfo := struct {
+ 		Repo    ghrepo.Interface
+ 		Filters SearchFilters
++		After   string
+ 		Limit   int
+ 	}{
+ 		Repo:    repo,
+ 		Filters: filters,
++		After:   after,
+ 		Limit:   limit,
+ 	}
+ 	mock.lockSearch.Lock()
+ 	mock.calls.Search = append(mock.calls.Search, callInfo)
+ 	mock.lockSearch.Unlock()
+-	return mock.SearchFunc(repo, filters, limit)
++	return mock.SearchFunc(repo, filters, after, limit)
+ }
+ 
+ // SearchCalls gets all the calls that were made to Search.
+@@ -651,11 +661,13 @@ func (mock *DiscussionClientMock) Search(repo ghrepo.Interface, filters SearchFi
+ func (mock *DiscussionClientMock) SearchCalls() []struct {
+ 	Repo    ghrepo.Interface
+ 	Filters SearchFilters
++	After   string
+ 	Limit   int
+ } {
+ 	var calls []struct {
+ 		Repo    ghrepo.Interface
+ 		Filters SearchFilters
++		After   string
+ 		Limit   int
+ 	}
+ 	mock.lockSearch.RLock()
+diff --git a/pkg/cmd/discussion/client/types.go b/pkg/cmd/discussion/client/types.go
+index 9870416ad..f3c58456c 100644
+--- a/pkg/cmd/discussion/client/types.go
++++ b/pkg/cmd/discussion/client/types.go
+@@ -10,16 +10,15 @@ type Discussion struct {
+ 	Title          string
+ 	Body           string
+ 	URL            string
+-	State          string
++	Closed         bool
+ 	StateReason    string
+-	Author         DiscussionAuthor
++	Author         DiscussionActor
+ 	Category       DiscussionCategory
+ 	Labels         []DiscussionLabel
+ 	Answered       bool
+ 	AnswerChosenAt time.Time
+-	AnswerChosenBy *DiscussionAuthor
++	AnswerChosenBy *DiscussionActor
+ 	Comments       DiscussionCommentList
+-	ReactionGroups []ReactionGroup
+ 	CreatedAt      time.Time
+ 	UpdatedAt      time.Time
+ 	ClosedAt       time.Time
+@@ -43,8 +42,8 @@ func (d Discussion) ExportData(fields []string) map[string]interface{} {
+ 			data[f] = d.Body
+ 		case "url":
+ 			data[f] = d.URL
+-		case "state":
+-			data[f] = d.State
++		case "closed":
++			data[f] = d.Closed
+ 		case "stateReason":
+ 			data[f] = d.StateReason
+ 		case "author":
+@@ -80,12 +79,6 @@ func (d Discussion) ExportData(fields []string) map[string]interface{} {
+ 				"totalCount": d.Comments.TotalCount,
+ 				"nodes":      comments,
+ 			}
+-		case "reactionGroups":
+-			groups := make([]interface{}, len(d.ReactionGroups))
+-			for i, rg := range d.ReactionGroups {
+-				groups[i] = rg.Export()
+-			}
+-			data[f] = groups
+ 		case "createdAt":
+ 			data[f] = d.CreatedAt
+ 		case "updatedAt":
+@@ -103,15 +96,15 @@ func (d Discussion) ExportData(fields []string) map[string]interface{} {
+ 	return data
+ }
+ 
+-// DiscussionAuthor represents the author of a discussion or comment.
+-type DiscussionAuthor struct {
++// DiscussionActor represents a GitHub actor (user or bot) associated with a discussion.
++type DiscussionActor struct {
+ 	ID    string
+ 	Login string
+ 	Name  string
+ }
+ 
+ // Export returns the author as a map for JSON output.
+-func (a DiscussionAuthor) Export() map[string]interface{} {
++func (a DiscussionActor) Export() map[string]interface{} {
+ 	return map[string]interface{}{
+ 		"id":    a.ID,
+ 		"login": a.Login,
+@@ -159,7 +152,7 @@ func (l DiscussionLabel) Export() map[string]interface{} {
+ type DiscussionComment struct {
+ 	ID             string
+ 	URL            string
+-	Author         DiscussionAuthor
++	Author         DiscussionActor
+ 	Body           string
+ 	CreatedAt      time.Time
+ 	IsAnswer       bool
+@@ -225,10 +218,37 @@ const (
+ 	CloseReasonDuplicate CloseReason = "DUPLICATE"
+ )
+ 
++// Domain-level filter constants for state.
++const (
++	FilterStateOpen   = "open"
++	FilterStateClosed = "closed"
++)
++
++// Domain-level constants for order-by field.
++const (
++	OrderByCreated = "created"
++	OrderByUpdated = "updated"
++)
++
++// Domain-level constants for order direction.
++const (
++	OrderDirectionAsc  = "asc"
++	OrderDirectionDesc = "desc"
++)
++
++// DiscussionListResult holds the result of a List or Search call,
++// including the discussions, total count, and pagination cursor.
++type DiscussionListResult struct {
++	Discussions []Discussion
++	TotalCount  int
++	NextCursor  string
++}
++
+ // ListFilters holds parameters for the repository.discussions query.
+ // CategoryID must be resolved by the caller before passing to List.
++// A nil State indicates no state filtering (all states).
+ type ListFilters struct {
+-	State      string
++	State      *string
+ 	CategoryID string
+ 	Answered   *bool
+ 	OrderBy    string
+@@ -237,12 +257,14 @@ type ListFilters struct {
+ 
+ // SearchFilters holds parameters for the search query used when
+ // author or label filtering is required.
++// A nil State indicates no state filtering (all states).
+ type SearchFilters struct {
+ 	Author    string
+ 	Labels    []string
+-	State     string
++	State     *string
+ 	Category  string
+ 	Answered  *bool
++	Keywords  string
+ 	OrderBy   string
+ 	Direction string
+ }
+diff --git a/pkg/cmd/discussion/discussion.go b/pkg/cmd/discussion/discussion.go
+index 6db07c5d8..a9bf9b981 100644
+--- a/pkg/cmd/discussion/discussion.go
++++ b/pkg/cmd/discussion/discussion.go
+@@ -2,6 +2,7 @@ package discussion
+ 
+ import (
+ 	"github.com/MakeNowJust/heredoc"
++	cmdList "github.com/cli/cli/v2/pkg/cmd/discussion/list"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/spf13/cobra"
+ )
+@@ -10,8 +11,10 @@ import (
+ func NewCmdDiscussion(f *cmdutil.Factory) *cobra.Command {
+ 	cmd := &cobra.Command{
+ 		Use:   "discussion <command>",
+-		Short: "Manage discussions",
+-		Long:  "Work with GitHub Discussions.",
++		Short: "Work with GitHub Discussions (preview)",
++		Long: heredoc.Doc(`
++			Working with discussions in the GitHub CLI is in preview and subject to change without notice.
++		`),
+ 		Example: heredoc.Doc(`
+ 			$ gh discussion list
+ 			$ gh discussion create --category "General" --title "Hello"
+@@ -29,5 +32,9 @@ func NewCmdDiscussion(f *cmdutil.Factory) *cobra.Command {
+ 
+ 	cmdutil.EnableRepoOverride(cmd, f)
+ 
++	cmdutil.AddGroup(cmd, "General commands",
++		cmdList.NewCmdList(f, nil),
++	)
++
+ 	return cmd
+ }
+diff --git a/pkg/cmd/discussion/list/list.go b/pkg/cmd/discussion/list/list.go
+new file mode 100644
+index 000000000..3de5df6c6
+--- /dev/null
++++ b/pkg/cmd/discussion/list/list.go
+@@ -0,0 +1,354 @@
++package list
++
++import (
++	"fmt"
++	"net/url"
++	"strings"
++	"time"
++
++	"github.com/MakeNowJust/heredoc"
++	"github.com/cli/cli/v2/internal/browser"
++	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/cli/cli/v2/internal/tableprinter"
++	"github.com/cli/cli/v2/internal/text"
++	"github.com/cli/cli/v2/pkg/cmd/discussion/client"
++	"github.com/cli/cli/v2/pkg/cmd/discussion/shared"
++	"github.com/cli/cli/v2/pkg/cmdutil"
++	"github.com/cli/cli/v2/pkg/iostreams"
++	"github.com/spf13/cobra"
++)
++
++const defaultLimit = 30
++
++// discussionListFields lists the field names available for --json output
++// on the discussion list command. This excludes fields like "comments"
++// that are only populated by the view command.
++var discussionListFields = []string{
++	"id",
++	"number",
++	"title",
++	"body",
++	"url",
++	"closed",
++	"stateReason",
++	"author",
++	"category",
++	"labels",
++	"answered",
++	"answerChosenAt",
++	"answerChosenBy",
++	"createdAt",
++	"updatedAt",
++	"closedAt",
++	"locked",
++}
++
++// ListOptions holds the configuration for the discussion list command.
++type ListOptions struct {
++	IO       *iostreams.IOStreams
++	BaseRepo func() (ghrepo.Interface, error)
++	Browser  browser.Browser
++	Client   func() (client.DiscussionClient, error)
++
++	Author   string
++	Category string
++	Labels   []string
++	State    string
++	Limit    int
++	Answered *bool
++	Sort     string
++	Order    string
++	Search   string
++	After    string
++
++	WebMode  bool
++	Exporter cmdutil.Exporter
++	Now      func() time.Time
++}
++
++// NewCmdList creates the "discussion list" command.
++func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Command {
++	opts := &ListOptions{
++		IO:      f.IOStreams,
++		Browser: f.Browser,
++		Now:     time.Now,
++	}
++
++	cmd := &cobra.Command{
++		Use:   "list [flags]",
++		Short: "List discussions in a repository (preview)",
++		Long: heredoc.Doc(`
++			List discussions in a GitHub repository. By default, only open discussions
++			are shown.
++		`),
++		Example: heredoc.Doc(`
++			# List open discussions
++			$ gh discussion list
++
++			# List discussions with a specific category
++			$ gh discussion list --category General
++
++			# List closed discussions by author
++			$ gh discussion list --state closed --author monalisa
++
++			# List all discussions (closed or open) by label
++			$ gh discussion list --state all --label bug,enhancement
++
++			# List answered discussions as JSON
++			$ gh discussion list --answered --json number,title,url
++
++			# List unanswered discussions as JSON
++			$ gh discussion list --answered=false --json number,title,url
++		`),
++		Aliases: []string{"ls"},
++		Args:    cmdutil.NoArgsQuoteReminder,
++		RunE: func(cmd *cobra.Command, args []string) error {
++			opts.BaseRepo = f.BaseRepo
++			opts.Client = shared.DiscussionClientFunc(f)
++
++			if opts.Limit < 1 {
++				return cmdutil.FlagErrorf("invalid limit: %v", opts.Limit)
++			}
++
++			if runF != nil {
++				return runF(opts)
++			}
++			return listRun(opts)
++		},
++	}
++
++	cmd.Flags().StringVarP(&opts.Author, "author", "A", "", "Filter by author")
++	cmd.Flags().StringVarP(&opts.Category, "category", "c", "", "Filter by category name or slug")
++	cmd.Flags().StringSliceVarP(&opts.Labels, "label", "l", nil, "Filter by label")
++	cmdutil.StringEnumFlag(cmd, &opts.State, "state", "s", "open", []string{"open", "closed", "all"}, "Filter by state")
++	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, fmt.Sprintf("Maximum number of discussions to fetch (default %d)", defaultLimit))
++	cmdutil.NilBoolFlag(cmd, &opts.Answered, "answered", "", "Filter by answered state")
++	cmdutil.StringEnumFlag(cmd, &opts.Sort, "sort", "", "updated", []string{"created", "updated"}, "Sort by field")
++	cmdutil.StringEnumFlag(cmd, &opts.Order, "order", "", "desc", []string{"asc", "desc"}, "Order of results")
++	cmd.Flags().StringVarP(&opts.Search, "search", "S", "", "Search discussions with `query`")
++	cmd.Flags().StringVar(&opts.After, "after", "", "Cursor for the next page of results")
++	cmd.Flags().BoolVarP(&opts.WebMode, "web", "w", false, "List discussions in the web browser")
++	cmdutil.AddJSONFlags(cmd, &opts.Exporter, discussionListFields)
++
++	return cmd
++}
++
++// toFilterState maps CLI state strings to domain-level filter state pointers.
++// "all" maps to nil (no state filter).
++func toFilterState(v string) *string {
++	switch v {
++	case "open":
++		s := client.FilterStateOpen
++		return &s
++	case "closed":
++		s := client.FilterStateClosed
++		return &s
++	default:
++		return nil
++	}
++}
++
++func listRun(opts *ListOptions) error {
++	repo, err := opts.BaseRepo()
++	if err != nil {
++		return err
++	}
++
++	if opts.WebMode {
++		return openInBrowser(opts, repo)
++	}
++
++	dc, err := opts.Client()
++	if err != nil {
++		return err
++	}
++
++	var categoryID string
++	var categorySlug string
++	if opts.Category != "" {
++		categories, err := dc.ListCategories(repo)
++		if err != nil {
++			return err
++		}
++		cat, err := shared.MatchCategory(opts.Category, categories)
++		if err != nil {
++			return err
++		}
++		categoryID = cat.ID
++		categorySlug = cat.Slug
++	}
++
++	state := toFilterState(opts.State)
++
++	var result *client.DiscussionListResult
++
++	useSearch := opts.Author != "" || len(opts.Labels) > 0 || opts.Search != ""
++	if useSearch {
++		filters := client.SearchFilters{
++			Author:    opts.Author,
++			Labels:    opts.Labels,
++			State:     state,
++			Category:  categorySlug,
++			Answered:  opts.Answered,
++			Keywords:  opts.Search,
++			OrderBy:   opts.Sort,
++			Direction: opts.Order,
++		}
++		result, err = dc.Search(repo, filters, opts.After, opts.Limit)
++	} else {
++		filters := client.ListFilters{
++			State:      state,
++			CategoryID: categoryID,
++			Answered:   opts.Answered,
++			OrderBy:    opts.Sort,
++			Direction:  opts.Order,
++		}
++		result, err = dc.List(repo, filters, opts.After, opts.Limit)
++	}
++	if err != nil {
++		return err
++	}
++
++	if opts.Exporter != nil {
++		envelope := map[string]interface{}{
++			"totalCount":  result.TotalCount,
++			"discussions": result.Discussions,
++			"next":        result.NextCursor,
++		}
++		return opts.Exporter.Write(opts.IO, envelope)
++	}
++
++	if len(result.Discussions) == 0 {
++		return noResults(repo, opts.State)
++	}
++
++	if err := opts.IO.StartPager(); err == nil {
++		defer opts.IO.StopPager()
++	} else {
++		fmt.Fprintf(opts.IO.ErrOut, "failed to start pager: %v\n", err)
++	}
++
++	printDiscussions(opts, ghrepo.FullName(repo), result.Discussions, result.TotalCount)
++	return nil
++}
++
++func openInBrowser(opts *ListOptions, repo ghrepo.Interface) error {
++	discussionsURL := ghrepo.GenerateRepoURL(repo, "discussions")
++
++	var queryParts []string
++	if opts.Search != "" {
++		queryParts = append(queryParts, opts.Search)
++	}
++	if opts.State != "" && opts.State != "all" {
++		queryParts = append(queryParts, "is:"+opts.State)
++	}
++	if opts.Author != "" {
++		queryParts = append(queryParts, fmt.Sprintf("author:%q", opts.Author))
++	}
++	for _, l := range opts.Labels {
++		queryParts = append(queryParts, fmt.Sprintf("label:%q", l))
++	}
++	if opts.Category != "" {
++		queryParts = append(queryParts, fmt.Sprintf("category:%q", opts.Category))
++	}
++	if opts.Answered != nil {
++		if *opts.Answered {
++			queryParts = append(queryParts, "is:answered")
++		} else {
++			queryParts = append(queryParts, "is:unanswered")
++		}
++	}
++
++	if len(queryParts) > 0 {
++		discussionsURL += "?" + url.Values{"q": {strings.Join(queryParts, " ")}}.Encode()
++	}
++
++	if opts.IO.IsStderrTTY() {
++		fmt.Fprintf(opts.IO.ErrOut, "Opening %s in your browser.\n", text.DisplayURL(discussionsURL))
++	}
++	return opts.Browser.Browse(discussionsURL)
++}
++
++func noResults(repo ghrepo.Interface, state string) error {
++	switch state {
++	case "open":
++		return cmdutil.NewNoResultsError(fmt.Sprintf("no open discussions match your search in %s", ghrepo.FullName(repo)))
++	case "closed":
++		return cmdutil.NewNoResultsError(fmt.Sprintf("no closed discussions match your search in %s", ghrepo.FullName(repo)))
++	default:
++		return cmdutil.NewNoResultsError(fmt.Sprintf("no discussions match your search in %s", ghrepo.FullName(repo)))
++	}
++}
++
++func listHeader(repoName string, count, total int, state string) string {
++	switch state {
++	case "open":
++		return fmt.Sprintf("Showing %d of %d open discussions in %s", count, total, repoName)
++	case "closed":
++		return fmt.Sprintf("Showing %d of %d closed discussions in %s", count, total, repoName)
++	default:
++		return fmt.Sprintf("Showing %d of %d discussions in %s", count, total, repoName)
++	}
++}
++
++func printDiscussions(opts *ListOptions, repoName string, discussions []client.Discussion, totalCount int) {
++	isTerminal := opts.IO.IsStdoutTTY()
++	cs := opts.IO.ColorScheme()
++	now := opts.Now()
++
++	if isTerminal {
++		title := listHeader(repoName, len(discussions), totalCount, opts.State)
++		fmt.Fprintf(opts.IO.Out, "\n%s\n\n", title)
++	}
++
++	headers := []string{"ID", "TITLE", "CATEGORY", "LABELS", "ANSWERED", "UPDATED"}
++	if !isTerminal {
++		headers = []string{"ID", "STATE", "TITLE", "CATEGORY", "LABELS", "ANSWERED", "UPDATED"}
++	}
++	tp := tableprinter.New(opts.IO, tableprinter.WithHeader(headers...))
++
++	for _, d := range discussions {
++		if isTerminal {
++			idColor := cs.Green
++			if d.Closed {
++				idColor = cs.Muted
++			}
++			tp.AddField(fmt.Sprintf("#%d", d.Number), tableprinter.WithColor(idColor))
++		} else {
++			tp.AddField(fmt.Sprintf("%d", d.Number))
++			if d.Closed {
++				tp.AddField("CLOSED")
++			} else {
++				tp.AddField("OPEN")
++			}
++		}
++
++		tp.AddField(text.RemoveExcessiveWhitespace(d.Title))
++		tp.AddField(d.Category.Name)
++
++		labelNames := make([]string, len(d.Labels))
++		for i, l := range d.Labels {
++			if isTerminal {
++				labelNames[i] = cs.Label(l.Color, l.Name)
++			} else {
++				labelNames[i] = l.Name
++			}
++		}
++		tp.AddField(strings.Join(labelNames, ", "), tableprinter.WithTruncate(nil))
++
++		if d.Answered {
++			tp.AddField("✓")
++		} else {
++			tp.AddField("")
++		}
++
++		tp.AddTimeField(now, d.UpdatedAt, cs.Muted)
++		tp.EndRow()
++	}
++
++	_ = tp.Render()
++
++	if remaining := totalCount - len(discussions); isTerminal && remaining > 0 {
++		fmt.Fprintf(opts.IO.Out, cs.Muted("And %d more\n"), remaining)
++	}
++}
+diff --git a/pkg/cmd/discussion/shared/categories.go b/pkg/cmd/discussion/shared/categories.go
+new file mode 100644
+index 000000000..5e0ca33cd
+--- /dev/null
++++ b/pkg/cmd/discussion/shared/categories.go
+@@ -0,0 +1,32 @@
++package shared
++
++import (
++	"fmt"
++	"slices"
++	"strings"
++
++	"github.com/cli/cli/v2/pkg/cmd/discussion/client"
++)
++
++// MatchCategory finds a category by name or slug (case-insensitive).
++// It prefers an exact slug match over a name match, so users are
++// encouraged to use slugs for unambiguous lookups.
++func MatchCategory(input string, categories []client.DiscussionCategory) (*client.DiscussionCategory, error) {
++	for i := range categories {
++		if strings.EqualFold(categories[i].Slug, input) {
++			return &categories[i], nil
++		}
++	}
++	for i := range categories {
++		if strings.EqualFold(categories[i].Name, input) {
++			return &categories[i], nil
++		}
++	}
++
++	slugs := make([]string, len(categories))
++	for i, c := range categories {
++		slugs[i] = c.Slug
++	}
++	slices.Sort(slugs)
++	return nil, fmt.Errorf("unknown category: %q; must be one of %q", input, slugs)
++}
+diff --git a/pkg/cmd/discussion/shared/fields.go b/pkg/cmd/discussion/shared/fields.go
+deleted file mode 100644
+index 47d750314..000000000
+--- a/pkg/cmd/discussion/shared/fields.go
++++ /dev/null
+@@ -1,25 +0,0 @@
+-package shared
+-
+-// DiscussionFields lists the field names available for --json output on
+-// discussion commands.
+-var DiscussionFields = []string{
+-	"id",
+-	"number",
+-	"title",
+-	"body",
+-	"url",
+-	"state",
+-	"stateReason",
+-	"author",
+-	"category",
+-	"labels",
+-	"answered",
+-	"answerChosenAt",
+-	"answerChosenBy",
+-	"comments",
+-	"reactionGroups",
+-	"createdAt",
+-	"updatedAt",
+-	"closedAt",
+-	"locked",
+-}

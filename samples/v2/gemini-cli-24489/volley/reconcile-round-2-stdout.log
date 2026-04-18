@@ -1,0 +1,276 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/cleanroom-v2/24489
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019d9de9-4e27-7ae0-b222-1f51da980392
+--------
+user
+# Reconcile — apply hunt-spec findings to the spec
+
+You previously authored `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md`. A hunt pass produced `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md` listing defects.
+
+Your task: produce the next-round spec at `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md` (or `/Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/sharpened-spec-final.md` if this is the final round).
+
+## Rules
+
+- **Blockers are mandatory-reject.** Any claim with a blocker finding MUST move to `## Rejected` with the hunt finding cited as the reason. You may NOT narrow, clarify, or retain a blocker'd claim.
+- **Warnings may be narrowed.** Rewrite the claim with the missing edge cases made explicit, or demote it to rejected if narrowing can't make it specific.
+- **Notes are optional.** Act on them if they improve specificity; ignore otherwise.
+- **No new claims.** You may not add refactor claims during reconcile. If hunt identified a claim the spec SHOULD have rejected, add it to `## Rejected`.
+- **Preserve format.** Keep the `## Accepted Claims` numbered list and the `## Rejected` bullet list. Include ALL previous rejections plus any new ones.
+- **Cite each retained warning'd claim against the hunt finding**: add a one-line note explaining why it's safe to retain as-narrowed.
+
+If all accepted claims survived without blockers, the reconciled spec may be identical to the input minus rejected-candidate updates.
+
+## Output
+
+Markdown file only. No code edits. No commentary outside the document.
+mcp startup: no servers
+codex
+I’ll read the existing round-2 spec and the hunt findings, then write the reconciled markdown to the requested next-round path.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-2-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C1 — Name AgentTool override parameters directly
+**File**: packages/core/src/agents/agent-tool.ts:77
+**Change**: In `AgentTool.createInvocation` and the `DelegateInvocation` constructor, rename `_toolName` and `_toolDisplayName` to `toolName` and `toolDisplayName`, and pass those renamed parameters through unchanged to `BaseToolInvocation`.
+**Goal link**: This clarifies the unified `invoke_agent` tool's delegated display-name path.
+**Justification**: These parameters are used to preserve the unified tool identity, so removing the unused-parameter convention reduces misleading first-pass scaffolding without changing values or behavior.
+
+### C2 — Share schema property-name extraction in AgentTool
+**File**: packages/core/src/agents/agent-tool.ts:96
+**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
+
+### C3 — Inline policy virtual-call construction
+**File**: packages/core/src/policy/policy-engine.ts:560
+**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/hunt-spec-round-2.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Finding F1 — C1 would drop required DelegateInvocation defaults if followed literally
+**Severity**: blocker
+**Claim**: C1
+**What**: The claim says to rename `_toolName`/`_toolDisplayName` and pass the renamed parameters "through unchanged to `BaseToolInvocation`." In the current code, `DelegateInvocation` must not pass those optional values unchanged: it supplies fallbacks of `AGENT_TOOL_NAME` and `Invoke ${definition.displayName ?? definition.name}` before calling `super`. Those defaults are observable when tests call `AgentTool.createInvocation` directly without override names. Following the claim literally would leave `this._toolName`/`this._toolDisplayName` undefined, and the browser delegation path would pass undefined values into `BrowserAgentInvocation`, causing it to fall back to `browser_agent` / `Browser Agent` instead of the asserted unified `invoke_agent` identity.
+**Evidence**: `packages/core/src/agents/agent-tool.ts:134` has optional constructor parameters, while `packages/core/src/agents/agent-tool.ts:140` and `packages/core/src/agents/agent-tool.ts:141` apply the required defaults. `packages/core/src/agents/agent-tool.ts:158` and `packages/core/src/agents/agent-tool.ts:159` pass those resolved values to the browser invocation. `packages/core/src/agents/agent-tool.test.ts:136` asserts `BrowserAgentInvocation` is called with `invoke_agent`, and `packages/core/src/agents/agent-tool.test.ts:141` asserts `Invoke Browser Agent`.
+**Fix**: Narrow C1 to a pure parameter rename while explicitly preserving the existing fallback expressions in the `DelegateInvocation` `super(...)` call; do not require passing optional override parameters unchanged to `BaseToolInvocation`.
+codex
+The hunt file has one blocker, F1 against C1. I’m moving C1 to rejected exactly because blockers are mandatory-reject, and retaining the unaffected claims.
+file update
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+## Accepted Claims
+
+### C2 — Share schema property-name extraction in AgentTool
+**File**: packages/core/src/agents/agent-tool.ts:96
+**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
+
+### C3 — Inline policy virtual-call construction
+**File**: packages/core/src/policy/policy-engine.ts:560
+**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+
+### C4 — Update the unified tool registration comment
+**File**: packages/core/src/config/config.ts:3625
+**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
+
+## Rejected
+
+- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
+- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
+- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
+- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
+- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
+- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
+- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
+apply_patch(auto_approved=true) exited 0 in 24ms:
+Success. Updated the following files:
+A /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..db6be578a628795860628259bb10c9f41544e79c
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C2 — Share schema property-name extraction in AgentTool
++**File**: packages/core/src/agents/agent-tool.ts:96
++**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
++**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
++**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++
++### C3 — Inline policy virtual-call construction
++**File**: packages/core/src/policy/policy-engine.ts:560
++**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
++**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
++
++### C4 — Update the unified tool registration comment
++**File**: packages/core/src/config/config.ts:3625
++**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
++**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
++**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++
++## Rejected
++
++- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
++- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
++- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
++- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
++- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
++- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
++- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..db6be578a628795860628259bb10c9f41544e79c
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C2 — Share schema property-name extraction in AgentTool
++**File**: packages/core/src/agents/agent-tool.ts:96
++**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
++**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
++**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++
++### C3 — Inline policy virtual-call construction
++**File**: packages/core/src/policy/policy-engine.ts:560
++**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
++**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
++
++### C4 — Update the unified tool registration comment
++**File**: packages/core/src/config/config.ts:3625
++**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
++**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
++**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++
++## Rejected
++
++- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
++- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
++- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
++- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
++- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
++- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
++- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
+
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/junekim/Documents/refactor-equivalence/samples/v2/gemini-cli-24489/volley/round-3-claims.md" in /tmp/refactor-eq-workdir/cleanroom-v2/24489 succeeded in 0ms:
+## Accepted Claims
+
+### C2 — Share schema property-name extraction in AgentTool
+**File**: packages/core/src/agents/agent-tool.ts:96
+**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
+**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
+**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
+
+### C3 — Inline policy virtual-call construction
+**File**: packages/core/src/policy/policy-engine.ts:560
+**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
+**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
+**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
+
+### C4 — Update the unified tool registration comment
+**File**: packages/core/src/config/config.ts:3625
+**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
+**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
+**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
+
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..db6be578a628795860628259bb10c9f41544e79c
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C2 — Share schema property-name extraction in AgentTool
++**File**: packages/core/src/agents/agent-tool.ts:96
++**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
++**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
++**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++
++### C3 — Inline policy virtual-call construction
++**File**: packages/core/src/policy/policy-engine.ts:560
++**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
++**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
++
++### C4 — Update the unified tool registration comment
++**File**: packages/core/src/config/config.ts:3625
++**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
++**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
++**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++
++## Rejected
++
++- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
++- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
++- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
++- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
++- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
++- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
++- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
+
+codex
+Done.
+file update:
+diff --git a/samples/v2/gemini-cli-24489/volley/round-3-claims.md b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..db6be578a628795860628259bb10c9f41544e79c
+--- /dev/null
++++ b/samples/v2/gemini-cli-24489/volley/round-3-claims.md
+@@ -0,0 +1,29 @@
++## Accepted Claims
++
++### C2 — Share schema property-name extraction in AgentTool
++**File**: packages/core/src/agents/agent-tool.ts:96
++**Change**: Add a private helper in `agent-tool.ts` that returns the sole property name only when an input schema has a record-valued `properties` object with exactly one key, and use it from both `AgentTool.mapParams` and `DelegateInvocation.withUserHints`; keep each caller's current fallback behavior, with `mapParams` falling back to `{ prompt }` and `withUserHints` returning the original args unless it can append to a string-valued primary key.
++**Goal link**: This clarifies how the unified `invoke_agent` `prompt` argument is mapped onto an individual subagent's input schema.
++**Justification**: The same schema inspection logic appears in two blocks, and centralizing only that extraction removes duplication while preserving the existing mapping and hint-injection semantics.
++
++### C3 — Inline policy virtual-call construction
++**File**: packages/core/src/policy/policy-engine.ts:560
++**Change**: Replace the separate `toolCallsToTry` array construction with a direct `toolNamesToTry.some((name) => ruleMatches(rule, { ...toolCall, name }, ...))` at the rule-match site.
++**Goal link**: This clarifies the Policy Engine enhancement that treats `agent_name` as a virtual alias for `invoke_agent`.
++**Justification**: The intermediate array only materializes cloned calls for one loop, so inlining the clone where matching occurs makes the alias path more direct without changing rule ordering or match results.
++
++### C4 — Update the unified tool registration comment
++**File**: packages/core/src/config/config.ts:3625
++**Change**: Change the comment above `maybeRegister(AgentTool, ...)` from `Register Subagent Tool` to `Register unified agent invocation tool`.
++**Goal link**: This aligns the main tool registry with the goal of replacing per-subagent tools with a single `invoke_agent` entry point.
++**Justification**: The current comment preserves legacy terminology and makes the registration look like the old specialized subagent-tool path, while the code now registers the unified tool.
++
++## Rejected
++
++- Name `AgentTool` override parameters directly: hunt finding F1 is a blocker because the round-2 claim would pass optional override values through unchanged and could drop the required `DelegateInvocation` defaults for unified `invoke_agent` identity.
++- Delete `packages/core/src/agents/subagent-tool.ts` as dead legacy code: the file is still imported by existing non-allowed test files and may remain part of the internal direct-subagent invocation surface, so deleting it would not be a bounded behavior-preserving refactor.
++- Move `AgentTool.buildChildInvocation` onto `SubagentToolWrapper`: `packages/core/src/agents/subagent-tool-wrapper.ts` is outside the allowed edit set, and the wrapper's `build()` path would also change the browser-agent override name/display behavior unless it grew a new API.
++- Replace dynamic remote-agent policy rules in `AgentRegistry.addAgentPolicy` with `toolName: definition.name` virtual-alias rules: although this would express the new alias model more directly, it could change matching for direct agent-named tool calls or precedence around `invoke_agent` plus `argsPattern` rules.
++- Apply `invoke_agent` virtual aliases to safety checker matching as well as policy-rule matching: this would broaden when safety checkers run and is therefore an observable policy behavior change, not a pure refactor.
++- Rename the `promptProvider` section key from `agentContexts` to `subAgents`: the existing key may be part of user-facing prompt-section configuration, so changing it could alter which prompt sections are enabled or disabled.
++- Remove the browser-agent special case from `AgentTool.buildChildInvocation`: browser delegation intentionally constructs `BrowserAgentInvocation`, so removing the branch would change execution behavior.
+
+tokens used
+7,507
+Done.

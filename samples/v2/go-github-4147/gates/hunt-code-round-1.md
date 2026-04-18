@@ -1,80 +1,94 @@
 ## Build: PASS
-Exit code: 0
-Tail 50 lines:
+## Tests: PASS
+
+Command records:
 
 ```text
-(no output)
+cat /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/allowed-files.txt
+exit code: 1
+tail:
+cat: /Users/junekim/Documents/refactor-equivalence/samples/v2/go-github-4147/inputs/allowed-files.txt: No such file or directory
 ```
 
-## Tests: PASS
-Exit code: 0
-Tail 50 lines:
+The cleanroom contains `FORGE_ALLOWED_FILES.txt`, and the matching artifact set exists under `/Users/junekim/Documents/refactor-equivalence/samples/v2-single-round/go-github-4147/inputs/allowed-files.txt`; I used those to check scope after the required path failed.
 
 ```text
-ok  	github.com/google/go-github/v84/github	2.547s
+go build ./...
+exit code: 0
+tail 50 lines:
+<no output>
+```
+
+```text
+go test ./... -count=1 -short
+exit code: 0
+tail 50 lines:
+ok  	github.com/google/go-github/v84/github	2.488s
 ?   	github.com/google/go-github/v84/test/fields	[no test files]
 ?   	github.com/google/go-github/v84/test/integration	[no test files]
 ```
 
-## Finding F1 — Accepted OAuth scope docs-link claim is not applied
+## Finding F1 — OAuth scope docs link remains unversioned
 **Severity**: warning
 **File**: github/authorizations.go:15
-**What**: Accepted claim C1 requires the `Scope` comment to use `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`, but the current file still has the unversioned URL:
+**What**: Accepted claim C1 was not applied. The current `Scope` comment still points at the unversioned REST docs URL, so this accepted part of the refactor is missing:
 
 ```go
 // GitHub API docs: https://docs.github.com/rest/oauth/#scopes
 ```
 
-**Fix**: Change that comment URL to include `?apiVersion=2022-11-28` before the `#scopes` fragment.
+**Fix**: Change the link to `https://docs.github.com/rest/oauth?apiVersion=2022-11-28#scopes`.
 
-## Finding F2 — Accepted SCIM options docs-link claims are not applied
+## Finding F2 — SCIM list options docs link remains unversioned
 **Severity**: warning
 **File**: github/scim.go:84
-**What**: Accepted claim C2 requires `ListSCIMProvisionedIdentitiesOptions` to use `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`, but the current file still has the unversioned URL:
+**What**: Accepted claim C2 was not applied. The current `ListSCIMProvisionedIdentitiesOptions` comment still points at the unversioned REST docs URL:
 
 ```go
 // GitHub API docs: https://docs.github.com/rest/scim#list-scim-provisioned-identities--parameters
 ```
 
-The same issue exists for accepted claim C3 at `github/scim.go:187`, where the current file still has the unversioned URL:
+**Fix**: Change the link to `https://docs.github.com/rest/scim?apiVersion=2022-11-28#list-scim-provisioned-identities--parameters`.
+
+## Finding F3 — SCIM update options docs link remains unversioned
+**Severity**: warning
+**File**: github/scim.go:187
+**What**: Accepted claim C3 was not applied. The current `UpdateAttributeForSCIMUserOptions` comment still points at the unversioned REST docs URL:
 
 ```go
 // GitHub API docs: https://docs.github.com/rest/scim#update-an-attribute-for-a-scim-user--parameters
 ```
 
-**Fix**: Add `?apiVersion=2022-11-28` to both SCIM docs-comment URLs before their fragments.
+**Fix**: Change the link to `https://docs.github.com/rest/scim?apiVersion=2022-11-28#update-an-attribute-for-a-scim-user--parameters`.
 
-## Finding F3 — Accepted revert of the TreeEntry path pointer rewrite is not applied
+## Finding F4 — Unrelated TreeEntry pointer rewrite was not reverted
 **Severity**: warning
 **File**: example/commitpr/main.go:108
-**What**: Accepted claim C4 requires the unrelated `TreeEntry` path pointer rewrite to be reverted to `Path: &file`, but the current file still uses `github.Ptr(file)`:
+**What**: Accepted claim C4 was not applied. The merged tree still contains the off-goal pointer construction rewrite instead of restoring the original local address expression:
 
 ```go
 entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
 ```
 
-**Fix**: Change the `Path` field back to `Path: &file`.
+**Fix**: Restore `Path: &file` for this `TreeEntry` literal.
 
-## Finding F4 — Accepted redundantptr linter restoration is not applied
+## Finding F5 — redundantptr linter restoration was not applied
 **Severity**: warning
 **File**: .golangci.yml:27
-**What**: Accepted claim C5 requires restoring `redundantptr` in the enabled linter list and custom linter settings, plus the buildable `tools/redundantptr` module files. The current enabled-linter list still skips directly from `perfsprint` to `revive`, with no `redundantptr` entry:
+**What**: Accepted claim C5 was not applied. The current enabled linter list skips directly from `perfsprint` to `revive`, so `redundantptr` remains removed:
 
 ```yaml
     - perfsprint
     - revive
 ```
 
-The current custom-linter settings still skip directly from `fmtpercentv` to `sliceofpointers`, with no `redundantptr` settings:
+The custom plugin list also still omits the `redundantptr` module:
 
 ```yaml
-      fmtpercentv:
-        type: module
-        description: Reports usage of %d or %s in format strings.
-        original-url: github.com/google/go-github/v84/tools/fmtpercentv
-      sliceofpointers:
+  - module: "github.com/google/go-github/v84/tools/fmtpercentv"
+    path: ./tools/fmtpercentv
+  - module: "github.com/google/go-github/v84/tools/sliceofpointers"
+    path: ./tools/sliceofpointers
 ```
 
-`tools/redundantptr` is also absent from the current tree.
-
-**Fix**: Restore the `redundantptr` linter entries in `.golangci.yml` and `.custom-gcl.yml`, and restore `tools/redundantptr/go.mod` and `tools/redundantptr/redundantptr.go` as specified by C5.
+**Fix**: Re-add `redundantptr` to `.golangci.yml`, re-add its `.custom-gcl.yml` plugin entry, and restore `tools/redundantptr/go.mod` plus `tools/redundantptr/redundantptr.go` as specified by C5.

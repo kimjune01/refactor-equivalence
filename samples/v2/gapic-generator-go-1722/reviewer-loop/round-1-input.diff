@@ -1,6 +1,6 @@
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/generator.go	2026-03-31 10:32:08
-+++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go	2026-04-17 09:05:48
++++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/generator.go	2026-04-17 22:52:52
 @@ -105,13 +105,15 @@
  	// attach config to generator.
  	g.cfg = cfg
@@ -24,7 +24,7 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gene
  	files = append(files, wellKnownTypeFiles...)
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/gengapic.go	2026-03-31 10:32:08
-+++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go	2026-04-17 09:06:19
++++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/gengapic.go	2026-04-17 22:56:57
 @@ -501,35 +501,7 @@
  			if g.featureEnabled(OpenTelemetryAttributesFeature) {
  				resTarget := g.resourceNameField(m)
@@ -58,7 +58,7 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/geng
 -					p("}")
 -					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
 -					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
-+					g.emitResourceNameTelemetry(m, resTarget)
++					g.insertResourceNameTelemetryContext(m, resTarget)
  				}
  			}
  		case rest:
@@ -93,16 +93,17 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/geng
 -					p("}")
 -					g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
 -					g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
-+					g.emitResourceNameTelemetry(m, resTarget)
++					g.insertResourceNameTelemetryContext(m, resTarget)
  				}
  			}
  		}
-@@ -583,6 +529,32 @@
+@@ -583,6 +529,33 @@
  	}
  }
  
-+func (g *generator) emitResourceNameTelemetry(m *descriptorpb.MethodDescriptorProto, resTarget *heuristicTarget) {
-+	g.printf("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
++func (g *generator) insertResourceNameTelemetryContext(m *descriptorpb.MethodDescriptorProto, resTarget *heuristicTarget) {
++	p := g.printf
++	p("if gax.IsFeatureEnabled(\"TRACING\") || gax.IsFeatureEnabled(\"LOGGING\") {")
 +
 +	var getters []string
 +	for _, f := range resTarget.FieldNames {
@@ -118,11 +119,11 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/geng
 +
 +	escapedFormat := strings.ReplaceAll(resTarget.Format, "%", "%%")
 +	if host != "" {
-+		g.printf(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
++		p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//%s/`+escapedFormat+`", `+gettersStr+`))`, host)
 +	} else {
-+		g.printf(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
++		p(`  ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("` + escapedFormat + `", ` + gettersStr + `))`)
 +	}
-+	g.printf("}")
++	p("}")
 +	g.imports[pbinfo.ImportSpec{Path: "github.com/googleapis/gax-go/v2/callctx"}] = true
 +	g.imports[pbinfo.ImportSpec{Path: "fmt"}] = true
 +}
@@ -130,7 +131,7 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/geng
  // insertAutoPopulatedFields generates the conditional initialization of any
  // default-value request fields (for the given method) that are specified for
  // auto-population by autoPopulatedFields.
-@@ -903,10 +875,11 @@
+@@ -903,10 +876,12 @@
  	return matches
  }
  
@@ -138,17 +139,18 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/geng
 -// that carries a google.api.resource_reference annotation.
 -// If multiple fields match, it prioritizes the one that also appears in the HTTP path.
 -// If no input type or associated attributes are found, it returns an empty string.
-+// resourceNameField returns the resource-name target for telemetry formatting.
-+// Annotated google.api.resource_reference fields are preferred; if multiple
-+// annotated fields match, it prioritizes one that also appears in the HTTP path.
-+// If no annotation exists, dynamic HTTP-path inference is used only when
-+// DynamicResourceHeuristicsFeature is enabled.
++// resourceNameField returns the telemetry resource-name target for the method's
++// input message, or nil when no target can be resolved. Fields with
++// google.api.resource_reference annotations are preferred, and HTTP path fields
++// break ties between multiple annotated candidates. If no annotation exists and
++// DynamicResourceHeuristicsFeature is enabled, the target may be inferred from
++// the method's HTTP path and heuristic vocabulary.
  func (g *generator) resourceNameField(m *descriptorpb.MethodDescriptorProto) *heuristicTarget {
  	if m.GetInputType() == "" {
  		return nil
 diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go
 --- /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heuristics.go	2026-03-31 10:32:08
-+++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go	2026-04-17 09:06:35
++++ /tmp/refactor-eq-workdir/bb-merged-1722/internal/gengapic/heuristics.go	2026-04-17 22:57:03
 @@ -45,17 +45,14 @@
  func buildHeuristicVocabulary(methods []*descriptorpb.MethodDescriptorProto) map[string]bool {
  	resourceCollections := make(map[string]bool)
@@ -165,7 +167,7 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heur
 -	// Why do we filter for CRUD? Non-CRUD methods (e.g., `CancelOperation`, `CheckHealth`)
 -	// often have path literals that are random verbs or actions, not resource collections.
 -	// If we learned from those, we might pollute our vocabulary with non-resource nouns.
-+	// Learn only from CRUD-like method names.
++	// Vocabulary is learned only from CRUD-like method names.
  	discoveryExactVerbs := map[string]struct{}{
  		"get":  {},
  		"list": {},
@@ -179,11 +181,11 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heur
 -	// extracting the static literal nouns that sit immediately before a `{variable}`
 -	// (`projects` and `topics`). We add these to our `resourceCollections` map so we can
 -	// validate unannotated field patterns later, in IdentifyHeuristicTarget.
-+	// Inspect all HTTP patterns for valid resource collection nouns.
++	// Inspect every HTTP pattern on eligible methods.
  	for _, m := range methods {
  		nameLower := strings.ToLower(m.GetName())
  
-@@ -102,41 +94,27 @@
+@@ -102,41 +94,26 @@
  			}
  		}
  
@@ -222,17 +224,95 @@ diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/1722/internal/gengapic/heur
 -			// Matches:
 -			//   match[0] = "projects/{project}" (with groups [ projects ])
 -			//   match[1] = "topics/{topic}" (with groups [ topics ])
-+			// Collect literals immediately before variables.
  			matches := literalVarRegex.FindAllStringSubmatch(pattern, -1)
  			for _, match := range matches {
  				if len(match) < 2 {
-@@ -144,8 +122,7 @@
+@@ -144,12 +121,13 @@
  				}
  				literal := match[1]
  
 -				// We should discard verbs (anything after and including the ':' character)
 -				// so we do not learn generic collection nouns like "projects:cancel".
-+				// Strip literal custom verbs and ignore version segments.
++				// Collect only the literal immediately before a variable,
++				// after stripping literal custom verbs.
  				if idx := strings.Index(literal, ":"); idx != -1 {
  					literal = literal[:idx]
  				}
+ 
++				// Ignore API version segments.
+ 				if isVersionString(literal) {
+ 					continue
+ 				}
+@@ -179,7 +157,7 @@
+ 		}
+ 	}
+ 
+-	// Step 1: Extract the primary verb's pattern.
++	// Extract the primary verb's pattern.
+ 	switch p := h.GetPattern().(type) {
+ 	case *annotations.HttpRule_Get:
+ 		extract(p.Get)
+@@ -193,7 +171,7 @@
+ 		extract(p.Patch)
+ 	}
+ 
+-	// Step 2: Recursively process any additional bindings attached to this rule.
++	// Recursively process any additional bindings attached to this rule.
+ 	for _, rule := range h.GetAdditionalBindings() {
+ 		patterns = append(patterns, getHTTPPatterns(rule)...)
+ 	}
+@@ -240,11 +218,11 @@
+ 
+ 	pattern := patterns[0]
+ 
+-	// Step 1: Split the path into atomic segments.
++	// Split the path into atomic segments.
+ 	segments := splitPathSegments(pattern)
+ 
+-	// Step 2: Walk BACKWARDS from the end of the HTTP path in order to find the most
+-	// specific resource (the child) at the end of the URI.
++	// Walk backward from the end of the HTTP path to find the most
++	// specific resource at the end of the URI.
+ 	for i := len(segments) - 1; i >= 0; i-- {
+ 		seg := segments[i]
+ 
+@@ -255,7 +233,7 @@
+ 
+ 		token := segments[i-1]
+ 		if strings.Contains(token, ":") {
+-			// Wes: Custom verbs in a literal path indicate an action, not a collection noun.
++			// Custom verbs in a literal path indicate an action, not a collection noun.
+ 			// Skip this segment to fall back to the parent resource.
+ 			continue
+ 		}
+@@ -300,16 +278,8 @@
+ 			}
+ 		}
+ 
+-		// Step 3: Reject partial matches with unhandled variables on the left.
+-		//
+-		// Example: `/v1/users/{user}/topics/{topic}`
+-		//
+-		// We have unhandled variables if `{user}` is missing from our vocabulary.
+-		// If this API package doesn't define a standard `GetUser` or `ListUsers`,
+-		// we never learn `users` as a valid collection noun.
+-		//
+-		// We discard these partial matches to avoid returning an incomplete or
+-		// disconnected resource name.
++		// Reject partial matches with unhandled variables on the left; those
++		// indicate an incomplete or disconnected resource name.
+ 		disconnected := false
+ 		for k := 0; k < firstIndex; k++ {
+ 			if strings.Contains(segments[k], "{") {
+@@ -324,10 +294,7 @@
+ 		var fields []string
+ 		var formatSegments []string
+ 
+-		// Step 4: Extract fields and build the format template from the validated sub-path.
+-		//
+-		// Example: For `projects/{project}/topics/{topic}`, the template will be
+-		// `projects/%v/topics/%v` and the field names will be `["project", "topic"]`.
++		// Extract fields and build the format template from the validated sub-path.
+ 		targetSegments := segments[firstIndex : i+1]
+ 		for _, s := range targetSegments {
+ 			if strings.Contains(s, "{") {

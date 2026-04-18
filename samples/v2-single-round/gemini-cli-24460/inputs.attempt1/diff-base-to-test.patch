@@ -1,0 +1,1126 @@
+diff --git a/packages/core/src/policy/policies/sandbox-default.toml b/packages/core/src/policy/policies/sandbox-default.toml
+index 933d85cf9e..796902f0b4 100644
+--- a/packages/core/src/policy/policies/sandbox-default.toml
++++ b/packages/core/src/policy/policies/sandbox-default.toml
+@@ -6,7 +6,7 @@ allowOverrides = false
+ 
+ [modes.default]
+ network = false
+-readonly = true
++readonly = false
+ approvedTools = ['cat', 'ls', 'grep', 'head', 'tail', 'less', 'Get-Content', 'dir', 'type', 'findstr', 'Get-ChildItem', 'echo']
+ allowOverrides = true
+ 
+diff --git a/packages/core/src/policy/policy-engine.ts b/packages/core/src/policy/policy-engine.ts
+index c901116eb7..f2376df914 100644
+--- a/packages/core/src/policy/policy-engine.ts
++++ b/packages/core/src/policy/policy-engine.ts
+@@ -13,6 +13,7 @@ import {
+   extractStringFromParseEntry,
+ } from '../utils/shell-utils.js';
+ import { parse as shellParse } from 'shell-quote';
++import { isSubpath } from '../utils/paths.js';
+ import {
+   PolicyDecision,
+   type PolicyEngineConfig,
+@@ -28,6 +29,7 @@ import { debugLogger } from '../utils/debugLogger.js';
+ import type { CheckerRunner } from '../safety/checker-runner.js';
+ import { SafetyCheckDecision } from '../safety/protocol.js';
+ import { getToolAliases } from '../tools/tool-names.js';
++import { PARAM_ADDITIONAL_PERMISSIONS } from '../tools/definitions/base-declarations.js';
+ import {
+   MCP_TOOL_PREFIX,
+   isMcpToolAnnotation,
+@@ -38,6 +40,7 @@ import {
+ import {
+   type SandboxManager,
+   NoopSandboxManager,
++  type SandboxPermissions,
+ } from '../services/sandboxManager.js';
+ 
+ function isWildcardPattern(name: string): boolean {
+@@ -647,6 +650,36 @@ export class PolicyEngine {
+       }
+     }
+ 
++    if (decision === PolicyDecision.ALLOW) {
++      const args = toolCall.args;
++      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
++      const additionalPermissions = args?.[PARAM_ADDITIONAL_PERMISSIONS] as
++        | SandboxPermissions
++        | undefined;
++
++      const fsPerms = additionalPermissions?.fileSystem;
++      if (fsPerms) {
++        const workspace = this.sandboxManager.getWorkspace();
++        const readPaths = Array.isArray(fsPerms.read) ? fsPerms.read : [];
++        const writePaths = Array.isArray(fsPerms.write) ? fsPerms.write : [];
++        const allPaths = [...readPaths, ...writePaths];
++
++        for (const p of allPaths) {
++          if (
++            typeof p === 'string' &&
++            !isSubpath(workspace, p) &&
++            workspace !== p
++          ) {
++            debugLogger.debug(
++              `[PolicyEngine.check] Additional permission path '${p}' is outside workspace '${workspace}'. Downgrading to ASK_USER.`,
++            );
++            decision = PolicyDecision.ASK_USER;
++            break;
++          }
++        }
++      }
++    }
++
+     // Safety checks
+     if (decision !== PolicyDecision.DENY && this.checkerRunner) {
+       for (const checkerRule of this.checkers) {
+diff --git a/packages/core/src/policy/sandboxPolicyManager.ts b/packages/core/src/policy/sandboxPolicyManager.ts
+index 5b00150b41..c8a4d2f8df 100644
+--- a/packages/core/src/policy/sandboxPolicyManager.ts
++++ b/packages/core/src/policy/sandboxPolicyManager.ts
+@@ -19,6 +19,7 @@ export const SandboxModeConfigSchema = z.object({
+   readonly: z.boolean(),
+   approvedTools: z.array(z.string()),
+   allowOverrides: z.boolean().optional(),
++  yolo: z.boolean().optional(),
+ });
+ 
+ export const PersistentCommandConfigSchema = z.object({
+@@ -66,7 +67,7 @@ export class SandboxPolicyManager {
+               },
+               default: {
+                 network: false,
+-                readonly: true,
++                readonly: false,
+                 approvedTools: [],
+                 allowOverrides: true,
+               },
+@@ -132,8 +133,17 @@ export class SandboxPolicyManager {
+   }
+ 
+   getModeConfig(
+-    mode: 'plan' | 'accepting_edits' | 'default' | string,
++    mode: 'plan' | 'accepting_edits' | 'default' | 'yolo' | string,
+   ): SandboxModeConfig {
++    if (mode === 'yolo') {
++      return {
++        network: true,
++        readonly: false,
++        approvedTools: [],
++        allowOverrides: true,
++        yolo: true,
++      };
++    }
+     if (mode === 'plan') return this.config.modes.plan;
+     if (mode === 'accepting_edits' || mode === 'autoEdit')
+       return this.config.modes.accepting_edits;
+diff --git a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+index 1ebae20216..d91ab1a836 100644
+--- a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
++++ b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+@@ -144,6 +144,10 @@ export class LinuxSandboxManager implements SandboxManager {
+     return parsePosixSandboxDenials(result);
+   }
+ 
++  getWorkspace(): string {
++    return this.options.workspace;
++  }
++
+   private getMaskFilePath(): string {
+     if (
+       LinuxSandboxManager.maskFilePath &&
+@@ -193,9 +197,11 @@ export class LinuxSandboxManager implements SandboxManager {
+           this.options.modeConfig?.approvedTools,
+         )
+       : false;
+-    const workspaceWrite = !isReadonlyMode || isApproved;
++    const isYolo = this.options.modeConfig?.yolo ?? false;
++    const workspaceWrite = !isReadonlyMode || isApproved || isYolo;
++
+     const networkAccess =
+-      this.options.modeConfig?.network || req.policy?.networkAccess || false;
++      this.options.modeConfig?.network || req.policy?.networkAccess || isYolo;
+ 
+     const persistentPermissions = allowOverrides
+       ? this.options.policyManager?.getCommandPermissions(commandName)
+diff --git a/packages/core/src/sandbox/macos/MacOsSandboxManager.ts b/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+index 51a2651c47..497bf30c31 100644
+--- a/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
++++ b/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+@@ -55,6 +55,10 @@ export class MacOsSandboxManager implements SandboxManager {
+     return parsePosixSandboxDenials(result);
+   }
+ 
++  getWorkspace(): string {
++    return this.options.workspace;
++  }
++
+   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
+     await initializeShellParsers();
+     const sanitizationConfig = getSecureSanitizationConfig(
+@@ -90,9 +94,11 @@ export class MacOsSandboxManager implements SandboxManager {
+         )
+       : false;
+ 
+-    const workspaceWrite = !isReadonlyMode || isApproved;
++    const isYolo = this.options.modeConfig?.yolo ?? false;
++    const workspaceWrite = !isReadonlyMode || isApproved || isYolo;
++
+     const defaultNetwork =
+-      this.options.modeConfig?.network || req.policy?.networkAccess || false;
++      this.options.modeConfig?.network || req.policy?.networkAccess || isYolo;
+ 
+     const { allowed: allowedPaths, forbidden: forbiddenPaths } =
+       await resolveSandboxPaths(this.options, req);
+@@ -103,7 +109,6 @@ export class MacOsSandboxManager implements SandboxManager {
+       ? this.options.policyManager?.getCommandPermissions(commandName)
+       : undefined;
+ 
+-    // Merge all permissions
+     const mergedAdditional: SandboxPermissions = {
+       fileSystem: {
+         read: [
+diff --git a/packages/core/src/sandbox/macos/baseProfile.ts b/packages/core/src/sandbox/macos/baseProfile.ts
+index f4bd331889..b014e53723 100644
+--- a/packages/core/src/sandbox/macos/baseProfile.ts
++++ b/packages/core/src/sandbox/macos/baseProfile.ts
+@@ -23,6 +23,15 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ (allow signal (target same-sandbox))
+ (allow process-info*)
+ 
++; Map system frameworks + dylibs for loader.
++(allow file-map-executable
++  (subpath "/System/Library/Frameworks")
++  (subpath "/System/Library/PrivateFrameworks")
++  (subpath "/usr/lib")
++  (subpath "/bin")
++  (subpath "/usr/bin")
++)
++
+ (allow file-write-data
+   (require-all
+     (path "/dev/null")
+@@ -86,16 +95,22 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ 
+ (allow mach-lookup
+   (global-name "com.apple.sysmond")
++  (global-name "com.apple.system.opendirectoryd.libinfo")
++  (global-name "com.apple.system.opendirectoryd.membership")
++  (global-name "com.apple.system.logger")
++  (global-name "com.apple.system.notification_center")
++  (global-name "com.apple.logd")
++  (global-name "com.apple.secinitd")
++  (global-name "com.apple.trustd.agent")
++  (global-name "com.apple.trustd")
++  (global-name "com.apple.analyticsd")
++  (global-name "com.apple.analyticsd.messagetracer")
+ )
+ \n; IOKit
+ (allow iokit-open
+   (iokit-registry-entry-class "RootDomainUserClient")
+ )
+ 
+-(allow mach-lookup
+-  (global-name "com.apple.system.opendirectoryd.libinfo")
+-)
+-
+ ; Needed for python multiprocessing on MacOS for the SemLock
+ (allow ipc-posix-sem)
+ 
+@@ -132,10 +147,19 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ (allow file-read* file-write*
+   (literal "/dev/null")
+   (literal "/dev/zero")
++  (literal "/dev/tty")
++  (subpath "/dev/fd")
+   (subpath "/tmp")
+   (subpath "/private/tmp")
+ )
+ 
++(allow file-read-metadata
++  (literal "/")
++  (subpath "/var")
++  (subpath "/private/var")
++  (subpath "/dev")
++)
++
+ `;
+ 
+ /**
+diff --git a/packages/core/src/sandbox/utils/proactivePermissions.ts b/packages/core/src/sandbox/utils/proactivePermissions.ts
+new file mode 100644
+index 0000000000..a5e11e2c3c
+--- /dev/null
++++ b/packages/core/src/sandbox/utils/proactivePermissions.ts
+@@ -0,0 +1,189 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import os from 'node:os';
++import path from 'node:path';
++import fs from 'node:fs';
++import { type SandboxPermissions } from '../../services/sandboxManager.js';
++
++const NETWORK_RELIANT_TOOLS = new Set([
++  'npm',
++  'npx',
++  'yarn',
++  'pnpm',
++  'bun',
++  'git',
++  'ssh',
++  'scp',
++  'sftp',
++  'curl',
++  'wget',
++]);
++
++const NODE_ECOSYSTEM_TOOLS = new Set(['npm', 'npx', 'yarn', 'pnpm', 'bun']);
++
++const NETWORK_HEAVY_SUBCOMMANDS = new Set([
++  'install',
++  'i',
++  'ci',
++  'update',
++  'up',
++  'publish',
++  'add',
++  'remove',
++  'outdated',
++  'audit',
++]);
++
++/**
++ * Returns true if the command or subcommand is known to be network-reliant.
++ */
++export function isNetworkReliantCommand(
++  commandName: string,
++  subCommand?: string,
++): boolean {
++  const normalizedCommand = commandName.toLowerCase().replace(/\.exe$/, '');
++  if (!NETWORK_RELIANT_TOOLS.has(normalizedCommand)) {
++    return false;
++  }
++
++  // Node ecosystem tools only need network for specific subcommands
++  if (NODE_ECOSYSTEM_TOOLS.has(normalizedCommand)) {
++    // Bare yarn/bun/pnpm is an alias for install
++    if (
++      !subCommand &&
++      (normalizedCommand === 'yarn' ||
++        normalizedCommand === 'bun' ||
++        normalizedCommand === 'pnpm')
++    ) {
++      return true;
++    }
++
++    return (
++      !!subCommand && NETWORK_HEAVY_SUBCOMMANDS.has(subCommand.toLowerCase())
++    );
++  }
++
++  // Other tools (ssh, git, curl, etc.) are always network-reliant
++  return true;
++}
++
++/**
++ * Returns suggested additional permissions for network-reliant tools
++ * based on common configuration and cache directories.
++ */
++/**
++ * Returns suggested additional permissions for network-reliant tools
++ * based on common configuration and cache directories.
++ */
++export async function getProactiveToolSuggestions(
++  commandName: string,
++): Promise<SandboxPermissions | undefined> {
++  const normalizedCommand = commandName.toLowerCase().replace(/\.exe$/, '');
++  if (!NETWORK_RELIANT_TOOLS.has(normalizedCommand)) {
++    return undefined;
++  }
++
++  const home = os.homedir();
++  const readOnlyPaths: string[] = [];
++  const primaryCachePaths: string[] = [];
++  const optionalCachePaths: string[] = [];
++
++  if (normalizedCommand === 'npm' || normalizedCommand === 'npx') {
++    readOnlyPaths.push(path.join(home, '.npmrc'));
++    primaryCachePaths.push(path.join(home, '.npm'));
++    optionalCachePaths.push(path.join(home, '.node-gyp'));
++    optionalCachePaths.push(path.join(home, '.cache'));
++  } else if (normalizedCommand === 'yarn') {
++    readOnlyPaths.push(path.join(home, '.yarnrc'));
++    readOnlyPaths.push(path.join(home, '.yarnrc.yml'));
++    primaryCachePaths.push(path.join(home, '.yarn'));
++    primaryCachePaths.push(path.join(home, '.config', 'yarn'));
++    optionalCachePaths.push(path.join(home, '.cache'));
++  } else if (normalizedCommand === 'pnpm') {
++    readOnlyPaths.push(path.join(home, '.npmrc'));
++    primaryCachePaths.push(path.join(home, '.pnpm-store'));
++    primaryCachePaths.push(path.join(home, '.config', 'pnpm'));
++    optionalCachePaths.push(path.join(home, '.cache'));
++  } else if (normalizedCommand === 'bun') {
++    readOnlyPaths.push(path.join(home, '.bunfig.toml'));
++    primaryCachePaths.push(path.join(home, '.bun'));
++    optionalCachePaths.push(path.join(home, '.cache'));
++  } else if (normalizedCommand === 'git') {
++    readOnlyPaths.push(path.join(home, '.ssh'));
++    readOnlyPaths.push(path.join(home, '.gitconfig'));
++    optionalCachePaths.push(path.join(home, '.cache'));
++  } else if (
++    normalizedCommand === 'ssh' ||
++    normalizedCommand === 'scp' ||
++    normalizedCommand === 'sftp'
++  ) {
++    readOnlyPaths.push(path.join(home, '.ssh'));
++  }
++
++  // Windows specific paths
++  if (os.platform() === 'win32') {
++    const appData = process.env['AppData'];
++    const localAppData = process.env['LocalAppData'];
++    if (normalizedCommand === 'npm' || normalizedCommand === 'npx') {
++      if (appData) {
++        primaryCachePaths.push(path.join(appData, 'npm'));
++        optionalCachePaths.push(path.join(appData, 'npm-cache'));
++      }
++      if (localAppData) {
++        optionalCachePaths.push(path.join(localAppData, 'npm-cache'));
++      }
++    }
++  }
++
++  const finalReadOnly: string[] = [];
++  const finalReadWrite: string[] = [];
++
++  const checkExists = async (p: string): Promise<boolean> => {
++    try {
++      await fs.promises.access(p, fs.constants.F_OK);
++      return true;
++    } catch {
++      return false;
++    }
++  };
++
++  const readOnlyChecks = await Promise.all(
++    readOnlyPaths.map(async (p) => ({ path: p, exists: await checkExists(p) })),
++  );
++  for (const { path: p, exists } of readOnlyChecks) {
++    if (exists) {
++      finalReadOnly.push(p);
++    }
++  }
++
++  for (const p of primaryCachePaths) {
++    finalReadWrite.push(p);
++  }
++
++  const optionalChecks = await Promise.all(
++    optionalCachePaths.map(async (p) => ({
++      path: p,
++      exists: await checkExists(p),
++    })),
++  );
++  for (const { path: p, exists } of optionalChecks) {
++    if (exists) {
++      finalReadWrite.push(p);
++    }
++  }
++
++  return {
++    fileSystem:
++      finalReadOnly.length > 0 || finalReadWrite.length > 0
++        ? {
++            read: [...finalReadOnly, ...finalReadWrite],
++            write: finalReadWrite,
++          }
++        : undefined,
++    network: true,
++  };
++}
+diff --git a/packages/core/src/sandbox/utils/sandboxDenialUtils.ts b/packages/core/src/sandbox/utils/sandboxDenialUtils.ts
+index d1e2366e76..96082767dd 100644
+--- a/packages/core/src/sandbox/utils/sandboxDenialUtils.ts
++++ b/packages/core/src/sandbox/utils/sandboxDenialUtils.ts
+@@ -20,6 +20,9 @@ export function parsePosixSandboxDenials(
+ 
+   const isFileDenial = [
+     'operation not permitted',
++    'permission denied',
++    'eperm',
++    'eacces',
+     'vim:e303',
+     'should be read/write',
+     'sandbox_apply',
+@@ -32,6 +35,17 @@ export function parsePosixSandboxDenials(
+     'could not resolve host',
+     'connection refused',
+     'no address associated with hostname',
++    'econnrefused',
++    'enotfound',
++    'etimedout',
++    'econnreset',
++    'network error',
++    'getaddrinfo',
++    'socket hang up',
++    'connect-timeout',
++    'err_pnpm_fetch',
++    'err_pnpm_no_matching_version',
++    "syscall: 'listen'",
+   ].some((keyword) => combined.includes(keyword));
+ 
+   if (!isFileDenial && !isNetworkDenial) {
+@@ -40,17 +54,31 @@ export function parsePosixSandboxDenials(
+ 
+   const filePaths = new Set<string>();
+ 
+-  // Extract denied paths (POSIX absolute paths)
+-  const regex =
+-    /(?:^|\s)['"]?(\/[\w.-/]+)['"]?:\s*[Oo]peration not permitted/gi;
+-  let match;
+-  while ((match = regex.exec(output)) !== null) {
+-    filePaths.add(match[1]);
+-  }
+-  if (errorOutput) {
+-    while ((match = regex.exec(errorOutput)) !== null) {
++  // Extract denied paths (POSIX absolute paths or home-relative paths starting with ~)
++  const regexes = [
++    // format: /path: operation not permitted
++    /(?:^|\s)['"]?((?:\/|~)[\w.\-/:~]+)['"]?:\s*[Oo]peration not permitted/gi,
++    // format: operation not permitted, open '/path'
++    /[Oo]peration not permitted,\s*open\s*['"]?((?:\/|~)[\w.\-/:~]+)['"]?/gi,
++    // format: permission denied, open '/path'
++    /[Pp]ermission denied,\s*open\s*['"]?((?:\/|~)[\w.\-/:~]+)['"]?/gi,
++    // format: npm error path /path or npm ERR! path /path
++    /npm\s+(?:error|ERR!)\s+path\s+((?:\/|~)[\w.\-/:~]+)/gi,
++    // format: EACCES: permission denied, mkdir '/path'
++    /EACCES:\s*permission denied,\s*\w+\s*['"]?((?:\/|~)[\w.\-/:~]+)['"]?/gi,
++  ];
++
++  for (const regex of regexes) {
++    let match;
++    while ((match = regex.exec(output)) !== null) {
+       filePaths.add(match[1]);
+     }
++    if (errorOutput) {
++      regex.lastIndex = 0; // Reset for next use
++      while ((match = regex.exec(errorOutput)) !== null) {
++        filePaths.add(match[1]);
++      }
++    }
+   }
+ 
+   // Fallback heuristic: look for any absolute path in the output if it was a file denial
+diff --git a/packages/core/src/sandbox/windows/WindowsSandboxManager.ts b/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+index c828d46fa7..6484d9406c 100644
+--- a/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
++++ b/packages/core/src/sandbox/windows/WindowsSandboxManager.ts
+@@ -72,6 +72,10 @@ export class WindowsSandboxManager implements SandboxManager {
+     return parseWindowsSandboxDenials(result);
+   }
+ 
++  getWorkspace(): string {
++    return this.options.workspace;
++  }
++
+   /**
+    * Ensures a file or directory exists.
+    */
+@@ -240,6 +244,8 @@ export class WindowsSandboxManager implements SandboxManager {
+       ];
+     }
+ 
++    const isYolo = this.options.modeConfig?.yolo ?? false;
++
+     // Fetch persistent approvals for this command
+     const commandName = await getCommandName(command, args);
+     const persistentPermissions = allowOverrides
+@@ -259,6 +265,7 @@ export class WindowsSandboxManager implements SandboxManager {
+         ],
+       },
+       network:
++        isYolo ||
+         persistentPermissions?.network ||
+         req.policy?.additionalPermissions?.network ||
+         false,
+@@ -301,7 +308,9 @@ export class WindowsSandboxManager implements SandboxManager {
+     // Grant "Low Mandatory Level" read/write access to allowedPaths.
+     for (const allowedPath of allowedPaths) {
+       const resolved = await tryRealpath(allowedPath);
+-      if (!fs.existsSync(resolved)) {
++      try {
++        await fs.promises.access(resolved, fs.constants.F_OK);
++      } catch {
+         throw new Error(
+           `Sandbox request rejected: Allowed path does not exist: ${resolved}. ` +
+             'On Windows, granular sandbox access can only be granted to existing paths to avoid broad parent directory permissions.',
+@@ -316,7 +325,9 @@ export class WindowsSandboxManager implements SandboxManager {
+     );
+     for (const writePath of additionalWritePaths) {
+       const resolved = await tryRealpath(writePath);
+-      if (!fs.existsSync(resolved)) {
++      try {
++        await fs.promises.access(resolved, fs.constants.F_OK);
++      } catch {
+         throw new Error(
+           `Sandbox request rejected: Additional write path does not exist: ${resolved}. ` +
+             'On Windows, granular sandbox access can only be granted to existing paths to avoid broad parent directory permissions.',
+diff --git a/packages/core/src/services/sandboxManager.ts b/packages/core/src/services/sandboxManager.ts
+index 6313c09eeb..7260551d35 100644
+--- a/packages/core/src/services/sandboxManager.ts
++++ b/packages/core/src/services/sandboxManager.ts
+@@ -57,6 +57,7 @@ export interface SandboxModeConfig {
+   network?: boolean;
+   approvedTools?: string[];
+   allowOverrides?: boolean;
++  yolo?: boolean;
+ }
+ 
+ /**
+@@ -140,6 +141,11 @@ export interface SandboxManager {
+    * Parses the output of a command to detect sandbox denials.
+    */
+   parseDenials(result: ShellExecutionResult): ParsedSandboxDenial | undefined;
++
++  /**
++   * Returns the primary workspace directory for this sandbox.
++   */
++  getWorkspace(): string;
+ }
+ 
+ /**
+@@ -238,6 +244,8 @@ export async function findSecretFiles(
+  * through while applying environment sanitization.
+  */
+ export class NoopSandboxManager implements SandboxManager {
++  constructor(private options?: GlobalSandboxOptions) {}
++
+   /**
+    * Prepares a command by sanitizing the environment and passing through
+    * the original program and arguments.
+@@ -271,12 +279,18 @@ export class NoopSandboxManager implements SandboxManager {
+   parseDenials(): undefined {
+     return undefined;
+   }
++
++  getWorkspace(): string {
++    return this.options?.workspace ?? process.cwd();
++  }
+ }
+ 
+ /**
+  * A SandboxManager implementation that just runs locally (no sandboxing yet).
+  */
+ export class LocalSandboxManager implements SandboxManager {
++  constructor(private options?: GlobalSandboxOptions) {}
++
+   async prepareCommand(_req: SandboxRequest): Promise<SandboxedCommand> {
+     throw new Error('Tool sandboxing is not yet implemented.');
+   }
+@@ -292,6 +306,10 @@ export class LocalSandboxManager implements SandboxManager {
+   parseDenials(): undefined {
+     return undefined;
+   }
++
++  getWorkspace(): string {
++    return this.options?.workspace ?? process.cwd();
++  }
+ }
+ 
+ /**
+diff --git a/packages/core/src/services/sandboxManagerFactory.ts b/packages/core/src/services/sandboxManagerFactory.ts
+index cb70f796d1..924780ec4d 100644
+--- a/packages/core/src/services/sandboxManagerFactory.ts
++++ b/packages/core/src/services/sandboxManagerFactory.ts
+@@ -24,10 +24,6 @@ export function createSandboxManager(
+   options: GlobalSandboxOptions,
+   approvalMode?: string,
+ ): SandboxManager {
+-  if (approvalMode === 'yolo') {
+-    return new NoopSandboxManager();
+-  }
+-
+   if (!options.modeConfig && options.policyManager && approvalMode) {
+     options.modeConfig = options.policyManager.getModeConfig(approvalMode);
+   }
+@@ -40,8 +36,8 @@ export function createSandboxManager(
+     } else if (os.platform() === 'darwin') {
+       return new MacOsSandboxManager(options);
+     }
+-    return new LocalSandboxManager();
++    return new LocalSandboxManager(options);
+   }
+ 
+-  return new NoopSandboxManager();
++  return new NoopSandboxManager(options);
+ }
+diff --git a/packages/core/src/tools/shell.ts b/packages/core/src/tools/shell.ts
+index 63a9b1dc83..71fc354ae5 100644
+--- a/packages/core/src/tools/shell.ts
++++ b/packages/core/src/tools/shell.ts
+@@ -25,6 +25,7 @@ import {
+   type PolicyUpdateOptions,
+   type ToolLiveOutput,
+   type ExecuteOptions,
++  type ForcedToolDecision,
+ } from './tools.js';
+ 
+ import { getErrorMessage } from '../utils/errors.js';
+@@ -48,6 +49,11 @@ import type { MessageBus } from '../confirmation-bus/message-bus.js';
+ import { getShellDefinition } from './definitions/coreTools.js';
+ import { resolveToolDeclaration } from './definitions/resolver.js';
+ import type { AgentLoopContext } from '../config/agent-loop-context.js';
++import { isSubpath } from '../utils/paths.js';
++import {
++  getProactiveToolSuggestions,
++  isNetworkReliantCommand,
++} from '../sandbox/utils/proactivePermissions.js';
+ 
+ export const OUTPUT_UPDATE_INTERVAL_MS = 1000;
+ 
+@@ -66,6 +72,8 @@ export class ShellToolInvocation extends BaseToolInvocation<
+   ShellToolParams,
+   ToolResult
+ > {
++  private proactivePermissionsConfirmed?: SandboxPermissions;
++
+   constructor(
+     private readonly context: AgentLoopContext,
+     params: ShellToolParams,
+@@ -126,6 +134,83 @@ export class ShellToolInvocation extends BaseToolInvocation<
+     return `${this.params.command} ${this.getContextualDetails()}`;
+   }
+ 
++  private simplifyPaths(paths: Set<string>): string[] {
++    if (paths.size === 0) return [];
++    const rawPaths = Array.from(paths);
++
++    // 1. Remove redundant paths (subpaths of already included paths)
++    const sorted = rawPaths.sort((a, b) => a.length - b.length);
++    const nonRedundant: string[] = [];
++    for (const p of sorted) {
++      if (!nonRedundant.some((s) => isSubpath(s, p))) {
++        nonRedundant.push(p);
++      }
++    }
++
++    // 2. Consolidate clusters: if >= 3 paths share the same immediate parent, use the parent
++    const parentCounts = new Map<string, string[]>();
++    for (const p of nonRedundant) {
++      const parent = path.dirname(p);
++      if (!parentCounts.has(parent)) {
++        parentCounts.set(parent, []);
++      }
++      parentCounts.get(parent)!.push(p);
++    }
++
++    const finalPaths = new Set<string>();
++
++    const sensitiveDirs = new Set([
++      os.homedir(),
++      path.dirname(os.homedir()),
++      path.sep,
++      path.join(path.sep, 'etc'),
++      path.join(path.sep, 'usr'),
++      path.join(path.sep, 'var'),
++      path.join(path.sep, 'bin'),
++      path.join(path.sep, 'sbin'),
++      path.join(path.sep, 'lib'),
++      path.join(path.sep, 'root'),
++      path.join(path.sep, 'home'),
++      path.join(path.sep, 'Users'),
++    ]);
++
++    if (os.platform() === 'win32') {
++      const systemRoot = process.env['SystemRoot'];
++      if (systemRoot) {
++        sensitiveDirs.add(systemRoot);
++        sensitiveDirs.add(path.join(systemRoot, 'System32'));
++      }
++      const programFiles = process.env['ProgramFiles'];
++      if (programFiles) sensitiveDirs.add(programFiles);
++      const programFilesX86 = process.env['ProgramFiles(x86)'];
++      if (programFilesX86) sensitiveDirs.add(programFilesX86);
++    }
++
++    for (const [parent, children] of parentCounts.entries()) {
++      const isSensitive = sensitiveDirs.has(parent);
++      if (children.length >= 3 && parent.length > 1 && !isSensitive) {
++        finalPaths.add(parent);
++      } else {
++        for (const child of children) {
++          finalPaths.add(child);
++        }
++      }
++    }
++
++    // 3. Final redundancy check after consolidation
++    const finalSorted = Array.from(finalPaths).sort(
++      (a, b) => a.length - b.length,
++    );
++    const result: string[] = [];
++    for (const p of finalSorted) {
++      if (!result.some((s) => isSubpath(s, p))) {
++        result.push(p);
++      }
++    }
++
++    return result;
++  }
++
+   override getDisplayTitle(): string {
+     return this.params.command;
+   }
+@@ -155,15 +240,94 @@ export class ShellToolInvocation extends BaseToolInvocation<
+ 
+   override async shouldConfirmExecute(
+     abortSignal: AbortSignal,
++    forcedDecision?: ForcedToolDecision,
+   ): Promise<ToolCallConfirmationDetails | false> {
+     if (this.params[PARAM_ADDITIONAL_PERMISSIONS]) {
+       return this.getConfirmationDetails(abortSignal);
+     }
+-    return super.shouldConfirmExecute(abortSignal);
++
++    // Proactively suggest expansion for known network-heavy Node.js ecosystem tools
++    // (npm install, etc.) to avoid hangs when network is restricted by default.
++    // We do this even if the command is "allowed" by policy because the DEFAULT
++    // permissions are usually insufficient for these commands.
++    const command = stripShellWrapper(this.params.command);
++    const rootCommands = getCommandRoots(command);
++    const rootCommand = rootCommands[0];
++
++    if (rootCommand) {
++      const proactive = await getProactiveToolSuggestions(rootCommand);
++      if (proactive) {
++        const approved =
++          this.context.config.sandboxPolicyManager.getCommandPermissions(
++            rootCommand,
++          );
++        const missingNetwork = !!proactive.network && !approved?.network;
++
++        // Detect commands or sub-commands that definitely need network
++        const parsed = parseCommandDetails(command);
++        const subCommand = parsed?.details[0]?.args?.[0];
++        const needsNetwork = isNetworkReliantCommand(rootCommand, subCommand);
++
++        if (needsNetwork) {
++          // Add write permission to the current directory if we are in readonly mode
++          const mode = this.context.config.getApprovalMode();
++          const isReadonlyMode =
++            this.context.config.sandboxPolicyManager.getModeConfig(mode)
++              ?.readonly ?? false;
++
++          if (isReadonlyMode) {
++            const cwd =
++              this.params.dir_path || this.context.config.getTargetDir();
++            proactive.fileSystem = proactive.fileSystem || {
++              read: [],
++              write: [],
++            };
++            proactive.fileSystem.write = proactive.fileSystem.write || [];
++            if (!proactive.fileSystem.write.includes(cwd)) {
++              proactive.fileSystem.write.push(cwd);
++              proactive.fileSystem.read = proactive.fileSystem.read || [];
++              if (!proactive.fileSystem.read.includes(cwd)) {
++                proactive.fileSystem.read.push(cwd);
++              }
++            }
++          }
++
++          const missingRead = (proactive.fileSystem?.read || []).filter(
++            (p) => !approved?.fileSystem?.read?.includes(p),
++          );
++          const missingWrite = (proactive.fileSystem?.write || []).filter(
++            (p) => !approved?.fileSystem?.write?.includes(p),
++          );
++
++          const needsExpansion =
++            missingRead.length > 0 || missingWrite.length > 0 || missingNetwork;
++
++          if (needsExpansion) {
++            const details = await this.getConfirmationDetails(
++              abortSignal,
++              proactive,
++            );
++            if (details && details.type === 'sandbox_expansion') {
++              const originalOnConfirm = details.onConfirm;
++              details.onConfirm = async (outcome: ToolConfirmationOutcome) => {
++                await originalOnConfirm(outcome);
++                if (outcome !== ToolConfirmationOutcome.Cancel) {
++                  this.proactivePermissionsConfirmed = proactive;
++                }
++              };
++            }
++            return details;
++          }
++        }
++      }
++    }
++
++    return super.shouldConfirmExecute(abortSignal, forcedDecision);
+   }
+ 
+   protected override async getConfirmationDetails(
+     _abortSignal: AbortSignal,
++    proactivePermissions?: SandboxPermissions,
+   ): Promise<ToolCallConfirmationDetails | false> {
+     const command = stripShellWrapper(this.params.command);
+ 
+@@ -184,30 +348,36 @@ export class ShellToolInvocation extends BaseToolInvocation<
+     }
+ 
+     const rootCommands = [...new Set(getCommandRoots(command))];
++    const rootCommand = rootCommands[0] || 'shell';
++
++    // Proactively suggest expansion for known network-heavy tools (npm install, etc.)
++    // to avoid hangs when network is restricted by default.
++    const effectiveAdditionalPermissions =
++      this.params[PARAM_ADDITIONAL_PERMISSIONS] || proactivePermissions;
+ 
+     // Rely entirely on PolicyEngine for interactive confirmation.
+     // If we are here, it means PolicyEngine returned ASK_USER (or no message bus),
+     // so we must provide confirmation details.
+     // If additional_permissions are provided, it's an expansion request
+-    if (this.params[PARAM_ADDITIONAL_PERMISSIONS]) {
++    if (effectiveAdditionalPermissions) {
+       return {
+         type: 'sandbox_expansion',
+-        title: 'Sandbox Expansion Request',
++        title: proactivePermissions
++          ? 'Sandbox Expansion Request (Recommended)'
++          : 'Sandbox Expansion Request',
+         command: this.params.command,
+         rootCommand: rootCommandDisplay,
+-        additionalPermissions: this.params[PARAM_ADDITIONAL_PERMISSIONS],
++        additionalPermissions: effectiveAdditionalPermissions,
+         onConfirm: async (outcome: ToolConfirmationOutcome) => {
+           if (outcome === ToolConfirmationOutcome.ProceedAlwaysAndSave) {
+-            const commandName = rootCommands[0] || 'shell';
+             this.context.config.sandboxPolicyManager.addPersistentApproval(
+-              commandName,
+-              this.params[PARAM_ADDITIONAL_PERMISSIONS]!,
++              rootCommand,
++              effectiveAdditionalPermissions,
+             );
+           } else if (outcome === ToolConfirmationOutcome.ProceedAlways) {
+-            const commandName = rootCommands[0] || 'shell';
+             this.context.config.sandboxPolicyManager.addSessionApproval(
+-              commandName,
+-              this.params[PARAM_ADDITIONAL_PERMISSIONS]!,
++              rootCommand,
++              effectiveAdditionalPermissions,
+             );
+           }
+         },
+@@ -356,7 +526,25 @@ export class ShellToolInvocation extends BaseToolInvocation<
+               shellExecutionConfig?.sanitizationConfig ??
+               this.context.config.sanitizationConfig,
+             sandboxManager: this.context.config.sandboxManager,
+-            additionalPermissions: this.params[PARAM_ADDITIONAL_PERMISSIONS],
++            additionalPermissions: {
++              network:
++                this.params[PARAM_ADDITIONAL_PERMISSIONS]?.network ||
++                this.proactivePermissionsConfirmed?.network,
++              fileSystem: {
++                read: [
++                  ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
++                    ?.read || []),
++                  ...(this.proactivePermissionsConfirmed?.fileSystem?.read ||
++                    []),
++                ],
++                write: [
++                  ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
++                    ?.write || []),
++                  ...(this.proactivePermissionsConfirmed?.fileSystem?.write ||
++                    []),
++                ],
++              },
++            },
+             backgroundCompletionBehavior:
+               this.context.config.getShellBackgroundCompletionBehavior(),
+           },
+@@ -527,11 +715,33 @@ export class ShellToolInvocation extends BaseToolInvocation<
+             this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem?.write || [],
+           );
+ 
++          // Proactive permission suggestions for Node ecosystem tools
++          const proactive =
++            await getProactiveToolSuggestions(rootCommandDisplay);
++          if (proactive) {
++            if (proactive.network) {
++              sandboxDenial.network = true;
++            }
++            if (proactive.fileSystem?.read) {
++              for (const p of proactive.fileSystem.read) {
++                readPaths.add(p);
++              }
++            }
++            if (proactive.fileSystem?.write) {
++              for (const p of proactive.fileSystem.write) {
++                writePaths.add(p);
++              }
++            }
++          }
++
+           if (sandboxDenial.filePaths) {
+             for (const p of sandboxDenial.filePaths) {
+               try {
+                 // Find an existing parent directory to add instead of a non-existent file
+                 let currentPath = p;
++                if (currentPath.startsWith('~')) {
++                  currentPath = path.join(os.homedir(), currentPath.slice(1));
++                }
+                 try {
+                   if (
+                     fs.existsSync(currentPath) &&
+@@ -544,8 +754,18 @@ export class ShellToolInvocation extends BaseToolInvocation<
+                 }
+                 while (currentPath.length > 1) {
+                   if (fs.existsSync(currentPath)) {
+-                    writePaths.add(currentPath);
+-                    readPaths.add(currentPath);
++                    const mode = this.context.config.getApprovalMode();
++                    const isReadonlyMode =
++                      this.context.config.sandboxPolicyManager.getModeConfig(
++                        mode,
++                      )?.readonly ?? false;
++                    const isAllowed =
++                      this.context.config.isPathAllowed(currentPath);
++
++                    if (!isAllowed || isReadonlyMode) {
++                      writePaths.add(currentPath);
++                      readPaths.add(currentPath);
++                    }
+                     break;
+                   }
+                   currentPath = path.dirname(currentPath);
+@@ -556,16 +776,19 @@ export class ShellToolInvocation extends BaseToolInvocation<
+             }
+           }
+ 
++          const simplifiedRead = this.simplifyPaths(readPaths);
++          const simplifiedWrite = this.simplifyPaths(writePaths);
++
+           const additionalPermissions = {
+             network:
+               sandboxDenial.network ||
+               this.params[PARAM_ADDITIONAL_PERMISSIONS]?.network ||
+               undefined,
+             fileSystem:
+-              sandboxDenial.filePaths?.length || writePaths.size > 0
++              simplifiedRead.length > 0 || simplifiedWrite.length > 0
+                 ? {
+-                    read: Array.from(readPaths),
+-                    write: Array.from(writePaths),
++                    read: simplifiedRead,
++                    write: simplifiedWrite,
+                   }
+                 : undefined,
+           };
+@@ -711,7 +934,7 @@ export class ShellTool extends BaseDeclarativeTool<
+     _toolDisplayName?: string,
+   ): ToolInvocation<ShellToolParams, ToolResult> {
+     return new ShellToolInvocation(
+-      this.context.config,
++      this.context,
+       params,
+       messageBus,
+       _toolName,
+diff --git a/packages/core/src/utils/shell-utils.ts b/packages/core/src/utils/shell-utils.ts
+index e2a240a0b0..22a7e52a4c 100644
+--- a/packages/core/src/utils/shell-utils.ts
++++ b/packages/core/src/utils/shell-utils.ts
+@@ -179,6 +179,7 @@ export interface ParsedCommandDetail {
+   name: string;
+   text: string;
+   startIndex: number;
++  args?: string[];
+ }
+ 
+ interface CommandParseResult {
+@@ -218,9 +219,16 @@ foreach ($commandAst in $commandAsts) {
+   if ([string]::IsNullOrWhiteSpace($name)) {
+     continue
+   }
++  $args = @()
++  if ($commandAst.CommandElements.Count -gt 1) {
++    for ($i = 1; $i -lt $commandAst.CommandElements.Count; $i++) {
++      $args += $commandAst.CommandElements[$i].Extent.Text.Trim()
++    }
++  }
+   $commandObjects += [PSCustomObject]@{
+     name = $name
+     text = $commandAst.Extent.Text.Trim()
++    args = $args
+   }
+ }
+ [PSCustomObject]@{
+@@ -355,11 +363,31 @@ function collectCommandDetails(
+ 
+     const name = extractNameFromNode(current);
+     if (name) {
+-      details.push({
++      const detail: ParsedCommandDetail = {
+         name,
+         text: source.slice(current.startIndex, current.endIndex).trim(),
+         startIndex: current.startIndex,
+-      });
++      };
++
++      if (current.type === 'command') {
++        const args: string[] = [];
++        const nameNode = current.childForFieldName('name');
++        for (let i = 0; i < current.childCount; i += 1) {
++          const child = current.child(i);
++          if (
++            child &&
++            child.type === 'word' &&
++            child.startIndex !== nameNode?.startIndex
++          ) {
++            args.push(child.text);
++          }
++        }
++        if (args.length > 0) {
++          detail.args = args;
++        }
++      }
++
++      details.push(detail);
+     }
+ 
+     // Traverse all children to find all sub-components (commands, redirections, etc.)
+@@ -509,7 +537,7 @@ function parsePowerShellCommandDetails(
+ 
+     let parsed: {
+       success?: boolean;
+-      commands?: Array<{ name?: string; text?: string }>;
++      commands?: Array<{ name?: string; text?: string; args?: string[] }>;
+       hasRedirection?: boolean;
+     } | null = null;
+     try {
+@@ -524,7 +552,7 @@ function parsePowerShellCommandDetails(
+     }
+ 
+     const details = (parsed.commands ?? [])
+-      .map((commandDetail) => {
++      .map((commandDetail): ParsedCommandDetail | null => {
+         if (!commandDetail || typeof commandDetail.name !== 'string') {
+           return null;
+         }
+@@ -539,6 +567,9 @@ function parsePowerShellCommandDetails(
+           name,
+           text,
+           startIndex: 0,
++          args: Array.isArray(commandDetail.args)
++            ? commandDetail.args
++            : undefined,
+         };
+       })
+       .filter((detail): detail is ParsedCommandDetail => detail !== null);
