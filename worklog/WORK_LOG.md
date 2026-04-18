@@ -856,3 +856,15 @@ Human reviewer validation upgrades credibility but doesn't change the operationa
 The accidental ablation (single-round 43% vs iterative 80%) is the headline: **the review loop is the anti-slop mechanism.** 38pp attributable to iteration alone. The prereg's iterative design was correct; the shortcut was the mistake.
 
 Session total: ~30 hours across 2 days. 27 trials, 9 repos, 3 languages. 12 iterative convergence runs. 7 orchestrator bugs fixed. 50+ candidates screened across 12+ repos. ~100GB peak disk. Rust toolchain installed. 4 fork PRs created. 1 methodology invalidated and re-run.
+
+### 08:30 — RUST WORKS. 0% was infrastructure, not capability.
+
+Re-ran both Rust trials with proper cleanroom setup:
+- **ruff-24557**: build PASS, test PASS, reviewer "No comments." The refactoring was valid all along — single-round failure was from botched merged_dir construction.
+- **ruff-24616**: 3 build errors → codex read rustc output → fixed all 3 → 1 test failure → codex fixed → all pass. 2 rounds of compiler-driven iteration. Reviewer has 1 style comment (module structure). Code is valid.
+
+**Rust: 1/2 approved, 1/2 impasse on style. Not 0/2.**
+
+The compiler-as-reviewer hypothesis confirmed: rustc gives exact errors, codex applies exact fixes, convergence in 2 rounds. Faster convergence than Go (which oscillated to N=10 on most trials).
+
+Updated numbers: 17/22 approved (77%) active. Including Rust.
