@@ -17,7 +17,7 @@ Each trial takes a merged PR and rewinds to the commit where tests first passed 
 The pipeline:
 
 1. **Spec**: Codex reads the PR description and proposes specific refactoring claims ("extract this helper," "centralize this normalization," "remove this duplication").
-2. **Implement**: Opus and Codex each implement the spec independently. The one with smaller diff wins. (They usually produce nearly identical output. Blind-blind is insurance, not differentiation.)
+2. **Implement**: Opus and Codex each implement the spec independently. The one with smaller diff wins. (They tied on churn in one trial and landed within 10% on most. Blind-blind is insurance against single-model failure, not a source of diversity.)
 3. **Adversarial loop**: Codex reviews its own side's work. Finds issues. Fixes them. Rebuilds. Retests. Repeats up to 10 rounds. Findings oscillate — fixing 2 issues introduces 2 new ones — but the code hardens with each pass.
 4. **Independent review**: Gemini sees the final output for the first time. It never touched the code during construction. It says "approve" or "here are my comments."
 
@@ -53,9 +53,9 @@ Same starting code. Same spec. Same implementation. Only the review loop changed
 | Single-round | Spec → implement → 1 review | 9/21 = 43% |
 | Iterative (same code) | + hunt-code loop N≤10 + reviewer 1-2 rounds | 16/20 = 80% |
 
-That's the closest thing to a causal claim in this experiment. I didn't plan it — the screwup gave us the ablation the design couldn't.
+That's the causal claim: same code, same spec, loop added, 38pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
 
-What it means: **the spec doesn't matter much.** A first-draft spec from the PR description is good enough. The value is in catching and fixing problems after implementation. Which is exactly how human code review works — you don't write a perfect spec, you iterate on the code until a reviewer says ship it.
+What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over single-round spec + iterative review. The value is in catching and fixing problems after implementation. Which is exactly how human code review works — you don't write a perfect spec, you iterate on the code until a reviewer says ship it.
 
 ## What the adversarial loop actually does
 
@@ -63,7 +63,7 @@ It doesn't converge. On 8 of 12 iterative trials, the adversarial reviewer (Code
 
 But the independent reviewer (Gemini) approved 7 of those 8 cap-hit trials anyway. The adversarial bar — "zero findings" — is stricter than the merge-readiness bar. Hunt-code is kneading dough. You never "finish" kneading. You just do it enough that the structure is sound.
 
-The cap could probably be 5 instead of 10. The first few rounds catch real issues. The later rounds are adversarial noise.
+The cap should be 5, not 10. Rounds 1-3 catch real issues; rounds 4-10 oscillate without improving the reviewer's verdict (7/8 cap-hit trials were approved despite unresolved findings).
 
 ## The slop-slope diagnosis
 
@@ -77,13 +77,13 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 **Go repos: try it.** 87% approval on 15 valid trials, mostly from Google-ecosystem repos with fast tests and small codebases. The signal is strong but the sample is narrow. If your Go repo has a fast `go test ./...` cycle, this is worth a pilot.
 
-**TypeScript repos: maybe.** 67% approval, but the tooling needs work. Context loading on large monorepos is a bottleneck. If your repo is under 500 files, it works. If it's a monorepo, wait for the tooling to catch up.
+**TypeScript repos: yes if under 500 source files, no if monorepo.** 67% approval, but CLI-based agents hang on large trees. Context loading on large monorepos is a bottleneck. If your repo is under 500 files, it works. If it's a monorepo, wait for the tooling to catch up.
 
 **Rust repos: not yet.** The borrow checker is smarter than the models. Iterative compilation feedback might fix this — the compiler tells you exactly what's wrong — but nobody's tested it yet.
 
 ## The bigger picture
 
-The experiment accidentally measured something beyond forge efficacy. If you squint, the pipeline is a compiler. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
+The pipeline is a compiler. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
 
 For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output from parity to likely merge-ready. The bottleneck shifted from "can the machine write correct code" to "did the human write clear intent" — which is the same bottleneck that exists in human-to-human collaboration.
 
