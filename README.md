@@ -24,23 +24,41 @@ The 80% rate is measured by an LLM reviewer (Gemini 3.1 Pro), not humans. Human 
 
 ### Pipeline
 
+Two models converge on a solution. A third reviews independently.
+
 ```
-Blog post / PR description
+PR description + linked issues
         ↓
-   Goal anchor (issue + PR body)
+   Goal anchor
         ↓
-   Volley (codex sharpens spec into claims)
-        ↓
-   Hunt-spec (codex adversarial review, iterative N≤10)
-        ↓
-   Blind-blind (opus + codex implement independently, smaller-churn wins)
-        ↓
-   Hunt-code (codex + build + tests, iterative N≤10)
-        ↓
-   Reviewer-loop (gemini reviews, iterative until "No comments" or impasse)
-        ↓
+   ┌─────────────────────────────────────────┐
+   │  GENERATOR PAIR (Opus 4.6 + Codex 5.4)  │
+   │                                          │
+   │  Volley: codex sharpens spec into claims │
+   │  Blind-blind: both implement from spec,  │
+   │    smaller-churn wins                    │
+   └──────────────┬──────────────────────────┘
+                  ↓
+   ┌─────────────────────────────────────────┐
+   │  ADVERSARIAL LOOP (Codex vs Codex)       │
+   │                                          │
+   │  Hunt-spec: codex critiques claims       │
+   │  Hunt-code: codex finds defects          │
+   │    → codex addresses → rebuild+retest    │
+   │    → repeat until converge or N=10       │
+   │  Build + tests gate every round          │
+   └──────────────┬──────────────────────────┘
+                  ↓
    Complexity gate (δ=0.05 on mean cognitive)
-        ↓
+                  ↓
+   ┌─────────────────────────────────────────┐
+   │  INDEPENDENT REVIEWER (Gemini 3.1 Pro)   │
+   │                                          │
+   │  Sees final output blind                 │
+   │  Forced choice: approve or comment       │
+   │  Never saw the code during construction  │
+   └──────────────┬──────────────────────────┘
+                  ↓
    C_llm (merge-ready refactored code)
 ```
 
