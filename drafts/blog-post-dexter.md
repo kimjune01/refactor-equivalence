@@ -1,5 +1,7 @@
 # The slop-slope is real. The fix is a loop.
 
+*Caveat up front: the reviewer in this experiment is an LLM (Gemini 3.1 Pro), not a human. Human validation on a subset is prepared but pending. Everything below should be read as "LLM-reviewer-judged merge-readiness," not "human-confirmed quality." If that's a dealbreaker, stop here and check back when the human data lands.*
+
 I ran an autonomous refactoring pipeline on 27 merged PRs from 9 open-source repos. The question: if you let an LLM refactor code that already passes tests, does it make things better or worse?
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
@@ -44,7 +46,14 @@ I messed up the first run. The prereg specifies iterative convergence — run th
 
 So I re-ran with iteration on the same refactored code. Same spec, same implementation, just the review loop added on top. The rate jumped to 80%.
 
-That's a clean A/B on the review mechanism. I didn't plan it. The screwup gave us the ablation the design couldn't.
+Same starting code. Same spec. Same implementation. Only the review loop changed:
+
+| Condition | What ran | Approval |
+|-----------|---------|----------|
+| Single-round | Spec → implement → 1 review | 9/21 = 43% |
+| Iterative (same code) | + hunt-code loop N≤10 + reviewer 1-2 rounds | 16/20 = 80% |
+
+That's the closest thing to a causal claim in this experiment. I didn't plan it — the screwup gave us the ablation the design couldn't.
 
 What it means: **the spec doesn't matter much.** A first-draft spec from the PR description is good enough. The value is in catching and fixing problems after implementation. Which is exactly how human code review works — you don't write a perfect spec, you iterate on the code until a reviewer says ship it.
 
@@ -76,7 +85,7 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 The experiment accidentally measured something beyond forge efficacy. If you squint, the pipeline is a compiler. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
 
-The 80% approval rate means: this compiler is faithful enough to ship. The bottleneck isn't "can the machine write correct code." It's "did the human write clear intent." Which is the same bottleneck that exists in human-to-human collaboration.
+For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output from parity to likely merge-ready. The bottleneck shifted from "can the machine write correct code" to "did the human write clear intent" — which is the same bottleneck that exists in human-to-human collaboration.
 
 The review loop doesn't need to be LLMs. It could be a linter, a type checker, a test suite, a human reviewer. The point is: autonomous refactoring without a feedback loop is the slop-slope. Autonomous refactoring with a feedback loop is a workflow.
 
