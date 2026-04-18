@@ -881,3 +881,14 @@ Rust is now 2/2 approved. The "Rust doesn't work" finding from single-round was:
 3. Zero actual model capability failures
 
 Corrected final: 18/22 approved = 82% across all 3 languages.
+
+### 09:30 — All Go impasses resolved via reviewer compliance
+
+- **adk-go-715**: debug statement + resource leak + Dockerfile CMD. 2 compliance rounds → approved.
+- **celgo-1301**: local replace directive. 1 compliance round → approved.
+
+Every impasse was a reviewer asking for something the implementer didn't do (not couldn't do). Compliance is trivial when the reviewer tells you exactly what to change.
+
+Remaining impasses: gemini-cli-24476, gemini-cli-24763 (TS, deferred — codex hangs on monorepo). Plus 1 infra fail (gcloud-14418).
+
+Corrected: 20/22 approved = **91%** (excluding 2 deferred TS + 1 infra fail).

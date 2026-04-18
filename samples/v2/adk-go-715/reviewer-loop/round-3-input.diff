@@ -1,0 +1,198 @@
+diff --color -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-09 04:30:09
++++ /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go	2026-04-18 12:28:28
+@@ -56,15 +56,14 @@
+ 
+ type buildFlags struct {
+ 	tempDir             string
+-	execPath            string
+ 	execFile            string
+ 	dockerfileBuildPath string
+ 	archivePath         string
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -82,12 +81,11 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+-		return flags.deployOnagentEngine()
++		return flags.deployOnAgentEngine()
+ 	},
+ }
+ 
+@@ -106,27 +104,38 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
+-			f.source.origEntryPointPath = flags.source.entryPointPath
+-			absp, err := filepath.Abs(flags.source.entryPointPath)
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
++			f.source.origEntryPointPath = f.source.entryPointPath
++			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.source.entryPointPath, err)
+ 			}
+ 			f.source.entryPointPath = absp
+ 
+-			if flags.build.tempDir == "" {
+-				flags.build.tempDir = os.TempDir()
++			if f.build.tempDir == "" {
++				f.build.tempDir = os.TempDir()
+ 			}
+-			absp, err = filepath.Abs(flags.build.tempDir)
++			absp, err = filepath.Abs(f.build.tempDir)
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -136,14 +145,11 @@
+ 			dir, file := path.Split(f.source.entryPointPath)
+ 			f.source.srcBasePath = dir
+ 			f.source.entryPointPath = file
+-			if f.build.execPath == "" {
+-				exec, err := util.StripExtension(f.source.entryPointPath, ".go")
+-				if err != nil {
+-					return fmt.Errorf("cannot strip '.go' extension from entry point path '%v': %w", f.source.entryPointPath, err)
+-				}
+-				f.build.execFile = exec
+-				f.build.execPath = path.Join(f.build.tempDir, exec)
++			exec, err := util.StripExtension(f.source.entryPointPath, ".go")
++			if err != nil {
++				return fmt.Errorf("cannot strip '.go' extension from entry point path '%v': %w", f.source.entryPointPath, err)
+ 			}
++			f.build.execFile = exec
+ 			f.build.dockerfileBuildPath = path.Join(f.build.tempDir, "Dockerfile")
+ 			f.build.archivePath = path.Join(f.build.tempDir, "archive.tgz")
+ 
+@@ -155,32 +161,14 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+ 
+-// compileEntryPoint builds locally the server using flags and environment variables in order to be run in agentEngine containter
+-func (f *deployAgentEngineFlags) compileEntryPoint() error {
+-	return util.LogStartStop("Compiling server",
+-		func(p util.Printer) error {
+-			p("Using", f.source.entryPointPath, "as entry point")
+-			// for help on ldflags you can run go build -ldflags="--help" ./examples/quickstart/main.go
+-			//    -s    disable symbol table
+-			//    -w    disable DWARF generation
+-			//   using those flags reduces the size of an executable
+-			cmd := exec.Command("go", "build", "-ldflags", "-s -w", "-o", f.build.execPath, f.source.entryPointPath)
+-
+-			cmd.Dir = f.source.srcBasePath
+-			// build using staticallly linked libs, for linux/amd64
+-			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+-			return util.LogCommand(cmd, p)
+-		})
+-}
+-
+ // prepareDockerfile creates a temporary Dockerfile which will be executed by agentEngine
+ func (f *deployAgentEngineFlags) prepareDockerfile() error {
+ 	return util.LogStartStop("Preparing Dockerfile",
+@@ -197,17 +185,17 @@
+ FROM gcr.io/distroless/static-debian11
+ 
+ COPY --from=builder /app/` + f.build.execFile + `  /app/` + f.build.execFile + `
+-EXPOSE ` + strconv.Itoa(flags.agentEngine.serverPort) + `
++EXPOSE ` + strconv.Itoa(f.agentEngine.serverPort) + `
+ # Command to run the executable when the container starts
+-CMD ["/app/` + f.build.execFile + `", "web", "-port", "` + strconv.Itoa(flags.agentEngine.serverPort) + `"`)
++CMD ["/app/` + f.build.execFile + `", "web", "-port", "` + strconv.Itoa(f.agentEngine.serverPort) + `"`)
+ 
+-			if flags.agentEngine.api {
++			if f.agentEngine.api {
+ 				b.WriteString(`, "api", "-webui_address", "127.0.0.1:` + strconv.Itoa(f.proxy.port) + `"`)
+ 			}
+-			if flags.agentEngine.a2a {
+-				b.WriteString(`, "a2a", "--a2a_agent_url", "` + flags.agentEngine.a2aAgentCardURL + `"`)
++			if f.agentEngine.a2a {
++				b.WriteString(`, "a2a", "--a2a_agent_url", "` + f.agentEngine.a2aAgentCardURL + `"`)
+ 			}
+-			if flags.agentEngine.webui {
++			if f.agentEngine.webui {
+ 				b.WriteString(`, "webui", "--api_server_address", "http://127.0.0.1:` + strconv.Itoa(f.proxy.port) + `/api"]
+ 				`)
+ 			}
+@@ -236,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -314,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -330,10 +321,8 @@
+ 		})
+ }
+ 
+-// deployOnagentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+-func (f *deployAgentEngineFlags) deployOnagentEngine() error {
+-	fmt.Println(flags)
+-
++// deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
++func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err

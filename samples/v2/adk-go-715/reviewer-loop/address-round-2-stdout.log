@@ -1,0 +1,1601 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-715
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019da20f-9a22-7a83-b7fc-94f8ef68c4b4
+--------
+user
+
+Comply with ALL of these reviewer comments:
+
+## Comment 1 — Leftover debug statement
+**Severity**: approve-blocker
+**File**: cmd/adkgo/internal/deploy/agentengine/agentengine.go:310
+**Request**: Remove the debug statement `fmt.Println(flags)`.
+**Why**: This is leftover debugging code that will pollute standard output on every execution of the deploy command.
+
+## Comment 2 — Resource leak in cleanTemp
+**Severity**: approve-blocker
+**File**: cmd/adkgo/internal/deploy/agentengine/agentengine.go:152
+**Request**: Uncomment the `os.RemoveAll(f.build.tempDir)` logic and its associated error handling inside `cleanTemp()`.
+**Why**: Leaving this cleanup code commented out causes a temporary directory leak on the user's filesystem every time they deploy.
+
+## Comment 3 — Unfinished CLI documentation
+**Severity**: approve-blocker
+**File**: cmd/adkgo/internal/deploy/agentengine/agentengine.go:83
+**Request**: Replace the `TODO(kdroste)` and placeholder `????????????????????????????????????????????????????????????????????????????` in the `Long` description with actual documentation.
+**Why**: The CLI help output currently displays temporary placeholder text, which is not ready for users.
+
+## Comment 4 — Empty service name in runGcloudProxy
+**Severity**: approve-blocker
+**File**: cmd/adkgo/internal/deploy/agentengine/agentengine.go:303
+**Request**: Handle the case where `f.agentEngine.name` is empty. You should either validate that the user passed the `--name` flag, default it, or extract the underlying service name from the created Reasoning Engine.
+**Why**: If the user omits the optional `--name` flag, the deploy step will succeed but the local proxy step will execute `gcloud run services proxy ""` which immediately fails due to an empty service name.
+
+## Comment 5 — Missing required flag validation
+**Severity**: nice-to-have
+**File**: cmd/adkgo/internal/deploy/agentengine/agentengine.go:96
+**Request**: Consider validating that the `region` and `project_name` flags are provided (e.g., using `cobra.MarkFlagRequired`), or pull their defaults from the active environment.
+**Why**: If the user does not provide these flags, the deployment will fail with a malformed API path like `projects//locations/`.
+
+After making changes, verify the code compiles with 'go build ./...'. Do not produce output files besides source edits.
+
+mcp startup: no servers
+codex
+I’ll inspect the deploy command and nearby patterns first, then patch only that file unless the build exposes something broader. After the edit I’ll run `go build ./...` exactly as requested.
+exec
+/bin/zsh -lc "sed -n '1,380p' cmd/adkgo/internal/deploy/agentengine/agentengine.go" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package agentengine handles command line parameters and execution logic for agentengine deployment.
+
+package agentengine
+
+import (
+	"context"
+exec
+/bin/zsh -lc 'rg "agentEngine|runGcloudProxy|cleanTemp|MarkFlagRequired|Reasoning Engine|reasoning" -n cmd/adkgo internal .' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:44:type agentEngineServiceFlags struct {
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:72:	agentEngine agentEngineServiceFlags
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:80:// agentEngineCmd represents the agentEngine command
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:81:var agentEngineCmd = &cobra.Command{
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:95:	deploy.DeployCmd.AddCommand(agentEngineCmd)
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:97:	agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.region, "region", "r", "", "GCP Region")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:98:	agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.projectName, "project_name", "p", "", "GCP Project Name")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:99:	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.name, "name", "s", "", "Agent Engine name")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:100:	agentEngineCmd.PersistentFlags().StringVarP(&flags.build.tempDir, "temp_dir", "t", "", "Temp dir for build, defaults to os.TempDir() if not specified")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:101:	agentEngineCmd.PersistentFlags().IntVar(&flags.proxy.port, "proxy_port", 8081, "Local proxy port")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:102:	agentEngineCmd.PersistentFlags().IntVar(&flags.agentEngine.serverPort, "server_port", 8080, "agentEngine server port")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:103:	agentEngineCmd.PersistentFlags().StringVarP(&flags.source.entryPointPath, "entry_point_path", "e", "", "Path to an entry point (go 'main')")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:104:	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.a2a, "a2a", true, "Enable A2A")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:105:	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:106:	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:107:	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:128:			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:150:func (f *deployAgentEngineFlags) cleanTemp() error {
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:162:// prepareDockerfile creates a temporary Dockerfile which will be executed by agentEngine
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:178:EXPOSE ` + strconv.Itoa(f.agentEngine.serverPort) + `
+exec
+/bin/zsh -lc 'go env GOMOD' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-merged-715/go.mod
+codex
+The Agent Engine command has all five issues in the single file. I’m also checking the Cloud Run deploy command so the cleanup and required-flag handling match existing local style where possible.
+exec
+/bin/zsh -lc "sed -n '1,330p' cmd/adkgo/internal/deploy/cloudrun/cloudrun.go" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package cloudrun handles command line parameters and execution logic for cloudrun deployment.
+package cloudrun
+
+import (
+	"fmt"
+	"os"
+exec
+/bin/zsh -lc 'rg "MarkPersistentFlagRequired|MarkFlagRequired|project_name|entry_point_path" -n cmd/adkgo internal' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:98:	agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.projectName, "project_name", "p", "", "GCP Project Name")
+cmd/adkgo/internal/deploy/agentengine/agentengine.go:103:	agentEngineCmd.PersistentFlags().StringVarP(&flags.source.entryPointPath, "entry_point_path", "e", "", "Path to an entry point (go 'main')")
+cmd/adkgo/internal/deploy/cloudrun/cloudrun.go:101:	cloudrunCmd.PersistentFlags().StringVarP(&flags.gcloud.projectName, "project_name", "p", "", "GCP Project Name")
+cmd/adkgo/internal/deploy/cloudrun/cloudrun.go:106:	cloudrunCmd.PersistentFlags().StringVarP(&flags.source.entryPointPath, "entry_point_path", "e", "", "Path to an entry point (go 'main')")
+codex
+For the empty proxy target, the safest local fix is to retain the deployed `ReasoningEngine` resource name and derive a usable service name from it when `--name` is omitted. I’m checking the generated protobuf fields now so this stays compile-safe.
+exec
+/bin/zsh -lc 'rg "type ReasoningEngine struct" $(go env GOPATH 2>/dev/null)/pkg/mod/cloud.google.com/go/aiplatform* -n' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/aiplatformpb/reasoning_engine.pb.go:171:type ReasoningEngine struct {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1beta1/aiplatformpb/reasoning_engine.pb.go:172:type ReasoningEngine struct {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.105.0/apiv1/aiplatformpb/reasoning_engine.pb.go:135:type ReasoningEngine struct {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.105.0/apiv1beta1/aiplatformpb/reasoning_engine.pb.go:136:type ReasoningEngine struct {
+exec
+/bin/zsh -lc 'rg "ReasoningEngine" $(go env GOPATH 2>/dev/null)/pkg/mod/cloud.google.com/go/aiplatform* -n --glob '"'*.go'" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary_go123.go:302:func (it *ReasoningEngineIterator) All() iter.Seq2[*aiplatformpb.ReasoningEngine, error] {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:30:func ExampleReasoningEngineClient_ListReasoningEngines_all() {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:37:	c, err := aiplatform.NewReasoningEngineClient(ctx)
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:43:	req := &aiplatformpb.ListReasoningEnginesRequest{
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:45:		// See https://pkg.go.dev/cloud.google.com/go/aiplatform/apiv1/aiplatformpb#ListReasoningEnginesRequest.
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:47:	for resp, err := range c.ListReasoningEngines(ctx, req).All() {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:56:func ExampleReasoningEngineClient_ListLocations_all() {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:63:	c, err := aiplatform.NewReasoningEngineClient(ctx)
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:82:func ExampleReasoningEngineClient_ListOperations_all() {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/reasoning_engine_client_example_go123_test.go:89:	c, err := aiplatform.NewReasoningEngineClient(ctx)
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.105.0/apiv1beta1/auxiliary_go123.go:368:func (it *ReasoningEngineIterator) All() iter.Seq2[*aiplatformpb.ReasoningEngine, error] {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1617:// CreateReasoningEngineOperation manages a long-running operation from CreateReasoningEngine.
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1618:type CreateReasoningEngineOperation struct {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1625:func (op *CreateReasoningEngineOperation) Wait(ctx context.Context, opts ...gax.CallOption) (*aiplatformpb.ReasoningEngine, error) {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1626:	var resp aiplatformpb.ReasoningEngine
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1642:func (op *CreateReasoningEngineOperation) Poll(ctx context.Context, opts ...gax.CallOption) (*aiplatformpb.ReasoningEngine, error) {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1643:	var resp aiplatformpb.ReasoningEngine
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1657:func (op *CreateReasoningEngineOperation) Metadata() (*aiplatformpb.CreateReasoningEngineOperationMetadata, error) {
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1658:	var meta aiplatformpb.CreateReasoningEngineOperationMetadata
+/Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/auxiliary.go:1668:func (op *CreateReasoningEngineOperation) Done() bool {
+exec
+/bin/zsh -lc "sed -n '171,270p' /Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/aiplatformpb/reasoning_engine.pb.go" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+type ReasoningEngine struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Identifier. The resource name of the ReasoningEngine.
+	// Format:
+	// `projects/{project}/locations/{location}/reasoningEngines/{reasoning_engine}`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Required. The display name of the ReasoningEngine.
+	DisplayName string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// Optional. The description of the ReasoningEngine.
+	Description string `protobuf:"bytes,7,opt,name=description,proto3" json:"description,omitempty"`
+	// Optional. Configurations of the ReasoningEngine
+	Spec *ReasoningEngineSpec `protobuf:"bytes,3,opt,name=spec,proto3" json:"spec,omitempty"`
+	// Output only. Timestamp when this ReasoningEngine was created.
+	CreateTime *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	// Output only. Timestamp when this ReasoningEngine was most recently updated.
+	UpdateTime *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=update_time,json=updateTime,proto3" json:"update_time,omitempty"`
+	// Optional. Used to perform consistent read-modify-write updates. If not set,
+exec
+/bin/zsh -lc 'rg "ServiceAccount|service" /Users/junekim/go/pkg/mod/cloud.google.com/go/aiplatform@v1.121.0/apiv1/aiplatformpb/reasoning_engine.pb.go -n' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+55:	// Optional. The service account that the Reasoning Engine artifact runs as.
+60:	ServiceAccount *string `protobuf:"bytes,1,opt,name=service_account,json=serviceAccount,proto3,oneof" json:"service_account,omitempty"`
+123:func (x *ReasoningEngineSpec) GetServiceAccount() string {
+124:	if x != nil && x.ServiceAccount != nil {
+125:		return *x.ServiceAccount
+794:// the Developer Connect service.
+1266:	file_google_cloud_aiplatform_v1_service_networking_proto_init()
+codex
+I’m going to patch the Agent Engine command with a generated default service name, Cobra required-flag markers for project and region, real help text, restored temp cleanup, and removal of the debug print. The default name keeps the proxy command from ever receiving an empty target after a successful deploy.
+file update
+M /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -83,5 +83,4 @@
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+@@ -107,2 +106,9 @@
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+@@ -113,2 +119,6 @@
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+@@ -127,3 +137,3 @@
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+@@ -153,6 +163,6 @@
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+@@ -312,4 +322,2 @@
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+apply_patch(auto_approved=true) exited 0 in 16ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..289ded9afa3c355d64b2dfa9b490d63af155b0fc
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..289ded9afa3c355d64b2dfa9b490d63af155b0fc
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+The source edit is in place. I’m formatting the touched file and then I’ll run the full Go build to catch compile errors across packages.
+exec
+/bin/zsh -lc 'gofmt -w cmd/adkgo/internal/deploy/agentengine/agentengine.go' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+
+exec
+/bin/zsh -lc 'git diff -- cmd/adkgo/internal/deploy/agentengine/agentengine.go' in /tmp/refactor-eq-workdir/bb-merged-715 exited 129 in 0ms:
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..cd81da0d4a941ac330428c41d390c529a73a25ab
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+`gofmt` completed. This worktree directory is not a Git checkout, so `git diff` is unavailable here; I’ll verify by reading the changed sections directly after the build.
+exec
+/bin/zsh -lc 'go build ./...' in /tmp/refactor-eq-workdir/bb-merged-715file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..cd81da0d4a941ac330428c41d390c529a73a25ab
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+ succeeded in 2.35s:
+
+codex
+The full build is running now. I’ll wait for it to finish before doing the final sanity pass on the edited sections.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..cd81da0d4a941ac330428c41d390c529a73a25ab
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+`go build ./...` passed with no compiler output. I’m doing one final read over the touched command to make sure each reviewer point is represented plainly in source.
+exec
+/bin/zsh -lc "sed -n '220,330p' cmd/adkgo/internal/deploy/agentengine/agentengine.go" in /tmp/refactor-eq-workdir/bb-merged-715exec
+/bin/zsh -lc "sed -n '76,170p' cmd/adkgo/internal/deploy/agentengine/agentengine.go" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+}
+
+var flags deployAgentEngineFlags
+
+// agentEngineCmd represents the agentEngine command
+var agentEngineCmd = &cobra.Command{
+	Use:   "agentengine",
+	Short: "Deploys the application to Agent Engine.",
+	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
+	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+	`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return flags.deployOnAgentEngine()
+	},
+}
+
+// init creates flags and adds subcommand to parent
+func init() {
+	deploy.DeployCmd.AddCommand(agentEngineCmd)
+
+ succeeded in 0ms:
+}
+
+// gcloudDeployToAgentEngine invokes gcloud to deploy source on agentEngine
+func (f *deployAgentEngineFlags) gcloudDeployToAgentEngine() error {
+	return util.LogStartStop("Deploying to Agent Engine",
+		func(p util.Printer) error {
+			ctx := context.Background()
+
+			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+
+			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+			if err != nil {
+				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+			}
+			defer client.Close()
+
+			archiveContent, err := os.ReadFile(f.build.archivePath)
+			if err != nil {
+				return fmt.Errorf("cannot read archive file: %w", err)
+exec
+/bin/zsh -lc 'find .. -name .git -maxdepth 3 -type d -print' in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+../ruff/.git
+../google-adk-go/.git
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..cd81da0d4a941ac330428c41d390c529a73a25ab
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -310,8 +320,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+The requested behaviors are present. I’m adding a small guard at the proxy call site too, so even a future caller that skips `computeFlags` gets a clear error instead of invoking `gcloud` with an empty service argument.
+file update
+M /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -304,2 +304,5 @@
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+apply_patch(auto_approved=true) exited 0 in 20ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+I made the proxy guard. I’ll reformat and rerun the full build once more because this changed compiled code.
+exec
+/bin/zsh -lc 'gofmt -w cmd/adkgo/internal/deploy/agentengine/agentengine.go && go build ./...' in /tmp/refactor-eq-workdir/bb-merged-715file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+ succeeded in 2.35s:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+exec
+/bin/zsh -lc "nl -ba cmd/adkgo/internal/deploy/agentengine/agentengine.go | sed -n '80,165p;292,322p'" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+    80	// agentEngineCmd represents the agentEngine command
+    81	var agentEngineCmd = &cobra.Command{
+    82		Use:   "agentengine",
+    83		Short: "Deploys the application to Agent Engine.",
+    84		Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
+    85		After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+    86		`,
+    87		RunE: func(cmd *cobra.Command, args []string) error {
+    88			return flags.deployOnAgentEngine()
+    89		},
+    90	}
+    91	
+    92	// init creates flags and adds subcommand to parent
+    93	func init() {
+    94		deploy.DeployCmd.AddCommand(agentEngineCmd)
+    95	
+    96		agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.region, "region", "r", "", "GCP Region")
+    97		agentEngineCmd.PersistentFlags().StringVarP(&flags.gcloud.projectName, "project_name", "p", "", "GCP Project Name")
+    98		agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.name, "name", "s", "", "Agent Engine name")
+    99		agentEngineCmd.PersistentFlags().StringVarP(&flags.build.tempDir, "temp_dir", "t", "", "Temp dir for build, defaults to os.TempDir() if not specified")
+exec
+/bin/zsh -lc "rg \"fmt\\.Println\\(flags\\)|TODO\\(kdroste\\)|\\?{10,}|RemoveAll\\(|MarkPersistentFlagRequired|agent engine service name is empty|adk-agentengine\" cmd/adkgo/internal/deploy/agentengine/agentengine.go -n" in /tmp/refactor-eq-workdir/bb-merged-715 succeeded in 0ms:
+108:	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
+111:	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
+122:				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
+164:			err := os.RemoveAll(f.build.tempDir)
+306:				return fmt.Errorf("agent engine service name is empty")
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+codex
+Implemented all reviewer comments in [agentengine.go](/tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go):
+
+- Replaced placeholder CLI `Long` docs.
+- Marked `region` and `project_name` as required Cobra flags.
+- Added a generated default Agent Engine service name when `--name` is omitted, plus a proxy guard for empty names.
+- Restored `os.RemoveAll(f.build.tempDir)` cleanup with error handling.
+- Removed the leftover `fmt.Println(flags)` debug output.
+
+Verification passed:
+
+```sh
+go build ./...
+```
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+index a928543ea83ee790be21c0394c8ff281072c1de0..c6172c378ff92b509bf2074b8b1af2c20a6318f2
+--- a//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
++++ b//tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go
+@@ -62,8 +62,8 @@
+ }
+ 
+ type sourceFlags struct {
+-	srcBasePath    string
+-	entryPointPath string
++	srcBasePath        string
++	entryPointPath     string
+ 	origEntryPointPath string
+ }
+ 
+@@ -81,9 +81,8 @@
+ var agentEngineCmd = &cobra.Command{
+ 	Use:   "agentengine",
+ 	Short: "Deploys the application to Agent Engine.",
+-	// TODO(kdroste): add description
+-	Long: `????????????????????????????????????????????????????????????????????????????
+-	Local proxy adding authentication is started. 
++	Long: `Deployment packages the local Go application source, creates a Vertex AI Reasoning Engine, and starts the deployed service with ADK Web UI, REST API, and A2A support according to the selected flags.
++	After deployment completes, a local gcloud proxy is started so browser and API requests can use your active Google Cloud authentication.
+ 	`,
+ 	RunE: func(cmd *cobra.Command, args []string) error {
+ 		return flags.deployOnAgentEngine()
+@@ -105,12 +104,23 @@
+ 	agentEngineCmd.PersistentFlags().StringVarP(&flags.agentEngine.a2aAgentCardURL, "a2a_agent_url", "a", "http://127.0.0.1:8081", "A2A agent card URL as advertised in the public agent card")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.api, "api", true, "Enable API")
+ 	agentEngineCmd.PersistentFlags().BoolVar(&flags.agentEngine.webui, "webui", true, "Enable Web UI")
++
++	if err := agentEngineCmd.MarkPersistentFlagRequired("region"); err != nil {
++		panic(err)
++	}
++	if err := agentEngineCmd.MarkPersistentFlagRequired("project_name"); err != nil {
++		panic(err)
++	}
+ }
+ 
+ // computeFlags uses command line arguments to create a full config
+ func (f *deployAgentEngineFlags) computeFlags() error {
+ 	return util.LogStartStop("Computing flags & preparing temp",
+ 		func(p util.Printer) error {
++			now := time.Now()
++			if f.agentEngine.name == "" {
++				f.agentEngine.name = "adk-agentengine-" + now.Format("20060102-150405")
++			}
+ 			f.source.origEntryPointPath = f.source.entryPointPath
+ 			absp, err := filepath.Abs(f.source.entryPointPath)
+ 			if err != nil {
+@@ -125,7 +135,7 @@
+ 			if err != nil {
+ 				return fmt.Errorf("cannot make an absolute path from '%v': %w", f.build.tempDir, err)
+ 			}
+-			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+time.Now().Format("20060102_150405__")+"*")
++			f.build.tempDir, err = os.MkdirTemp(absp, "agentEngine_"+now.Format("20060102_150405__")+"*")
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create a temporary sub directory in '%v': %w", absp, err)
+ 			}
+@@ -151,10 +161,10 @@
+ 	return util.LogStartStop("Cleaning temp",
+ 		func(p util.Printer) error {
+ 			p("Clean temp starting with", f.build.tempDir)
+-			// err := os.RemoveAll(f.build.tempDir)
+-			// if err != nil {
+-			// 	return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
+-			// }
++			err := os.RemoveAll(f.build.tempDir)
++			if err != nil {
++				return fmt.Errorf("failed to clean temp directory %v: %w", f.build.tempDir, err)
++			}
+ 			return nil
+ 		})
+ }
+@@ -214,10 +224,10 @@
+ 	return util.LogStartStop("Deploying to Agent Engine",
+ 		func(p util.Printer) error {
+ 			ctx := context.Background()
+-			
++
+ 			parent := fmt.Sprintf("projects/%s/locations/%s", f.gcloud.projectName, f.gcloud.region)
+ 			endpoint := fmt.Sprintf("%s-aiplatform.googleapis.com:443", f.gcloud.region)
+-			
++
+ 			client, err := aiplatform.NewReasoningEngineClient(ctx, option.WithEndpoint(endpoint))
+ 			if err != nil {
+ 				return fmt.Errorf("cannot create ReasoningEngineClient: %w", err)
+@@ -292,6 +302,9 @@
+ func (f *deployAgentEngineFlags) runGcloudProxy() error {
+ 	return util.LogStartStop("Running local gcloud authenticating proxy",
+ 		func(p util.Printer) error {
++			if f.agentEngine.name == "" {
++				return fmt.Errorf("agent engine service name is empty")
++			}
+ 			targetWidth := 80
+ 
+ 			p(strings.Repeat("-", targetWidth))
+@@ -310,8 +323,6 @@
+ 
+ // deployOnAgentEngine executes the sequence of actions preparing and deploying the agent to agentEngine. Then runs authenticating proxy to newly deployed service
+ func (f *deployAgentEngineFlags) deployOnAgentEngine() error {
+-	fmt.Println(flags)
+-
+ 	err := f.computeFlags()
+ 	if err != nil {
+ 		return err
+
+tokens used
+53,828
+Implemented all reviewer comments in [agentengine.go](/tmp/refactor-eq-workdir/bb-merged-715/cmd/adkgo/internal/deploy/agentengine/agentengine.go):
+
+- Replaced placeholder CLI `Long` docs.
+- Marked `region` and `project_name` as required Cobra flags.
+- Added a generated default Agent Engine service name when `--name` is omitted, plus a proxy guard for empty names.
+- Restored `os.RemoveAll(f.build.tempDir)` cleanup with error handling.
+- Removed the leftover `fmt.Println(flags)` debug output.
+
+Verification passed:
+
+```sh
+go build ./...
+```
