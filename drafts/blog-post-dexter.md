@@ -136,6 +136,10 @@ One-shot LLM output is a coin flip (43%). Run [`/bug-hunt`](https://github.com/k
 
 A single model can't catch its own blind spots. Use Claude and Codex: one implements, the other hunts. Cross-model iteration is what breaks the self-congratulation loop.
 
+### Use skills or repeatable prompts.
+
+Ad-hoc prompting produces ad-hoc results. The 91% came from codified skills ([`/volley`](https://june.kim/volley), [`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md), [`/forge`](https://github.com/kimjune01/june.kim/blob/main/skills/forge/skill.md)) that run the same way every time. Reproducibility is what turns a lucky result into a reliable workflow.
+
 ### Lean on the compiler.
 
 On Rust and Go, the compiler catches what LLM reviewers hallucinate about. In our trials, Gemini's adversarial review had a ~40% false-positive rate (flagging issues that didn't exist). The compiler has 0%. Feed build errors back to the implementer and let it fix them mechanically. Convergence in 2 rounds.
