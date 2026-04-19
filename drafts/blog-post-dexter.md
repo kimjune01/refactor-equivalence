@@ -1,4 +1,9 @@
-# Does iteration mitigate against slop-slope?
+---
+variant: post
+title: "Does Iteration Mitigate Against Slop-Slope?"
+tags: experiment, methodology
+---
+
 
 *Caveat up front: the reviewer in this experiment is an LLM (Gemini 3.1 Pro), not a human. Human validation on a subset is prepared but pending. Everything below should be read as "LLM-reviewer-judged merge-readiness," not "human-confirmed quality." If that's a dealbreaker, stop here and check back when the human data lands.*
 
@@ -83,7 +88,7 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 ## The bigger picture
 
-The pipeline is a compiler. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
+The pipeline is a compiler. The methodology that produced this experiment — [/prework](https://june.kim/prework) — is itself an instance of the same pattern: clarify intent through writing, then compile to artifact. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
 
 For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output from parity to likely merge-ready. The bottleneck shifted from "can the machine write correct code" to "did the human write clear intent" — which is the same bottleneck that exists in human-to-human collaboration.
 
@@ -95,9 +100,9 @@ If you're using Claude Code, the two loops are available as skills:
 
 - **[/volley](https://june.kim/volley)** — collaborative iteration. Sharpens a spec into prescriptive claims against a goal, then iterates with an adversarial reviewer until the spec is defensible. The reviewer comments, the author complies, the reviewer re-checks. This is the collaborative loop that catches taste issues: module structure, naming, unnecessary complexity.
 
-- **[/bug-hunt](https://june.kim/bug-hunt)** — adversarial iteration. Hunts for bugs, fixes them, re-hunts until convergence. Build+test gates every round. This is the adversarial loop that catches mechanical slop: missing call sites, type mismatches, broken idioms. On Rust repos, the compiler does this job better than any LLM reviewer — zero false positives, exact fixes, convergence in 2 rounds.
+- **[`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md)** — adversarial iteration. Hunts for bugs, fixes them, re-hunts until convergence. Build+test gates every round. This is the adversarial loop that catches mechanical slop: missing call sites, type mismatches, broken idioms. On Rust repos, the compiler does this job better than any LLM reviewer — zero false positives, exact fixes, convergence in 2 rounds.
 
-Both together is [`/forge`](https://june.kim/soap-notes-soar) — the full pipeline this experiment measured.
+Both together is [`/forge`](https://github.com/kimjune01/june.kim/blob/main/skills/forge/skill.md) — the full pipeline this experiment measured.
 
 The single most important thing you can do to avoid slop-slope: **don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum. The adversarial loop alone moves you from coin-flip to viable. Adding `/volley` gets you the rest of the way.
 
