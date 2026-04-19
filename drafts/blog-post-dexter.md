@@ -128,6 +128,10 @@ Skip any one and the rate drops. Skip the loops entirely and you're at 43%. Toge
 
 The cheapest way to guarantee your LLM-generated code isn't slop: iterate before you ship.
 
+### Review the issue/problem description first.
+
+The forge pipeline uses the PR description as its goal predicate. If the problem statement is wrong, the refactoring is wrong. Spend your review budget on the [problem description](https://june.kim/goal-transmission), not the diff.
+
 ### Don't ship the first thing that passes tests.
 
 One-shot LLM output is a coin flip (43%). Run [`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md) for mechanical slop, [`/volley`](https://june.kim/volley) for taste. Together: 91%.
