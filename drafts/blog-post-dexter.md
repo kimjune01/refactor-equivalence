@@ -11,7 +11,7 @@ If AI-generated code silently degrades the codebase (the slop-slope), humans mus
 
 I tested this on 27 merged PRs from 9 repos:
 
-| Repo | Language | Stars | Avg PR size | Trials |
+| Repo | Language | Stars | Avg PR size (lines) | Trials |
 |------|----------|-------|------------|--------|
 | [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~7,800 lines | 9 |
 | [go-github](https://github.com/google/go-github) | Go | 11k | ~4,500 lines | 3 |
