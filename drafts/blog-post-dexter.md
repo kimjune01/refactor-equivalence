@@ -126,7 +126,7 @@ Skip any one and the rate drops. Skip the loops entirely and you're at 43%. Toge
 
 ## Recommendation
 
-**Don't ship the first thing that passes tests.**
+### Don't ship the first thing that passes tests.
 
 One-shot LLM output is a coin flip (43%). It passes tests, it doesn't regress complexity, and it still isn't merge-ready half the time. That's the slop-slope.
 
