@@ -29,7 +29,7 @@ Without a review loop: coin flip. 43% of the time a reviewer would approve the o
 
 With an iterative review loop: 91%. The same code, same spec, same models; but after refactoring, an adversarial LLM finds issues, another LLM fixes them, rebuild, retest, repeat. After convergence, an independent reviewer sees the result for the first time. 21 of 23 active trials approved.
 
-**The 48 percentage point difference comes from adding the loop.** Same code, same spec; only the review iteration differs. The A/B was accidental (I screwed up the first run and had to re-run with iteration), not preregistered. Take it as suggestive, not definitive. But the direction is clear.
+*The 48 percentage point difference comes from adding the loop.* Same code, same spec; only the review iteration differs. The A/B was accidental (I screwed up the first run and had to re-run with iteration), not preregistered. Take it as suggestive, not definitive. But the direction is clear.
 
 ## The setup
 
@@ -76,7 +76,7 @@ So I re-ran with iteration on the same refactored code. Same spec, same implemen
 
 Same code, same spec, loop added, 48pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
 
-What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over one-shot spec + iterative review. The value is in catching and fixing problems after implementation, the same way human code review works. You don't write a perfect spec. You iterate until a reviewer says ship it.
+What it means: *a first-draft spec from the PR description is sufficient.* Iterative spec sharpening added zero measured value over one-shot spec + iterative review. The value is in catching and fixing problems after implementation, the same way human code review works. You don't write a perfect spec. You iterate until a reviewer says ship it.
 
 ## What the adversarial loop actually does
 
