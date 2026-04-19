@@ -23,7 +23,7 @@ I tested this on 27 merged PRs from 9 repos:
 | [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~570 | 2 |
 | [adk-go](https://github.com/google/adk-go) | Go | 8k | ~500 | 2 |
 
-These are not toy PRs. The median is ~1,200 lines of additions+deletions. If forge handles PRs this size, smaller ones are implied.
+These are not toy PRs. The median is ~1,200 lines of additions+deletions. If LLM-led iterations can handle PRs this size, smaller ones are implied.
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
 
