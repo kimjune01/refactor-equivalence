@@ -926,3 +926,11 @@ This means: forge output is roughly as good as the human first draft in a head-t
 Combined with the 91% iterative approval rate: forge produces code that's AS GOOD AS the human first draft AND gets polished to merge-ready through iteration. The iteration is the value-add, not the initial refactoring quality.
 
 Phase 7b (C_llm vs C_final) still needs to run properly — first attempt had script issues.
+
+### 21:30 — Blog post published + sent to Dexter
+
+"Does LLM Iteration Mitigate Against Slop-Slope?" live at june.kim/does-iteration-mitigate-slop-slope. Sent directly to Dexter Horthy as a response to his April 15 email where he framed the predicate/transformation/slop-slope axes that motivated the experiment.
+
+refactor-equivalence repo pushed to GitHub (105 commits, after removing a 103MB diff that blocked push). june.kim deployed.
+
+Awaiting Dexter's response. Next steps depend on his read: methodology holds → share wider + gemini-cli human validation. Methodology doesn't hold → iterate on the experiment before going public.
