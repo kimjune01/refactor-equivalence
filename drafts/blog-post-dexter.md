@@ -130,7 +130,7 @@ The cheapest way to guarantee your LLM-generated code isn't slop: iterate before
 
 ### Review the issue/problem description first.
 
-In our experiment this was implicit; every trial used a merged PR whose problem description had already survived review. But in practice, the forge pipeline uses the PR description as its goal predicate. If the problem statement is wrong, the refactoring is wrong. Spend your review budget on the [problem description](https://june.kim/goal-transmission), not the diff.
+In our experiment this was free; every trial used a merged PR whose problem description had already survived public review. In private repos, problem descriptions are often skipped altogether. The 91% assumes a clear [goal predicate](https://june.kim/goal-transmission). Without one, iteration converges toward the wrong target.
 
 ### Don't ship the first thing that passes tests.
 
