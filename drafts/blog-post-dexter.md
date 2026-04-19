@@ -89,6 +89,18 @@ For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output 
 
 The review loop doesn't need to be LLMs. It could be a linter, a type checker, a test suite, a human reviewer. The point is: autonomous refactoring without a feedback loop is the slop-slope. Autonomous refactoring with a feedback loop is a workflow.
 
+## Recommendations
+
+If you're using Claude Code, the two loops are available as skills:
+
+- **[/volley](https://june.kim/volley)** — collaborative iteration. Sharpens a spec into prescriptive claims against a goal, then iterates with an adversarial reviewer until the spec is defensible. The reviewer comments, the author complies, the reviewer re-checks. This is the collaborative loop that catches taste issues: module structure, naming, unnecessary complexity.
+
+- **[/bug-hunt](https://june.kim/bug-hunt)** — adversarial iteration. Hunts for bugs, fixes them, re-hunts until convergence. Build+test gates every round. This is the adversarial loop that catches mechanical slop: missing call sites, type mismatches, broken idioms. On Rust repos, the compiler does this job better than any LLM reviewer — zero false positives, exact fixes, convergence in 2 rounds.
+
+Both together is [/forge](https://june.kim/forge) — the full pipeline this experiment measured.
+
+The single most important thing you can do to avoid slop-slope: **don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum. The adversarial loop alone moves you from coin-flip to viable. Adding `/volley` gets you the rest of the way.
+
 ## Caveats
 
 The reviewer is an LLM (Gemini 3.1 Pro), not a human. It never saw the code during construction (independent), but it shares biases with the models that wrote it. Human validation on a 4-PR subset is prepared but pending. If humans disagree with the 80% number, every LLM-as-judge paper needs to revisit.
