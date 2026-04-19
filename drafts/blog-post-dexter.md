@@ -13,17 +13,17 @@ I tested this on 27 merged PRs from 9 repos:
 
 | Repo | Language | Stars | Avg PR size (lines) | Trials |
 |------|----------|-------|------------|--------|
-| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~7,800 | 9 |
-| [go-github](https://github.com/google/go-github) | Go | 11k | ~4,500 | 3 |
-| [cel-go](https://github.com/google/cel-go) | Go | 3k | ~3,300 | 3 |
-| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | ~2,400 | 2 |
-| [adk-go](https://github.com/google/adk-go) | Go | 8k | ~1,400 | 2 |
-| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | ~1,100 | 2 |
-| [cli/cli](https://github.com/cli/cli) | Go | 40k | ~1,000 | 2 |
-| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~800 | 2 |
-| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | ~700 | 2 |
+| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | ~3,200 | 2 |
+| [cel-go](https://github.com/google/cel-go) | Go | 3k | ~2,100 | 3 |
+| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | ~1,500 | 2 |
+| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~1,300 | 9 |
+| [cli/cli](https://github.com/cli/cli) | Go | 40k | ~1,200 | 2 |
+| [go-github](https://github.com/google/go-github) | Go | 11k | ~1,200 | 3 |
+| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | ~840 | 2 |
+| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~570 | 2 |
+| [adk-go](https://github.com/google/adk-go) | Go | 8k | ~500 | 2 |
 
-These are large PRs. The smallest averages 700 lines of post-exclusion source changes; the largest, 7,800. If forge handles these, smaller PRs are implied.
+These are not toy PRs. The median is ~1,200 lines of additions+deletions. If forge handles PRs this size, smaller ones are implied.
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
 
