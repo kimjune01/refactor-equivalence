@@ -132,7 +132,7 @@ The cheapest way to guarantee your LLM-generated code isn't slop: iterate before
 
 One-shot LLM output is a coin flip (43%). Run [`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md) for mechanical slop, [`/volley`](https://june.kim/volley) for taste. Together: 91%.
 
-### Use two SOTA models, not one.
+### Use two SOTA models in tandem.
 
 A single model can't catch its own blind spots. Use Claude and Codex: one implements, the other hunts. Cross-model iteration is what breaks the self-congratulation loop.
 
