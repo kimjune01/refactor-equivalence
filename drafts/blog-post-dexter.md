@@ -44,6 +44,8 @@ The pipeline:
 
 Build and tests pass every round. Complexity never increases (measured via AST-level cognitive complexity). The question is only: is it merge-ready?
 
+Three models, three roles: one writes the spec, two compete on implementation, one hunts bugs, one judges. No model reviews its own output. A single model talking to itself doesn't catch its own blind spots; cross-model iteration does.
+
 ## The numbers
 
 27 trials. 9 repos (gemini-cli, cli/cli, cel-go, google-cloud-go, go-github, adk-go, go-containerregistry, gapic-generator-go, ruff). 3 languages.
