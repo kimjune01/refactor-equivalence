@@ -100,7 +100,7 @@ The review loop doesn't need to be LLMs. It could be a linter, a type checker, a
 
 The experiment reveals four ingredients for a forge-produced PR to land:
 
-1. **Problem description as goal predicate.** The PR title + body + linked issue IS the spec. Not a prompt, not a system instruction — the same artifact the human author wrote to communicate intent. If the problem description is clear enough for a human reviewer to evaluate against, it's clear enough for the pipeline. Bad descriptions produce bad refactors regardless of the machinery.
+1. **[Problem description as goal predicate.](https://june.kim/goal-transmission)** The PR title + body + linked issue IS the spec. Not a prompt, not a system instruction — the same artifact the human author wrote to communicate intent. If the problem description is clear enough for a human reviewer to evaluate against, it's clear enough for the pipeline. Bad descriptions produce bad refactors regardless of the machinery.
 
 2. **[/prework](https://june.kim/prework).** Before the pipeline touches code, the intent must be sharpened through writing. Prework is the discipline of clarifying what you want before you ask a machine to build it. The experiment's goal-anchored volley step is prework formalized: read the goal, read the code, produce specific claims. A first-draft prework is sufficient — iterative sharpening adds zero measured value.
 
