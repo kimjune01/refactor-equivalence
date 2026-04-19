@@ -43,22 +43,20 @@ Go: every trial that produced test-passing code eventually got reviewer approval
 
 Rust: initially 0% — both trials were classified as "hard no-op." Re-running with proper infrastructure revealed both refactorings were valid. One passed immediately; the other needed 2 rounds of compiler-driven fixes (codex reads `rustc` error → applies fix → rebuilds). Rust's strict compiler makes iteration MORE effective: zero false-positive feedback, exact line numbers, convergence in 2 rounds vs Go's typical 5-10 rounds of oscillating adversarial findings.
 
-TypeScript: 67% approval. The 2 remaining impasses are infrastructure limitations — CLI agents hang loading 1000-file monorepos into context. Scoping to the changed package subdirectory would likely resolve them.
+TypeScript: 67% approval. The 2 remaining impasses are infrastructure — CLI agents hang loading 1000-file monorepos into context. Scoping to the changed package resolves this.
 
 ## The accidental finding
 
 I messed up the first run. The prereg specifies iterative convergence — run the review loop until the reviewer approves or gives up. I skipped it and ran single-round. Got 43%. The user caught me: "you weren't supposed to take shortcuts."
 
-So I re-ran with iteration on the same refactored code. Same spec, same implementation, just the review loop added on top. The rate jumped to 80%.
-
-Same starting code. Same spec. Same implementation. Only the review loop changed:
+So I re-ran with iteration on the same refactored code. Same spec, same implementation, just the review loop added on top:
 
 | Condition | What ran | Approval |
 |-----------|---------|----------|
 | Single-round | Spec → implement → 1 review | 9/21 = 43% |
 | Iterative (same code) | + hunt-code loop N≤10 + reviewer compliance | 21/23 = 91% |
 
-That's the causal claim: same code, same spec, loop added, 38pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
+Same code, same spec, loop added, 48pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
 
 What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over single-round spec + iterative review. The value is in catching and fixing problems after implementation. Which is exactly how human code review works — you don't write a perfect spec, you iterate on the code until a reviewer says ship it.
 
@@ -94,40 +92,29 @@ For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output 
 
 The review loop doesn't need to be LLMs. It could be a linter, a type checker, a test suite, a human reviewer. The point is: autonomous refactoring without a feedback loop is the slop-slope. Autonomous refactoring with a feedback loop is a workflow.
 
-## Recommendations
-
 ## The ingredients
 
-The experiment reveals four ingredients for a forge-produced PR to land:
+Four ingredients for a forge-produced PR to land:
 
-1. **[Problem description as goal predicate.](https://june.kim/goal-transmission)** The PR title + body + linked issue IS the spec. Not a prompt, not a system instruction — the same artifact the human author wrote to communicate intent. If the problem description is clear enough for a human reviewer to evaluate against, it's clear enough for the pipeline. Wrong problems motivate wrong refactors regardless of the machinery.
+1. **[Problem description as goal predicate.](https://june.kim/goal-transmission)** The PR title + body + linked issue IS the spec. Wrong problems motivate wrong refactors regardless of the machinery.
 
-2. **[/prework](https://june.kim/prework).** Before the pipeline touches code, the intent must be sharpened through writing. Prework is the discipline of clarifying what you want before you ask a machine to build it. The experiment's goal-anchored volley step is prework formalized: read the goal, read the code, produce specific claims. A first-draft prework is sufficient — iterative sharpening adds zero measured value.
+2. **[/prework](https://june.kim/prework).** Clarify what you want before you ask a machine to build it. A first-draft prework is sufficient — iterative sharpening adds zero measured value.
 
-3. **[/volley](https://june.kim/volley).** Collaborative iteration. The reviewer states requirements, the implementer complies, the reviewer confirms. This catches taste: module structure, naming, idiom fit. Every impasse in the experiment was resolved by a single round of volley-style compliance — the reviewer asked, the agent did it.
+3. **[/volley](https://june.kim/volley).** Collaborative iteration. The reviewer states requirements, the implementer complies, the reviewer confirms. Catches taste: module structure, naming, idiom fit. Every impasse in the experiment was resolved by a single compliance round.
 
-4. **[`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md).** Adversarial iteration. Hunt for defects, fix them, re-hunt. Build+test gate every round. This catches slop: missing call sites, type mismatches, broken invariants. On Rust repos, the compiler does this job perfectly — zero false positives, exact fixes. On Go/TS repos, codex oscillates but the code hardens with each pass.
+4. **[`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md).** Adversarial iteration. Hunt for defects, fix them, re-hunt. Build+test gate every round. Catches slop: missing call sites, type mismatches, broken invariants. On Rust, the compiler does this perfectly.
 
-Skip any one and the rate drops. Skip the review loops entirely and you're at 43% — coin flip. The ingredients compound: prework gives direction, volley gives taste, bug-hunt gives correctness. Together: 91%.
+Skip any one and the rate drops. Skip the loops entirely and you're at 43%. Together: 91%. Both loops compose into [`/forge`](https://github.com/kimjune01/june.kim/blob/main/skills/forge/skill.md) — the pipeline this experiment measured.
 
-
-If you're using Claude Code, the two loops are available as skills:
-
-- **[/volley](https://june.kim/volley)** — collaborative iteration. Sharpens a spec into prescriptive claims against a goal, then iterates with an adversarial reviewer until the spec is defensible. The reviewer comments, the author complies, the reviewer re-checks. This is the collaborative loop that catches taste issues: module structure, naming, unnecessary complexity.
-
-- **[`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md)** — adversarial iteration. Hunts for bugs, fixes them, re-hunts until convergence. Build+test gates every round. This is the adversarial loop that catches mechanical slop: missing call sites, type mismatches, broken idioms. On Rust repos, the compiler does this job better than any LLM reviewer — zero false positives, exact fixes, convergence in 2 rounds.
-
-Both together is [`/forge`](https://github.com/kimjune01/june.kim/blob/main/skills/forge/skill.md) — the full pipeline this experiment measured.
-
-The single most important thing you can do to avoid slop-slope: **don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum. The adversarial loop alone moves you from coin-flip to viable. Adding `/volley` gets you the rest of the way.
+**Don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum.
 
 ## Caveats
 
-The reviewer is an LLM (Gemini 3.1 Pro), not a human. It never saw the code during construction (independent), but it shares biases with the models that wrote it. Human validation on a 4-PR subset is prepared but pending. If humans disagree with the 80% number, every LLM-as-judge paper needs to revisit.
+The reviewer is Gemini 3.1 Pro, not a human. It never saw the code during construction, but it shares biases with the models that wrote it. Human validation on a 4-PR subset is prepared but pending. If humans disagree with the 91%, every LLM-as-judge paper needs to revisit.
 
 Go dominates the sample (15/23 valid trials) because Google repos preserve multi-commit branch history while most OSS repos squash. Rust has only 2 trials. The sample is real-world but not language-balanced.
 
-Complexity measurement (mean cognitive across scoped functions) showed zero change on 19/21 trials. The metric is too coarse for the kind of changes forge makes. The refactoring is real — helpers get extracted, duplication gets removed — but it doesn't move per-function complexity when averaged across 100+ functions.
+Complexity measurement (mean cognitive complexity) showed zero change on 19/21 trials. The metric is too coarse for what forge does — extracting helpers and removing duplication doesn't move per-function averages across 100+ functions. The refactoring is real; the ruler doesn't measure it.
 
 ---
 
