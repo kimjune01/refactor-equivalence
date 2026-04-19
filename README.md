@@ -2,11 +2,11 @@
 
 ## Abstract
 
-We tested whether an autonomous LLM refactoring pipeline can produce merge-ready code from brownfield PRs. 27 trials across 9 open-source repos (TypeScript, Go, Rust). Without iterative review, the pipeline produces code at parity with doing nothing (43% reviewer approval). With iterative review — where an adversarial LLM finds issues, another LLM fixes them, and a reviewer re-evaluates until convergence — approval reaches 80%, clearing the pre-registered improvement threshold. The review loop accounts for 38 percentage points of improvement. The spec-sharpening step is unnecessary: a first-draft spec from the PR description is sufficient. Go repos see 87% approval; TypeScript 67%; Rust 0% (forge can't satisfy the borrow checker). The finding: autonomous refactoring without review is the slop-slope. Autonomous refactoring with iterative review is a viable workflow step.
+We tested whether an autonomous LLM refactoring pipeline can produce merge-ready code from brownfield PRs. 27 trials across 9 open-source repos (TypeScript, Go, Rust). Without iterative review, the pipeline produces code at parity with doing nothing (43% reviewer approval). With iterative review — where an adversarial LLM finds issues, another LLM fixes them, and a reviewer re-evaluates until convergence — approval reaches 91%, clearing the pre-registered improvement threshold. The review loop accounts for 48 percentage points of improvement. The spec-sharpening step is unnecessary: a first-draft spec from the PR description is sufficient. Go 100%, Rust 100%, TypeScript 67% (infrastructure bottleneck, not model capability). The finding: autonomous refactoring without review is the slop-slope. Autonomous refactoring with iterative review is a viable workflow step.
 
 ## Conclusion
 
-Add forge + iterative review to your CI for Go and TypeScript. Don't bother for Rust. The mechanism is the review loop, not the prompt, not the model, not the spec. Single-round forge is coin-flip. Iterative forge clears the bar.
+Add forge + iterative review to your CI. The mechanism is the review loop, not the prompt, not the model, not the spec. Single-round forge is coin-flip. Iterative forge clears the bar. Rust's strict compiler makes iteration MORE effective — convergence in 2 rounds vs Go's 5-10.
 
 The 80% rate is measured by an LLM reviewer (Gemini 3.1 Pro), not humans. Human validation on a 4-PR subset is prepared but pending. If human reviewers agree, the finding is confirmed. If they disagree, every LLM-as-judge result in the field needs revisiting.
 
