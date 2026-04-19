@@ -1,0 +1,4064 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-24763
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019da340-43d4-7593-8246-7efcfb6eab72
+--------
+user
+
+Comply with ALL of these reviewer comments. The full repo is at /tmp/refactor-eq-workdir/bb-merged-24763 but you only need to edit files in this directory.
+
+## Comment 1 — Missing `try...finally` in SandboxedFileSystemService
+**Severity**: approve-blocker
+**File**: packages/core/src/services/sandboxedFileSystemService.ts:62
+**Request**: Wrap the returned `Promise` in a `try { return await new Promise(...) } finally { prepared.cleanup?.() }` block in both `readTextFile` and `writeTextFile` (around line 124) instead of relying on `.on('close')` and `.on('error')` handlers.
+**Why**: The PR goal explicitly states that all process execution logic must use `try...finally` blocks; currently, if `spawn` synchronously throws inside the Promise constructor, the event handlers are never attached and the cleanup is skipped.
+
+## Comment 2 — Block-scoped cleanup leaked in childProcessFallback
+**Severity**: approve-blocker
+**File**: packages/core/src/services/shellExecutionService.ts:522
+**Request**: Extract the `let cmdCleanup` declaration outside the `try` block, and ensure it gets called via `catch` or `finally` if process spawning or initialization fails synchronously.
+**Why**: `cmdCleanup` is currently block-scoped inside the `try` block, meaning if `cpSpawn` synchronously throws, the `catch (e)` block cannot access it, leaking the sandbox resources.
+
+## Comment 3 — Block-scoped cleanup leaked in executeWithPty
+**Severity**: approve-blocker
+**File**: packages/core/src/services/shellExecutionService.ts:854
+**Request**: Move the `let cmdCleanup` declaration outside the `try` block, and ensure it gets called via `catch` or `finally` if `ptyInfo.module.spawn` throws.
+**Why**: Similar to `childProcessFallback`, if process spawning synchronously throws, `cmdCleanup` is inaccessible from the `catch` block and the resource leaks.
+
+## Comment 4 — Missing `try...finally` in GrepTool process check
+**Severity**: approve-blocker
+**File**: packages/core/src/tools/grep.ts:290
+**Request**: In `isCommandAvailable`, wrap the `await new Promise(...)` that spawns the child process in a `try...finally { cleanup?.() }` block rather than relying on `.on('close')` and `.on('error')` events.
+**Why**: A synchronous throw from `spawn` will completely bypass the Promise's event handlers, missing the cleanup.
+
+## Comment 5 — Missing `try...finally` in ToolRegistry discovery
+**Severity**: approve-blocker
+**File**: packages/core/src/tools/tool-registry.ts:386
+**Request**: Wrap the `proc = spawn(...)` call and the subsequent `await new Promise(...)` in a `try...finally { cleanupFunc?.(); }` block.
+**Why**: If `spawn` throws synchronously, `cleanupFunc` will never be invoked because the execution skips over the Promise and exits the function.
+
+## Comment 6 — Missing `try...finally` in shell-utils spawnAsync
+**Severity**: approve-blocker
+**File**: packages/core/src/utils/shell-utils.ts:846
+**Request**: Refactor `spawnAsync` to use `try { return await new Promise(...) } finally { prepared.cleanup?.() }` instead of calling `prepared.cleanup?.()` inside the child's `.on('close')`/`.on('error')` handlers.
+**Why**: Using a `finally` block around an `await`ed promise correctly guarantees cleanup even if `spawn` synchronously throws.
+
+## Comment 7 — Incorrect `try...finally` placement in execStreaming
+**Severity**: approve-blocker
+**File**: packages/core/src/utils/shell-utils.ts:908
+**Request**: Move the `const child = spawn(...)` call inside the `try` block and explicitly invoke `prepared.cleanup?.()` in the generator's `finally` block (lines 955-985).
+**Why**: Currently, `spawn` is called before the `try` block, so if it throws synchronously, the generator's `finally` block is bypassed and `cleanup` is leaked.
+
+After making changes, verify the code is syntactically valid. Source edits only.
+
+mcp startup: no servers
+codex
+I’ll inspect the affected files first, then make the requested cleanup-safety changes in place and run a syntax/type-oriented check that does not modify sources.
+exec
+/bin/zsh -lc "sed -n '480,920p' packages/core/src/services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '1,190p' packages/core/src/services/sandboxedFileSystemService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '250,330p' packages/core/src/tools/grep.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '810,995p' packages/core/src/utils/shell-utils.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { spawn } from 'node:child_process';
+import { type FileSystemService } from './fileSystemService.js';
+import { type SandboxManager } from './sandboxManager.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import { isNodeError } from '../utils/errors.js';
+import { resolveToRealPath, isSubpath } from '../utils/paths.js';
+
+/**
+ * A FileSystemService implementation that performs operations through a sandbox.
+ */
+export class SandboxedFileSystemService implements FileSystemService {
+  constructor(
+    private sandboxManager: SandboxManager,
+    private cwd: string,
+ succeeded in 0ms:
+            signal: timeoutController.signal,
+          });
+
+          // Add directory prefix if searching multiple directories
+          if (searchDirectories.length > 1) {
+            const dirName = path.basename(searchDir);
+            matches.forEach((match) => {
+              match.filePath = path.join(dirName, match.filePath);
+            });
+          }
+
+          allMatches = allMatches.concat(matches);
+        }
+      } catch (error) {
+        if (timeoutController.signal.aborted) {
+          throw new Error(
+            `Operation timed out after ${timeoutMs}ms. In large repositories, consider narrowing your search scope by specifying a 'dir_path' or an 'include_pattern'.`,
+          );
+        }
+        throw error;
+ succeeded in 0ms:
+    }
+    return newCommand;
+  }
+  return command.trim();
+}
+
+/**
+ * Detects command substitution patterns in a shell command, following bash quoting rules:
+ * - Single quotes ('): Everything literal, no substitution possible
+ * - Double quotes ("): Command substitution with $() and backticks unless escaped with \
+ * - No quotes: Command substitution with $(), <(), and backticks
+ * @param command The shell command string to check
+ * @returns true if command substitution would be executed by bash
+ */
+/**
+ * Determines whether a given shell command is allowed to execute based on
+ * the tool's configuration including allowlists and blocklists.
+ *
+ * This function operates in "default allow" mode. It is a wrapper around
+ * `checkCommandPermissions`.
+ succeeded in 0ms:
+    }
+
+    // 3. Prepare Sandboxed Command
+    const sandboxedCommand = await sandboxManager.prepareCommand({
+      command: resolvedExecutable,
+      args: spawnArgs,
+      env: baseEnv,
+      cwd,
+      policy: {
+        ...shellExecutionConfig,
+        ...(shellExecutionConfig.sandboxConfig || {}),
+        sanitizationConfig,
+        additionalPermissions: shellExecutionConfig.additionalPermissions,
+      },
+    });
+
+    return {
+      program: sandboxedCommand.program,
+      args: sandboxedCommand.args,
+      env: sandboxedCommand.env,
+exec
+/bin/zsh -lc "sed -n '350,425p' packages/core/src/tools/tool-registry.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+   */
+  async discoverAllTools(): Promise<void> {
+    // remove any previously discovered tools
+    this.removeDiscoveredTools();
+    await this.discoverAndRegisterToolsFromCommand();
+  }
+
+  private async discoverAndRegisterToolsFromCommand(): Promise<void> {
+    const discoveryCmd = this.config.getToolDiscoveryCommand();
+    if (!discoveryCmd) {
+      return;
+    }
+
+    try {
+      const cmdParts = parse(discoveryCmd);
+      if (cmdParts.length === 0) {
+        throw new Error(
+          'Tool discovery command is empty or contains only whitespace.',
+        );
+      }
+codex
+Some requested changes are already present in two spots, but I’m checking the surrounding code before editing because the remaining leaks are in longer process lifecycle paths.
+exec
+/bin/zsh -lc "sed -n '425,510p' packages/core/src/tools/tool-registry.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '330,390p' packages/core/src/tools/grep.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '920,1020p' packages/core/src/utils/shell-utils.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '920,1120p' packages/core/src/services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+        if (sizeLimitExceeded) return;
+        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+          sizeLimitExceeded = true;
+          proc.kill();
+          return;
+        }
+        stderrByteLength += data.length;
+        stderr += stderrDecoder.write(data);
+      });
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          proc.on('error', (err) => {
+            reject(err);
+          });
+          proc.on('close', (code) => {
+            stdout += stdoutDecoder.end();
+            stderr += stderrDecoder.end();
+
+            if (sizeLimitExceeded) {
+ succeeded in 0ms:
+
+      if (sandboxManager) {
+        try {
+          const prepared = await sandboxManager.prepareCommand({
+            command: checkCommand,
+            args: checkArgs,
+            cwd: process.cwd(),
+            env: process.env,
+          });
+          finalCommand = prepared.program;
+          finalArgs = prepared.args;
+          finalEnv = prepared.env;
+          cleanup = prepared.cleanup;
+        } catch (err) {
+          debugLogger.debug(
+            `[GrepTool] Sandbox preparation failed for '${command}':`,
+            err,
+          );
+        }
+      }
+ succeeded in 0ms:
+      windowsHide: true,
+    });
+
+    const rl = readline.createInterface({
+      input: child.stdout,
+      terminal: false,
+    });
+
+    const errorChunks: Buffer[] = [];
+    let stderrTotalBytes = 0;
+    const MAX_STDERR_BYTES = 20 * 1024; // 20KB limit
+
+    child.stderr.on('data', (chunk) => {
+      if (stderrTotalBytes < MAX_STDERR_BYTES) {
+        errorChunks.push(chunk);
+        stderrTotalBytes += chunk.length;
+      }
+    });
+
+    let error: Error | null = null;
+ succeeded in 0ms:
+        },
+        getBackgroundOutput: () => getFullBufferText(headlessTerminal),
+        getSubscriptionSnapshot: () => {
+          const endLine = headlessTerminal.buffer.active.length;
+          const startLine = Math.max(
+            0,
+            endLine - (shellExecutionConfig.maxSerializedLines ?? 2000),
+          );
+          const bufferData = serializeTerminalToObject(
+            headlessTerminal,
+            startLine,
+            endLine,
+          );
+          return bufferData.length > 0 ? bufferData : undefined;
+        },
+        formatInjection: (output, error) =>
+          ShellExecutionService.formatShellBackgroundCompletion(
+            ptyPid,
+            shellExecutionConfig.backgroundCompletionBehavior || 'silent',
+            output,
+exec
+/bin/zsh -lc "sed -n '1020,1065p' packages/core/src/utils/shell-utils.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '1120,1300p' packages/core/src/services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+    }
+  } finally {
+    prepared.cleanup?.();
+  }
+}
+ succeeded in 0ms:
+                  type: 'binary_progress',
+                  bytesReceived: totalBytes,
+                };
+                onOutputEvent(event);
+                ExecutionLifecycleService.emitEvent(ptyPid, event);
+                resolveChunk();
+              }
+            }),
+        );
+      };
+
+      ptyProcess.onData((data: string) => {
+        const bufferData = Buffer.from(data, 'utf-8');
+        handleOutput(bufferData);
+      });
+
+      ptyProcess.onExit(
+        ({ exitCode, signal }: { exitCode: number; signal?: number }) => {
+          exited = true;
+          abortSignal.removeEventListener('abort', abortHandler);
+exec
+/bin/zsh -lc 'git diff -- packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 129 in 0ms:
+warning: Limiting comparison with pathspecs is only supported if both paths are directories.
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+codex
+I found that `sandboxedFileSystemService`, `grep`, `spawnAsync`, and `execStreaming` already have the core `try/finally` structure. I’m editing the two shell execution cleanup scopes and moving tool discovery’s `spawn` into the cleanup-protected block.
+file update
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -512,2 +512,4 @@
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+@@ -520,3 +522,3 @@
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+@@ -527,2 +529,3 @@
+       );
++      cmdCleanup = cleanup;
+ 
+@@ -692,2 +695,3 @@
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+@@ -811,2 +815,3 @@
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+@@ -842,2 +847,3 @@
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+@@ -852,3 +858,3 @@
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+@@ -859,2 +865,3 @@
+       );
++      cmdCleanup = cleanup;
+ 
+@@ -1150,2 +1157,3 @@
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+@@ -1240,2 +1248,4 @@
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+apply_patch(auto_approved=true) exited 0 in 19ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..c5a7273b4f7532361c082dbb6a2533a03d97496e
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = cleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = cleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..c5a7273b4f7532361c082dbb6a2533a03d97496e
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = cleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = cleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+
+file update
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -383,2 +383,3 @@
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+@@ -398,39 +399,38 @@
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..c5a7273b4f7532361c082dbb6a2533a03d97496e
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = cleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = cleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..c5a7273b4f7532361c082dbb6a2533a03d97496e
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = cleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = cleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+The first shell patch introduced an avoidable name collision with an existing local `cleanup()` function, so I’m tightening that up before running checks.
+file update
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -522,3 +522,3 @@
+         cwd: finalCwd,
+-        cleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+@@ -529,3 +529,3 @@
+       );
+-      cmdCleanup = cleanup;
++      cmdCleanup = preparedCleanup;
+ 
+@@ -858,3 +858,3 @@
+         cwd: finalCwd,
+-        cleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+@@ -865,3 +865,3 @@
+       );
+-      cmdCleanup = cleanup;
++      cmdCleanup = preparedCleanup;
+ 
+apply_patch(auto_approved=true) exited 0 in 15ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+exec
+/bin/zsh -lc "sed -n '510,620p' packages/core/src/services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '380,470p' packages/core/src/tools/tool-registry.ts" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '850,910p' packages/core/src/services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+    shellExecutionConfig: ShellExecutionConfig,
+    isInteractive: boolean,
+  ): Promise<ShellExecutionHandle> {
+    let cmdCleanup: (() => void) | undefined;
+
+    try {
+      const isWindows = os.platform() === 'win32';
+
+      const {
+        program: finalExecutable,
+        args: finalArgs,
+        env: finalEnv,
+        cwd: finalCwd,
+        cleanup: preparedCleanup,
+      } = await this.prepareExecution(
+        commandToExecute,
+        cwd,
+        shellExecutionConfig,
+        isInteractive,
+      );
+ succeeded in 0ms:
+        .slice(1)
+        .filter((p): p is string => typeof p === 'string');
+      let finalEnv = process.env;
+      let cleanupFunc: (() => void) | undefined;
+      let stdout = '';
+
+      const sandboxManager = this.config.sandboxManager;
+      if (sandboxManager) {
+        const prepared = await sandboxManager.prepareCommand({
+          command: finalCommand,
+          args: finalArgs,
+          cwd: process.cwd(),
+          env: process.env,
+        });
+        finalCommand = prepared.program;
+        finalArgs = prepared.args;
+        finalEnv = prepared.env;
+        cleanupFunc = prepared.cleanup;
+      }
+
+ succeeded in 0ms:
+    try {
+      const cols = shellExecutionConfig.terminalWidth ?? 80;
+      const rows = shellExecutionConfig.terminalHeight ?? 30;
+
+      const {
+        program: finalExecutable,
+        args: finalArgs,
+        env: finalEnv,
+        cwd: finalCwd,
+        cleanup: preparedCleanup,
+      } = await this.prepareExecution(
+        commandToExecute,
+        cwd,
+        shellExecutionConfig,
+        true,
+      );
+      cmdCleanup = preparedCleanup;
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+exec
+/bin/zsh -lc 'git diff -- packages/core/src/services/shellExecutionService.ts packages/core/src/tools/tool-registry.ts packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/tools/grep.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 129 in 0ms:
+warning: Limiting comparison with pathspecs is only supported if both paths are directories.
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+The diff command is behaving as a no-index diff because this workdir is not seen as a Git repository. I’ll use direct file checks and the repo’s package scripts for validation instead.
+exec
+/bin/zsh -lc "sed -n '1,220p' packages/core/package.json" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "sed -n '1,220p' package.json" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+{
+  "name": "@google/gemini-cli-core",
+  "version": "0.36.0-nightly.20260317.2f90b4653",
+  "description": "Gemini CLI Core",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "bundle:browser-mcp": "node scripts/bundle-browser-mcp.mjs",
+    "build": "node ../../scripts/build_package.js",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:ci": "vitest run",
+    "posttest": "npm run build",
+    "typecheck": "tsc --noEmit"
+ succeeded in 0ms:
+{
+  "name": "@google/gemini-cli",
+  "version": "0.36.0-nightly.20260317.2f90b4653",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "private": "true",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+  },
+  "config": {
+    "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.36.0-nightly.20260317.2f90b4653"
+  },
+  "scripts": {
+    "start": "cross-env NODE_ENV=development node scripts/start.js",
+exec
+/bin/zsh -lc "pwd && rg --files -g 'package.json' -g 'tsconfig*.json' | head -80" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "rg \"cleanup\\?|cmdCleanup|spawn\\(\" packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-merged-24763
+tsconfig.json
+integration-tests/tsconfig.json
+packages/a2a-server/tsconfig.json
+packages/a2a-server/package.json
+node_modules/is-bigint/tsconfig.json
+node_modules/is-bigint/package.json
+node_modules/fast-safe-stringify/package.json
+node_modules/simple-swizzle/package.json
+packages/a2a-server/node_modules/@a2a-js/sdk/package.json
+node_modules/is-windows/package.json
+node_modules/shebang-regex/package.json
+packages/vscode-ide-companion/tsconfig.json
+packages/vscode-ide-companion/package.json
+packages/a2a-server/node_modules/@a2a-js/sdk/node_modules/uuid/package.json
+node_modules/simple-swizzle/node_modules/is-arrayish/package.json
+node_modules/formdata-polyfill/package.json
+node_modules/eventsource-parser/package.json
+node_modules/reusify/tsconfig.json
+node_modules/reusify/package.json
+ succeeded in 0ms:
+packages/core/src/services/shellExecutionService.ts:    cleanup?: () => void;
+packages/core/src/services/shellExecutionService.ts:    let cmdCleanup: (() => void) | undefined;
+packages/core/src/services/shellExecutionService.ts:      cmdCleanup = preparedCleanup;
+packages/core/src/services/shellExecutionService.ts:        cmdCleanup?.();
+packages/core/src/services/shellExecutionService.ts:        cmdCleanup = undefined;
+packages/core/src/services/shellExecutionService.ts:      cmdCleanup?.();
+packages/core/src/services/shellExecutionService.ts:    let cmdCleanup: (() => void) | undefined;
+packages/core/src/services/shellExecutionService.ts:      cmdCleanup = preparedCleanup;
+packages/core/src/services/shellExecutionService.ts:      const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+packages/core/src/services/shellExecutionService.ts:            cmdCleanup?.();
+packages/core/src/services/shellExecutionService.ts:            cmdCleanup = undefined;
+packages/core/src/services/shellExecutionService.ts:      cmdCleanup?.();
+packages/core/src/tools/tool-registry.ts:      const child = spawn(finalCommand, finalArgs, {
+packages/core/src/tools/tool-registry.ts:        const proc = spawn(finalCommand, finalArgs, {
+packages/core/src/services/sandboxedFileSystemService.ts:        const child = spawn(prepared.program, prepared.args, {
+packages/core/src/services/sandboxedFileSystemService.ts:      prepared.cleanup?.();
+packages/core/src/services/sandboxedFileSystemService.ts:        const child = spawn(prepared.program, prepared.args, {
+packages/core/src/services/sandboxedFileSystemService.ts:      prepared.cleanup?.();
+packages/core/src/utils/shell-utils.ts: * using the `spawn(executable, [...argsPrefix, commandString], { shell: false })` pattern.
+packages/core/src/utils/shell-utils.ts:        const child = spawn(finalCommand, finalArgs, {
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+I’m also aligning `writeTextFile` with the exact requested `return await new Promise(...)` shape, even though the existing `await` was functionally equivalent for a `void` method.
+file update
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -131,3 +131,3 @@
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+apply_patch(auto_approved=true) exited 0 in 18ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+The requested source changes are in place. I’m running the core package typecheck now to catch syntax or TypeScript errors in the touched code.
+exec
+/bin/zsh -lc 'npm run typecheck --workspace @google/gemini-cli-core' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 2 in 6.61s:
+
+> @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653 typecheck
+> tsc --noEmit
+
+src/telemetry/clearcut-logger/clearcut-logger.test.ts(50,46): error TS2307: Cannot find module '../../generated/git-commit.js' or its corresponding type declarations.
+src/telemetry/clearcut-logger/clearcut-logger.ts(73,46): error TS2307: Cannot find module '../../generated/git-commit.js' or its corresponding type declarations.
+npm error Lifecycle script `typecheck` failed with error:
+npm error code 2
+npm error path /private/tmp/refactor-eq-workdir/bb-merged-24763/packages/core
+npm error workspace @google/gemini-cli-core@0.36.0-nightly.20260317.2f90b4653
+npm error location /private/tmp/refactor-eq-workdir/bb-merged-24763/packages/core
+npm error command failed
+npm error command sh -c tsc --noEmit
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+The package typecheck failed before reaching these edits because `packages/core/src/generated/git-commit.js` is missing in this checkout. I’m running a narrower TypeScript parse/type pass over the touched files so we still verify the modified sources.
+exec
+/bin/zsh -lc 'npx tsc --noEmit --pretty false --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --types node packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 2 in 2.48s:
+packages/core/src/code_assist/admin/admin_controls.ts(43,24): error TS2339: Property 'includeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(44,22): error TS2339: Property 'includeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(46,24): error TS2339: Property 'excludeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(47,22): error TS2339: Property 'excludeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(53,24): error TS2339: Property 'includeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(54,22): error TS2339: Property 'includeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(56,24): error TS2339: Property 'excludeTools' does not exist on type 'unknown'.
+packages/core/src/code_assist/admin/admin_controls.ts(57,22): error TS2339: Property 'excludeTools' does not exist on type 'unknown'.
+packages/core/src/core/geminiChat.ts(841,30): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'object'.
+packages/core/src/hooks/hookRunner.ts(284,9): error TS2322: Type 'void | HookOutput' is not assignable to type 'HookOutput'.
+  Type 'void' is not assignable to type 'HookOutput'.
+packages/core/src/safety/checker-runner.ts(23,7): error TS2322: Type 'ZodDiscriminatedUnion<"decision", [ZodObject<{ decision: ZodLiteral<SafetyCheckDecision.ALLOW>; reason: ZodOptional<ZodString>; }, "strip", ZodTypeAny, { ...; }, { ...; }>, ZodObject<...>, ZodObject<...>]>' is not assignable to type 'ZodType<SafetyCheckResult, ZodTypeDef, SafetyCheckResult>'.
+  Types of property '_type' are incompatible.
+    Type '{ reason?: string; decision?: SafetyCheckDecision.ALLOW; } | { reason?: string; decision?: SafetyCheckDecision.DENY; } | { reason?: string; decision?: SafetyCheckDecision.ASK_USER; }' is not assignable to type 'SafetyCheckResult'.
+      Type '{ reason?: string; decision?: SafetyCheckDecision.ALLOW; }' is not assignable to type 'SafetyCheckResult'.
+        Type '{ reason?: string; decision?: SafetyCheckDecision.ALLOW; }' is not assignable to type '{ decision: SafetyCheckDecision.ALLOW; reason?: string; error?: string; }'.
+          Property 'decision' is optional in type '{ reason?: string; decision?: SafetyCheckDecision.ALLOW; }' but required in type '{ decision: SafetyCheckDecision.ALLOW; reason?: string; error?: string; }'.
+packages/core/src/safety/conseca/policy-generator.ts(156,9): error TS2322: Type '{ permissions?: SafetyCheckDecision; constraints?: string; rationale?: string; }' is not assignable to type 'ToolPolicy'.
+  Property 'permissions' is optional in type '{ permissions?: SafetyCheckDecision; constraints?: string; rationale?: string; }' but required in type 'ToolPolicy'.
+packages/core/src/telemetry/clearcut-logger/clearcut-logger.ts(73,46): error TS2307: Cannot find module '../../generated/git-commit.js' or its corresponding type declarations.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+The narrowed TypeScript command still follows imports far enough to hit unrelated existing errors. I’m switching to a no-resolve compiler pass and a syntax parser check over only the edited files.
+exec
+/bin/zsh -lc 'npx tsc --noEmit --pretty false --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --types node --noResolve packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 2 in 351ms:
+packages/core/src/services/sandboxedFileSystemService.ts(7,23): error TS2307: Cannot find module 'node:child_process' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(8,40): error TS2307: Cannot find module './fileSystemService.js' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(9,37): error TS2307: Cannot find module './sandboxManager.js' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(10,29): error TS2307: Cannot find module '../utils/debugLogger.js' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(11,29): error TS2307: Cannot find module '../utils/errors.js' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(12,46): error TS2307: Cannot find module '../utils/paths.js' or its corresponding type declarations.
+packages/core/src/services/sandboxedFileSystemService.ts(56,12): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+packages/core/src/services/sandboxedFileSystemService.ts(120,12): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+packages/core/src/services/shellExecutionService.ts(7,23): error TS2307: Cannot find module 'strip-ansi' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(8,48): error TS2307: Cannot find module '../utils/getPty.js' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(9,53): error TS2307: Cannot find module 'node:child_process' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(10,29): error TS2307: Cannot find module 'node:util' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(11,31): error TS2307: Cannot find module 'node:stream' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(12,16): error TS2307: Cannot find module 'node:os' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(13,31): error TS2307: Cannot find module 'node:fs' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(14,18): error TS2307: Cannot find module 'node:path' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(15,27): error TS2307: Cannot find module '@lydell/node-pty' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(16,44): error TS2307: Cannot find module '../utils/systemEncoding.js' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(22,42): error TS2307: Cannot find module '../utils/textUtils.js' or its corresponding type declarations.
+packages/core/src/services/shellExecutionService.ts(23,17): error TS2307: Cannot find module '@xterm/headless' or its corresponding type declarations.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+exec
+/bin/zsh -lc 'npx prettier --check packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 465ms:
+Checking formatting...
+All matched files use Prettier code style!
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+Prettier’s parser accepted the edited TypeScript files. I’m doing one targeted ESLint pass on the same files now for a stronger syntactic/lint check.
+exec
+/bin/zsh -lc 'npx eslint packages/core/src/services/sandboxedFileSystemService.ts packages/core/src/services/shellExecutionService.ts packages/core/src/tools/grep.ts packages/core/src/tools/tool-registry.ts packages/core/src/utils/shell-utils.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 3.92s:
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+exec
+/bin/zsh -lc "nl -ba packages/core/src/services/shellExecutionService.ts | sed -n '515,810p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/services/sandboxedFileSystemService.ts | sed -n '50,155p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/tool-registry.ts | sed -n '375,470p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/services/shellExecutionService.ts | sed -n '845,1225p'" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+    50	  async readTextFile(filePath: string): Promise<string> {
+    51	    const safePath = this.sanitizeAndValidatePath(filePath);
+    52	    const prepared = await this.sandboxManager.prepareCommand({
+    53	      command: '__read',
+    54	      args: [safePath],
+    55	      cwd: this.cwd,
+    56	      env: process.env,
+    57	      policy: {
+    58	        allowedPaths: [safePath],
+    59	      },
+    60	    });
+    61	
+    62	    try {
+    63	      return await new Promise((resolve, reject) => {
+    64	        // Direct spawn is necessary here for streaming large file contents.
+    65	
+    66	        const child = spawn(prepared.program, prepared.args, {
+    67	          cwd: this.cwd,
+    68	          env: prepared.env,
+    69	        });
+ succeeded in 0ms:
+   515	    try {
+   516	      const isWindows = os.platform() === 'win32';
+   517	
+   518	      const {
+   519	        program: finalExecutable,
+   520	        args: finalArgs,
+   521	        env: finalEnv,
+   522	        cwd: finalCwd,
+   523	        cleanup: preparedCleanup,
+   524	      } = await this.prepareExecution(
+   525	        commandToExecute,
+   526	        cwd,
+   527	        shellExecutionConfig,
+   528	        isInteractive,
+   529	      );
+   530	      cmdCleanup = preparedCleanup;
+   531	
+   532	      const child = cpSpawn(finalExecutable, finalArgs, {
+   533	        cwd: finalCwd,
+   534	        stdio: ['ignore', 'pipe', 'pipe'],
+ succeeded in 0ms:
+   375	        );
+   376	      }
+   377	
+   378	      let finalCommand: string = firstPart;
+   379	      let finalArgs: string[] = cmdParts
+   380	        .slice(1)
+   381	        .filter((p): p is string => typeof p === 'string');
+   382	      let finalEnv = process.env;
+   383	      let cleanupFunc: (() => void) | undefined;
+   384	      let stdout = '';
+   385	
+   386	      const sandboxManager = this.config.sandboxManager;
+   387	      if (sandboxManager) {
+   388	        const prepared = await sandboxManager.prepareCommand({
+   389	          command: finalCommand,
+   390	          args: finalArgs,
+   391	          cwd: process.cwd(),
+   392	          env: process.env,
+   393	        });
+   394	        finalCommand = prepared.program;
+ succeeded in 0ms:
+   845	      throw new Error('PTY implementation not found');
+   846	    }
+   847	    let spawnedPty: IPty | undefined;
+   848	    let cmdCleanup: (() => void) | undefined;
+   849	
+   850	    try {
+   851	      const cols = shellExecutionConfig.terminalWidth ?? 80;
+   852	      const rows = shellExecutionConfig.terminalHeight ?? 30;
+   853	
+   854	      const {
+   855	        program: finalExecutable,
+   856	        args: finalArgs,
+   857	        env: finalEnv,
+   858	        cwd: finalCwd,
+   859	        cleanup: preparedCleanup,
+   860	      } = await this.prepareExecution(
+   861	        commandToExecute,
+   862	        cwd,
+   863	        shellExecutionConfig,
+   864	        true,
+exec
+/bin/zsh -lc 'git status --short' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 128 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+exec
+/bin/zsh -lc "nl -ba packages/core/src/services/shellExecutionService.ts | sed -n '810,840p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/services/shellExecutionService.ts | sed -n '1225,1285p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/utils/shell-utils.ts | sed -n '835,1025p'" in /tmp/refactor-eq-workdir/bb-merged-24763exec
+/bin/zsh -lc "nl -ba packages/core/src/tools/grep.ts | sed -n '318,365p'" in /tmp/refactor-eq-workdir/bb-merged-24763 succeeded in 0ms:
+  1225	            finalize();
+  1226	          });
+  1227	        },
+  1228	      );
+  1229	
+  1230	      const abortHandler = async () => {
+  1231	        if (ptyProcess.pid && !exited) {
+  1232	          await killProcessGroup({
+  1233	            pid: ptyPid,
+  1234	            escalate: true,
+  1235	            isExited: () => exited,
+  1236	            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  1237	            pty: ptyProcess,
+  1238	          });
+  1239	        }
+  1240	      };
+  1241	
+  1242	      abortSignal.addEventListener('abort', abortHandler, { once: true });
+  1243	
+  1244	      return { pid: ptyPid, result };
+ succeeded in 0ms:
+   810	
+   811	        return;
+   812	      }
+   813	
+   814	      return { pid: child.pid, result };
+   815	    } catch (e) {
+   816	      cmdCleanup?.();
+   817	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   818	      const error = e as Error;
+   819	      return {
+   820	        pid: undefined,
+   821	        result: Promise.resolve({
+   822	          error,
+   823	          rawOutput: Buffer.from(''),
+   824	          output: '',
+   825	          exitCode: 1,
+   826	          signal: null,
+   827	          aborted: false,
+   828	          pid: undefined,
+   829	          executionMethod: 'none',
+ succeeded in 0ms:
+   835	export const spawnAsync = async (
+   836	  command: string,
+   837	  args: string[],
+   838	  options?: SpawnOptionsWithoutStdio & { sandboxManager?: SandboxManager },
+   839	): Promise<{ stdout: string; stderr: string }> => {
+   840	  const sandboxManager = options?.sandboxManager ?? new NoopSandboxManager();
+   841	  const prepared = await sandboxManager.prepareCommand({
+   842	    command,
+   843	    args,
+   844	    cwd: options?.cwd?.toString() ?? process.cwd(),
+   845	    env: options?.env ?? process.env,
+   846	  });
+   847	
+   848	  const { program: finalCommand, args: finalArgs, env: finalEnv } = prepared;
+   849	
+   850	  try {
+   851	    return await new Promise<{ stdout: string; stderr: string }>(
+   852	      (resolve, reject) => {
+   853	        const child = spawn(finalCommand, finalArgs, {
+   854	          ...options,
+ succeeded in 0ms:
+   318	   */
+   319	  private async isCommandAvailable(command: string): Promise<boolean> {
+   320	    const checkCommand = process.platform === 'win32' ? 'where' : 'command';
+   321	    const checkArgs =
+   322	      process.platform === 'win32' ? [command] : ['-v', command];
+   323	    try {
+   324	      const sandboxManager = this.config.sandboxManager;
+   325	
+   326	      let finalCommand = checkCommand;
+   327	      let finalArgs = checkArgs;
+   328	      let finalEnv = process.env;
+   329	      let cleanup: (() => void) | undefined;
+   330	
+   331	      if (sandboxManager) {
+   332	        try {
+   333	          const prepared = await sandboxManager.prepareCommand({
+   334	            command: checkCommand,
+   335	            args: checkArgs,
+   336	            cwd: process.cwd(),
+   337	            env: process.env,
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+codex
+Implemented the reviewer-requested cleanup handling.
+
+Changes made:
+- [sandboxedFileSystemService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts):62 and :131 now use `try { return await new Promise(...) } finally { prepared.cleanup?.() }` for both read and write paths.
+- [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts):513 moves `cmdCleanup` outside `childProcessFallback`’s `try`, calls it from `catch`, and clears it after normal exit cleanup.
+- [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts):848 does the same for `executeWithPty`, including cleanup when `ptyInfo.module.spawn` throws.
+- [tool-registry.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts):400 now wraps `spawn(...)` and the process wait promise in `try/finally`, so `cleanupFunc?.()` runs even on synchronous spawn failure.
+
+Verification:
+- `npx prettier --check ...` passed for all touched files.
+- `npx eslint ...` passed for all touched files.
+- `npm run typecheck --workspace @google/gemini-cli-core` could not complete because this checkout is missing `packages/core/src/generated/git-commit.js`, producing existing `TS2307` errors unrelated to these edits.
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+index cd0c95bdf788f593909070232d7f8ea1b8788386..0161666a8dd509a4a8e1fee5961f31401e426e4d
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -129,7 +129,7 @@
+     });
+ 
+     try {
+-      await new Promise<void>((resolve, reject) => {
++      return await new Promise<void>((resolve, reject) => {
+         // Direct spawn is necessary here for streaming large file contents.
+ 
+         const child = spawn(prepared.program, prepared.args, {
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..b3f57476f1c9a7d8f6b3ab1c0ab3f21ad3db5ac3
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -809,6 +813,7 @@
+ 
+       return { pid: child.pid, result };
+     } catch (e) {
++      cmdCleanup?.();
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+       return {
+@@ -840,6 +845,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +856,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1155,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1238,6 +1246,8 @@
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
+ 
++      cmdCleanup?.();
++
+       if (spawnedPty) {
+         try {
+           (spawnedPty as IPty & { destroy?: () => void }).destroy?.();
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+index bb9097709fb1cbd0cc551072db8f5b88e2adcb92..7811902af5cc5d4772ba9e77439384beaf1e7b1a
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+@@ -381,6 +381,7 @@
+         .filter((p): p is string => typeof p === 'string');
+       let finalEnv = process.env;
+       let cleanupFunc: (() => void) | undefined;
++      let stdout = '';
+ 
+       const sandboxManager = this.config.sandboxManager;
+       if (sandboxManager) {
+@@ -396,43 +397,42 @@
+         cleanupFunc = prepared.cleanup;
+       }
+ 
+-      const proc = spawn(finalCommand, finalArgs, {
+-        env: finalEnv,
+-      });
+-      let stdout = '';
+-      const stdoutDecoder = new StringDecoder('utf8');
+-      let stderr = '';
+-      const stderrDecoder = new StringDecoder('utf8');
+-      let sizeLimitExceeded = false;
+-      const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
+-      const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
++      try {
++        const proc = spawn(finalCommand, finalArgs, {
++          env: finalEnv,
++        });
++        const stdoutDecoder = new StringDecoder('utf8');
++        let stderr = '';
++        const stderrDecoder = new StringDecoder('utf8');
++        let sizeLimitExceeded = false;
++        const MAX_STDOUT_SIZE = 10 * 1024 * 1024; // 10MB limit
++        const MAX_STDERR_SIZE = 10 * 1024 * 1024; // 10MB limit
+ 
+-      let stdoutByteLength = 0;
+-      let stderrByteLength = 0;
++        let stdoutByteLength = 0;
++        let stderrByteLength = 0;
+ 
+-      proc.stdout.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stdoutByteLength += data.length;
+-        stdout += stdoutDecoder.write(data);
+-      });
++        proc.stdout.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stdoutByteLength + data.length > MAX_STDOUT_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stdoutByteLength += data.length;
++          stdout += stdoutDecoder.write(data);
++        });
+ 
+-      proc.stderr.on('data', (data) => {
+-        if (sizeLimitExceeded) return;
+-        if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
+-          sizeLimitExceeded = true;
+-          proc.kill();
+-          return;
+-        }
+-        stderrByteLength += data.length;
+-        stderr += stderrDecoder.write(data);
+-      });
++        proc.stderr.on('data', (data) => {
++          if (sizeLimitExceeded) return;
++          if (stderrByteLength + data.length > MAX_STDERR_SIZE) {
++            sizeLimitExceeded = true;
++            proc.kill();
++            return;
++          }
++          stderrByteLength += data.length;
++          stderr += stderrDecoder.write(data);
++        });
+ 
+-      try {
+         await new Promise<void>((resolve, reject) => {
+           proc.on('error', (err) => {
+             reject(err);
+
+tokens used
+60,109
+Implemented the reviewer-requested cleanup handling.
+
+Changes made:
+- [sandboxedFileSystemService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts):62 and :131 now use `try { return await new Promise(...) } finally { prepared.cleanup?.() }` for both read and write paths.
+- [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts):513 moves `cmdCleanup` outside `childProcessFallback`’s `try`, calls it from `catch`, and clears it after normal exit cleanup.
+- [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts):848 does the same for `executeWithPty`, including cleanup when `ptyInfo.module.spawn` throws.
+- [tool-registry.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts):400 now wraps `spawn(...)` and the process wait promise in `try/finally`, so `cleanupFunc?.()` runs even on synchronous spawn failure.
+
+Verification:
+- `npx prettier --check ...` passed for all touched files.
+- `npx eslint ...` passed for all touched files.
+- `npm run typecheck --workspace @google/gemini-cli-core` could not complete because this checkout is missing `packages/core/src/generated/git-commit.js`, producing existing `TS2307` errors unrelated to these edits.

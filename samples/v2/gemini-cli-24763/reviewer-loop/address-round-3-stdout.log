@@ -1,0 +1,970 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019da350-af8d-7fb3-b91b-637c7f510c1c
+--------
+user
+
+Comply with this reviewer comment. The full repo is at /tmp/refactor-eq-workdir/bb-merged-24763.
+
+## Comment 1 — Clear `cmdCleanup` in error handlers to prevent double-invocation
+**Severity**: nice-to-have
+**File**: packages/core/src/services/shellExecutionService.ts:814
+**Request**: Add `cmdCleanup = undefined;` immediately after `cmdCleanup?.();` in the `catch` block of `childProcessFallback` (and make the identical change in the `catch` block for `executeWithPty` around line 1249).
+**Why**: While the underlying sandbox cleanup functions safely ignore errors on double execution, clearing the reference matches the pattern you established in the success paths (`closeCommand` and `finalize`), preventing an unnecessary secondary execution if the process lifecycle events (like `onExit`) still fire during teardown.
+
+Source edits only.
+
+mcp startup: no servers
+codex
+I’ll make the two requested source-only edits in `shellExecutionService.ts`, then verify the diff is limited to those cleanup assignments.
+exec
+/bin/zsh -lc "rg -n \"cmdCleanup\\?\\.\\(\\);|childProcessFallback|executeWithPty|catch\" shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src exited 2 in 0ms:
+rg: shellExecutionService.ts: IO error for operation on shellExecutionService.ts: No such file or directory (os error 2)
+exec
+/bin/zsh -lc 'git diff -- packages/core/src/services/shellExecutionService.ts' in /tmp/refactor-eq-workdir/bb-merged-24763 exited 129 in 0ms:
+warning: Not a git repository. Use --no-index to compare two paths outside a working tree
+usage: git diff --no-index [<options>] <path> <path> [<pathspec>...]
+
+Diff output format options
+    -p, --patch           generate patch
+    -s, --no-patch        suppress diff output
+    -u                    generate patch
+    -U, --unified[=<n>]   generate diffs with <n> lines context
+    -W, --[no-]function-context
+                          generate diffs with <n> lines context
+    --raw                 generate the diff in raw format
+    --patch-with-raw      synonym for '-p --raw'
+    --patch-with-stat     synonym for '-p --stat'
+    --numstat             machine friendly --stat
+    --shortstat           output only the last line of --stat
+    -X, --dirstat[=<param1>,<param2>...]
+                          output the distribution of relative amount of changes for each sub-directory
+    --cumulative          synonym for --dirstat=cumulative
+    --dirstat-by-file[=<param1>,<param2>...]
+                          synonym for --dirstat=files,<param1>,<param2>...
+codex
+The initial path assumption was off by one directory for the file, and Git metadata is not at the stated repo root. I’m locating the file and repository root before editing so the patch lands exactly where requested.
+exec
+/bin/zsh -lc pwd in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+/private/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src
+exec
+/bin/zsh -lc 'find /tmp/refactor-eq-workdir/bb-merged-24763 -name .git -type d -prune' in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "rg --files -g 'shellExecutionService.ts' /tmp/refactor-eq-workdir/bb-merged-24763" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 78ms:
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+ succeeded in 415ms:
+
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '1220,1275p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '780,835p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+  1220	      );
+  1221	
+  1222	      const abortHandler = async () => {
+  1223	        if (ptyProcess.pid && !exited) {
+  1224	          await killProcessGroup({
+  1225	            pid: ptyPid,
+  1226	            escalate: true,
+  1227	            isExited: () => exited,
+  1228	            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  1229	            pty: ptyProcess,
+  1230	          });
+  1231	        }
+  1232	      };
+  1233	
+  1234	      abortSignal.addEventListener('abort', abortHandler, { once: true });
+  1235	
+  1236	      return { pid: ptyPid, result };
+  1237	    } catch (e) {
+  1238	      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  1239	      const error = e as Error;
+ succeeded in 0ms:
+   780	                type: 'data',
+   781	                chunk: remaining,
+   782	              };
+   783	              onOutputEvent(event);
+   784	              if (child.pid) {
+   785	                ExecutionLifecycleService.emitEvent(child.pid, event);
+   786	              }
+   787	            }
+   788	          }
+   789	        }
+   790	        if (stderrDecoder) {
+   791	          const remaining = stderrDecoder.decode();
+   792	          if (remaining) {
+   793	            state.output += remaining;
+   794	            if (isStreamingRawContent) {
+   795	              const event: ShellOutputEvent = {
+   796	                type: 'data',
+   797	                chunk: remaining,
+   798	              };
+   799	              onOutputEvent(event);
+exec
+/bin/zsh -lc "rg -n \"cmdCleanup\\?\\.\\(\\);\" services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+692:        cmdCleanup?.();
+1150:            cmdCleanup?.();
+codex
+The current file already differs from the reviewer’s line numbers: the cleanup calls are earlier in the functions, inside lifecycle/finalization code, and the displayed catch blocks do not yet contain them. I’m reading the full function context to place the requested clearing only where `cmdCleanup?.()` is already invoked.
+exec
+/bin/zsh -lc "rg -n \"let cmdCleanup|cmdCleanup = undefined|closeCommand|finalize|catch \\(e\\)\" services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+811:    } catch (e) {
+1148:          const finalize = () => {
+1200:            finalize();
+1217:            finalize();
+1237:    } catch (e) {
+1385:    } catch (e) {
+1418:      } catch (e) {
+1473:      } catch (e) {
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '1110,1165p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '640,715p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+  1110	
+  1111	                isWriting = true;
+  1112	                headlessTerminal.write(decodedChunk, () => {
+  1113	                  render();
+  1114	                  isWriting = false;
+  1115	                  resolveChunk();
+  1116	                });
+  1117	              } else {
+  1118	                const totalBytes = binaryBytesReceived;
+  1119	                const event: ShellOutputEvent = {
+  1120	                  type: 'binary_progress',
+  1121	                  bytesReceived: totalBytes,
+  1122	                };
+  1123	                onOutputEvent(event);
+  1124	                ExecutionLifecycleService.emitEvent(ptyPid, event);
+  1125	                resolveChunk();
+  1126	              }
+  1127	            }),
+  1128	        );
+  1129	      };
+ succeeded in 0ms:
+   640	            }
+   641	          }
+   642	        }
+   643	
+   644	        if (isStreamingRawContent) {
+   645	          const decoder = stream === 'stdout' ? stdoutDecoder : stderrDecoder;
+   646	          const decodedChunk = decoder.decode(data, { stream: true });
+   647	
+   648	          const { newBuffer, truncated } = this.appendAndTruncate(
+   649	            state.output,
+   650	            decodedChunk,
+   651	            MAX_CHILD_PROCESS_BUFFER_SIZE,
+   652	          );
+   653	          state.output = newBuffer;
+   654	          if (truncated) {
+   655	            state.truncated = true;
+   656	          }
+   657	
+   658	          if (decodedChunk) {
+   659	            const event: ShellOutputEvent = {
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '520,640p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '990,1085p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+   520	        cwd: finalCwd,
+   521	        cleanup: cmdCleanup,
+   522	      } = await this.prepareExecution(
+   523	        commandToExecute,
+   524	        cwd,
+   525	        shellExecutionConfig,
+   526	        isInteractive,
+   527	      );
+   528	
+   529	      const child = cpSpawn(finalExecutable, finalArgs, {
+   530	        cwd: finalCwd,
+   531	        stdio: ['ignore', 'pipe', 'pipe'],
+   532	        windowsVerbatimArguments: isWindows ? false : undefined,
+   533	        shell: false,
+   534	        detached: !isWindows,
+   535	        env: finalEnv,
+   536	      });
+   537	
+   538	      const state = {
+   539	        output: '',
+ succeeded in 0ms:
+   990	            endLine,
+   991	          );
+   992	        } else {
+   993	          newOutput = (
+   994	            serializeTerminalToObject(headlessTerminal, startLine, endLine) ||
+   995	            []
+   996	          ).map((line) =>
+   997	            line.map((token) => {
+   998	              token.fg = '';
+   999	              token.bg = '';
+  1000	              return token;
+  1001	            }),
+  1002	          );
+  1003	        }
+  1004	
+  1005	        let lastNonEmptyLine = -1;
+  1006	        for (let i = newOutput.length - 1; i >= 0; i--) {
+  1007	          const line = newOutput[i];
+  1008	          if (
+  1009	            line
+exec
+/bin/zsh -lc 'rg -n "cmdCleanup" services/shellExecutionService.ts' in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+521:        cleanup: cmdCleanup,
+692:        cmdCleanup?.();
+853:        cleanup: cmdCleanup,
+1150:            cmdCleanup?.();
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '830,875p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '890,955p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '465,535p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+   830	  private static async executeWithPty(
+   831	    commandToExecute: string,
+   832	    cwd: string,
+   833	    onOutputEvent: (event: ShellOutputEvent) => void,
+   834	    abortSignal: AbortSignal,
+   835	    shellExecutionConfig: ShellExecutionConfig,
+   836	    ptyInfo: PtyImplementation,
+   837	  ): Promise<ShellExecutionHandle> {
+   838	    if (!ptyInfo) {
+   839	      // This should not happen, but as a safeguard...
+   840	      throw new Error('PTY implementation not found');
+   841	    }
+   842	    let spawnedPty: IPty | undefined;
+   843	
+   844	    try {
+   845	      const cols = shellExecutionConfig.terminalWidth ?? 80;
+   846	      const rows = shellExecutionConfig.terminalHeight ?? 30;
+   847	
+   848	      const {
+   849	        program: finalExecutable,
+ succeeded in 0ms:
+   465	        newValue,
+   466	      );
+   467	
+   468	      Object.assign(baseEnv, {
+   469	        GIT_TERMINAL_PROMPT: '0',
+   470	        GIT_ASKPASS: '',
+   471	        SSH_ASKPASS: '',
+   472	        GH_PROMPT_DISABLED: '1',
+   473	        GCM_INTERACTIVE: 'never',
+   474	        DISPLAY: '',
+   475	        DBUS_SESSION_BUS_ADDRESS: '',
+   476	        GIT_CONFIG_COUNT: (gitConfigCount + 1).toString(),
+   477	        [newKey]: 'credential.helper',
+   478	        [newValue]: '',
+   479	      });
+   480	    }
+   481	
+   482	    // 3. Prepare Sandboxed Command
+   483	    const sandboxedCommand = await sandboxManager.prepareCommand({
+   484	      command: resolvedExecutable,
+ succeeded in 0ms:
+   890	      });
+   891	
+   892	      const result = ExecutionLifecycleService.attachExecution(ptyPid, {
+   893	        executionMethod: ptyInfo?.name ?? 'node-pty',
+   894	        writeInput: (input) => {
+   895	          if (!ExecutionLifecycleService.isActive(ptyPid)) {
+   896	            return;
+   897	          }
+   898	          ptyProcess.write(input);
+   899	        },
+   900	        kill: () => {
+   901	          killProcessGroup({
+   902	            pid: ptyPid,
+   903	            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+   904	            pty: ptyProcess,
+   905	          }).catch(() => {});
+   906	          try {
+   907	            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+   908	            (ptyProcess as IPty & { destroy?: () => void }).destroy?.();
+   909	          } catch {
+codex
+To make the requested catch-block cleanup compile, `cmdCleanup` has to be visible outside the `try` block. I’m going to lift only that cleanup reference in each function, call it in the existing catch handlers, and clear it immediately after both the catch calls and the existing lifecycle calls.
+exec
+/bin/zsh -lc "rg -n \"interface .*Command|type .*Command|prepareCommand\" /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src -g '*.ts'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/policy/sandboxPolicyManager.ts:41:export type PersistentCommandConfig = z.infer<
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/policy/policy-engine.test.ts:373:        prepareCommand: vi.fn(),
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/policy/policy-engine.test.ts:3641:        prepareCommand: vi.fn(),
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/hookRegistry.test.ts:16:  type CommandHookConfig,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/hookRunner.ts:13:  type CommandHookConfig,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/hookRunner.ts:101:        (hookConfig.type === HookType.Command ? hookConfig.command : '') ||
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/types.ts:96:export interface CommandHookConfig {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/types.ts:107:export type HookConfig = CommandHookConfig | RuntimeHookConfig;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/types.ts:123:  const command = hook.type === HookType.Command ? hook.command : '';
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/hooks/hookEventHandler.ts:504:    if (config.type === HookType.Command) {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.ts:14:  type SandboxedCommand,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.ts:213:  async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:87:    const result = await manager.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:111:    const result = await manager.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:129:    await manager.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:157:    const result = await manager.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:177:    await expect(planManager.prepareCommand(req)).rejects.toThrow(
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:206:    const result = await managerWithPolicy.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:241:    const result = await manager.prepareCommand(req);
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.test.ts:254:    await manager.prepareCommand(req);
+exec
+/bin/zsh -lc "rg -n \"cleanup:.*=>|cleanup\\?:|cleanup:\" /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src /tmp/refactor-eq-workdir/bb-merged-24763/packages/core -g '*.ts'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxManager.ts:108:  cleanup?: () => void;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxManager.ts:108:  cleanup?: () => void;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.ts:426:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/windows/WindowsSandboxManager.ts:426:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/linux/LinuxSandboxManager.ts:286:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/linux/LinuxSandboxManager.ts:286:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:395:    cleanup?: () => void;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:501:      cleanup: sandboxedCommand.cleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:521:        cleanup: cmdCleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:853:        cleanup: cmdCleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:395:    cleanup?: () => void;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:501:      cleanup: sandboxedCommand.cleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:521:        cleanup: cmdCleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts:853:        cleanup: cmdCleanup,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/macos/MacOsSandboxManager.ts:160:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/sandbox/macos/MacOsSandboxManager.ts:160:      cleanup: () => {
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/agents/browser/browserManager.ts:160:          `Error during BrowserManager cleanup: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/agents/browser/browserAgentFactory.ts:313:      `Error during browser cleanup: ${error instanceof Error ? error.message : String(error)}`,
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/grep.ts:329:      let cleanup: (() => void) | undefined;
+/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/grep.ts:329:      let cleanup: (() => void) | undefined;
+file update
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -512,2 +512,4 @@
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+@@ -520,3 +522,3 @@
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+@@ -527,2 +529,3 @@
+       );
++      cmdCleanup = preparedCleanup;
+ 
+@@ -692,2 +695,3 @@
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+@@ -813,2 +817,4 @@
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+@@ -842,2 +848,3 @@
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+@@ -852,3 +859,3 @@
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+@@ -859,2 +866,3 @@
+       );
++      cmdCleanup = preparedCleanup;
+ 
+@@ -1150,2 +1158,3 @@
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+@@ -1248,2 +1257,5 @@
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+apply_patch(auto_approved=true) exited 0 in 21ms:
+Success. Updated the following files:
+M /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..60a1e3538ed6b23e363e42a81d14eefa8f34b4be
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -811,6 +815,8 @@
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -840,6 +846,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +857,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1156,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1246,6 +1255,9 @@
+         }
+       }
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+         onOutputEvent({
+           type: 'data',
+
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..60a1e3538ed6b23e363e42a81d14eefa8f34b4be
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -811,6 +815,8 @@
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -840,6 +846,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +857,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1156,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1246,6 +1255,9 @@
+         }
+       }
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+         onOutputEvent({
+           type: 'data',
+
+codex
+The source edit is in place. I’m doing a narrow verification pass over the changed regions to ensure the cleanup reference is cleared immediately after invocation in both paths.
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '1148,1260p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '505,535p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '687,820p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/srcexec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '838,865p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+   505	  private static async childProcessFallback(
+   506	    commandToExecute: string,
+   507	    cwd: string,
+   508	    onOutputEvent: (event: ShellOutputEvent) => void,
+   509	    abortSignal: AbortSignal,
+   510	    shellExecutionConfig: ShellExecutionConfig,
+   511	    isInteractive: boolean,
+   512	  ): Promise<ShellExecutionHandle> {
+   513	    let cmdCleanup: (() => void) | undefined;
+   514	
+   515	    try {
+   516	      const isWindows = os.platform() === 'win32';
+   517	
+   518	      const {
+   519	        program: finalExecutable,
+   520	        args: finalArgs,
+   521	        env: finalEnv,
+   522	        cwd: finalCwd,
+   523	        cleanup: preparedCleanup,
+   524	      } = await this.prepareExecution(
+ succeeded in 0ms:
+   838	    cwd: string,
+   839	    onOutputEvent: (event: ShellOutputEvent) => void,
+   840	    abortSignal: AbortSignal,
+   841	    shellExecutionConfig: ShellExecutionConfig,
+   842	    ptyInfo: PtyImplementation,
+   843	  ): Promise<ShellExecutionHandle> {
+   844	    if (!ptyInfo) {
+   845	      // This should not happen, but as a safeguard...
+   846	      throw new Error('PTY implementation not found');
+   847	    }
+   848	    let spawnedPty: IPty | undefined;
+   849	    let cmdCleanup: (() => void) | undefined;
+   850	
+   851	    try {
+   852	      const cols = shellExecutionConfig.terminalWidth ?? 80;
+   853	      const rows = shellExecutionConfig.terminalHeight ?? 30;
+   854	
+   855	      const {
+   856	        program: finalExecutable,
+   857	        args: finalArgs,
+ succeeded in 0ms:
+   687	        }
+   688	      };
+   689	
+   690	      const handleExit = (
+   691	        code: number | null,
+   692	        signal: NodeJS.Signals | null,
+   693	      ) => {
+   694	        cleanup();
+   695	        cmdCleanup?.();
+   696	        cmdCleanup = undefined;
+   697	
+   698	        let combinedOutput = state.output;
+   699	        if (state.truncated) {
+   700	          const truncationMessage = `\n[GEMINI_CLI_WARNING: Output truncated. The buffer is limited to ${
+   701	            MAX_CHILD_PROCESS_BUFFER_SIZE / (1024 * 1024)
+   702	          }MB.]`;
+   703	          combinedOutput += truncationMessage;
+   704	        }
+   705	
+   706	        const finalStrippedOutput = stripAnsi(combinedOutput).trim();
+ succeeded in 0ms:
+  1148	          // Attempt to destroy the PTY to ensure FD is closed
+  1149	          try {
+  1150	            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  1151	            (ptyProcess as IPty & { destroy?: () => void }).destroy?.();
+  1152	          } catch {
+  1153	            // Ignore errors during cleanup
+  1154	          }
+  1155	
+  1156	          const finalize = () => {
+  1157	            render(true);
+  1158	            cmdCleanup?.();
+  1159	            cmdCleanup = undefined;
+  1160	
+  1161	            const event: ShellOutputEvent = {
+  1162	              type: 'exit',
+  1163	              exitCode,
+  1164	              signal: signal ?? null,
+  1165	            };
+  1166	
+  1167	            const sessionId = shellExecutionConfig.sessionId ?? 'default';
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..60a1e3538ed6b23e363e42a81d14eefa8f34b4be
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -811,6 +815,8 @@
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -840,6 +846,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +857,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1156,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1246,6 +1255,9 @@
+         }
+       }
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+         onOutputEvent({
+           type: 'data',
+
+exec
+/bin/zsh -lc "nl -ba services/shellExecutionService.ts | sed -n '855,875p'" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+   855	      const {
+   856	        program: finalExecutable,
+   857	        args: finalArgs,
+   858	        env: finalEnv,
+   859	        cwd: finalCwd,
+   860	        cleanup: preparedCleanup,
+   861	      } = await this.prepareExecution(
+   862	        commandToExecute,
+   863	        cwd,
+   864	        shellExecutionConfig,
+   865	        true,
+   866	      );
+   867	      cmdCleanup = preparedCleanup;
+   868	
+   869	      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+   870	      const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+   871	        cwd: finalCwd,
+   872	        name: 'xterm-256color',
+   873	        cols,
+   874	        rows,
+exec
+/bin/zsh -lc "rg -n \"cmdCleanup\\?\\.\\(\\);|cmdCleanup = undefined|preparedCleanup|let cmdCleanup\" services/shellExecutionService.ts" in /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src succeeded in 0ms:
+513:    let cmdCleanup: (() => void) | undefined;
+523:        cleanup: preparedCleanup,
+530:      cmdCleanup = preparedCleanup;
+695:        cmdCleanup?.();
+696:        cmdCleanup = undefined;
+818:      cmdCleanup?.();
+819:      cmdCleanup = undefined;
+849:    let cmdCleanup: (() => void) | undefined;
+860:        cleanup: preparedCleanup,
+867:      cmdCleanup = preparedCleanup;
+1158:            cmdCleanup?.();
+1159:            cmdCleanup = undefined;
+1258:      cmdCleanup?.();
+1259:      cmdCleanup = undefined;
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..60a1e3538ed6b23e363e42a81d14eefa8f34b4be
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -811,6 +815,8 @@
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -840,6 +846,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +857,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1156,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1246,6 +1255,9 @@
+         }
+       }
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+         onOutputEvent({
+           type: 'data',
+
+codex
+Implemented the reviewer cleanup change in [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts).
+
+Changed both execution paths to keep `cmdCleanup` visible to their catch handlers, invoke it during error teardown, and immediately clear the reference after each `cmdCleanup?.();` call. I also added the same immediate clearing after the existing lifecycle cleanup calls so later `exit`/`onExit` events cannot invoke it again.
+
+No tests run, per “Source edits only.”
+file update:
+diff --git a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033f1d96b2d13065380bf155d5f3980ad..60a1e3538ed6b23e363e42a81d14eefa8f34b4be
+--- a//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
++++ b//tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts
+@@ -510,6 +510,8 @@
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
++
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+@@ -518,13 +520,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -690,6 +693,7 @@
+       ) => {
+         cleanup();
+         cmdCleanup?.();
++        cmdCleanup = undefined;
+ 
+         let combinedOutput = state.output;
+         if (state.truncated) {
+@@ -811,6 +815,8 @@
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
++      cmdCleanup = undefined;
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -840,6 +846,7 @@
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+@@ -850,13 +857,14 @@
+         args: finalArgs,
+         env: finalEnv,
+         cwd: finalCwd,
+-        cleanup: cmdCleanup,
++        cleanup: preparedCleanup,
+       } = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = preparedCleanup;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1148,6 +1156,7 @@
+           const finalize = () => {
+             render(true);
+             cmdCleanup?.();
++            cmdCleanup = undefined;
+ 
+             const event: ShellOutputEvent = {
+               type: 'exit',
+@@ -1246,6 +1255,9 @@
+         }
+       }
+ 
++      cmdCleanup?.();
++      cmdCleanup = undefined;
++
+       if (error.message.includes('posix_spawnp failed')) {
+         onOutputEvent({
+           type: 'data',
+
+tokens used
+28,929
+Implemented the reviewer cleanup change in [shellExecutionService.ts](/tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/shellExecutionService.ts).
+
+Changed both execution paths to keep `cmdCleanup` visible to their catch handlers, invoke it during error teardown, and immediately clear the reference after each `cmdCleanup?.();` call. I also added the same immediate clearing after the existing lifecycle cleanup calls so later `exit`/`onExit` events cannot invoke it again.
+
+No tests run, per “Source edits only.”
