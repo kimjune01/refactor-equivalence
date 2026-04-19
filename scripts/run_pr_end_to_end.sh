@@ -88,6 +88,6 @@ TRIAL_DIR="$TRIAL_DIR" \
 CLEANROOM="$CLEANROOM" \
 TEST_CMD="$TEST_CMD" \
 BUILD_CMD="$BUILD_CMD" \
-"$SCRIPTS/run_forge_v2.sh"
+"$SCRIPTS/run_forge_v2_iterative.sh"
 
 echo "[$(date -u +%FT%TZ)] e2e PR $PR complete"
