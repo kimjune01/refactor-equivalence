@@ -96,6 +96,21 @@ The review loop doesn't need to be LLMs. It could be a linter, a type checker, a
 
 ## Recommendations
 
+## The ingredients
+
+The experiment reveals four ingredients for a forge-produced PR to land:
+
+1. **Problem description as goal predicate.** The PR title + body + linked issue IS the spec. Not a prompt, not a system instruction — the same artifact the human author wrote to communicate intent. If the problem description is clear enough for a human reviewer to evaluate against, it's clear enough for the pipeline. Bad descriptions produce bad refactors regardless of the machinery.
+
+2. **[/prework](https://june.kim/prework).** Before the pipeline touches code, the intent must be sharpened through writing. Prework is the discipline of clarifying what you want before you ask a machine to build it. The experiment's goal-anchored volley step is prework formalized: read the goal, read the code, produce specific claims. A first-draft prework is sufficient — iterative sharpening adds zero measured value.
+
+3. **[/volley](https://june.kim/volley).** Collaborative iteration. The reviewer states requirements, the implementer complies, the reviewer confirms. This catches taste: module structure, naming, idiom fit. Every impasse in the experiment was resolved by a single round of volley-style compliance — the reviewer asked, the agent did it.
+
+4. **[`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md).** Adversarial iteration. Hunt for defects, fix them, re-hunt. Build+test gate every round. This catches slop: missing call sites, type mismatches, broken invariants. On Rust repos, the compiler does this job perfectly — zero false positives, exact fixes. On Go/TS repos, codex oscillates but the code hardens with each pass.
+
+Skip any one and the rate drops. Skip the review loops entirely and you're at 43% — coin flip. The ingredients compound: prework gives direction, volley gives taste, bug-hunt gives correctness. Together: 91%.
+
+
 If you're using Claude Code, the two loops are available as skills:
 
 - **[/volley](https://june.kim/volley)** — collaborative iteration. Sharpens a spec into prescriptive claims against a goal, then iterates with an adversarial reviewer until the spec is defensible. The reviewer comments, the author complies, the reviewer re-checks. This is the collaborative loop that catches taste issues: module structure, naming, unnecessary complexity.
