@@ -114,7 +114,7 @@ Four ingredients for a forge-produced PR to land:
 
 1. **[Problem description as goal predicate.](https://june.kim/goal-transmission)** The PR title + body + linked issue IS the spec. Wrong problems motivate wrong refactors regardless of the machinery.
 
-2. **[/prework](https://june.kim/prework).** Clarify what you want before you ask a machine to build it. A first-draft prework is sufficient; iterative sharpening adds zero measured value.
+2. **[/prework](https://june.kim/prework).** Provide technical evidence (prototypes, spikes) that clarifies the intent through concrete demonstration. A first-draft prework is sufficient; iterative sharpening adds zero measured value.
 
 3. **[/volley](https://june.kim/volley).** Collaborative iteration. The reviewer states requirements, the implementer complies, the reviewer confirms. Catches taste: module structure, naming, idiom fit. Every impasse in the experiment was resolved by a single compliance round.
 
