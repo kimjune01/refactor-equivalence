@@ -136,7 +136,7 @@ One-shot LLM output is a coin flip (43%). Run [`/bug-hunt`](https://github.com/k
 
 A single model can't catch its own blind spots. Use Claude and Codex: one implements, the other hunts. Cross-model iteration is what breaks the self-congratulation loop.
 
-### Let the compiler review for you.
+### Lean on the compiler.
 
 On Rust and Go, the compiler catches what LLM reviewers hallucinate about. In our trials, Gemini's adversarial review had a ~40% false-positive rate (flagging issues that didn't exist). The compiler has 0%. Feed build errors back to the implementer and let it fix them mechanically. Convergence in 2 rounds.
 
