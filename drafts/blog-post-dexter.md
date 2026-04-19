@@ -124,7 +124,15 @@ Four ingredients for a forge-produced PR to land:
 
 Skip any one and the rate drops. Skip the loops entirely and you're at 43%. Together: 91%. Both loops compose into [`/forge`](https://github.com/kimjune01/june.kim/blob/main/skills/forge/skill.md); the pipeline this experiment measured.
 
-**Don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum.
+## Recommendation
+
+**Don't ship the first thing that passes tests.**
+
+One-shot LLM output is a coin flip (43%). It passes tests, it doesn't regress complexity, and it still isn't merge-ready half the time. That's the slop-slope.
+
+The fix is cheap: run an adversarial review loop before you ship. `/bug-hunt` alone catches the mechanical slop (missing call sites, type mismatches, broken invariants). Add `/volley` for taste (module structure, naming, idiom compliance). Together they get you to 91%.
+
+You don't need to change your models, your prompts, or your workflow. You just need to stop treating the first passing output as final. Iterate. The loop is the product.
 
 ## Caveats
 
