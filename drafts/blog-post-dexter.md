@@ -7,9 +7,21 @@ tags: experiment, methodology
 
 *Caveat up front: the reviewer in this experiment is an LLM (Gemini 3.1 Pro), not a human. Human validation on a subset is prepared but pending. Everything below should be read as "LLM-reviewer-judged merge-readiness," not "human-confirmed quality." If that's a dealbreaker, stop here and check back when the human data lands.*
 
-If AI-generated code silently degrades the codebase — the slop-slope — then humans must stay in the review loop forever. If it doesn't, the loop can close: machines write, machines review, humans approve the intent. The answer decides whether AI coding agents are tools or liabilities.
+If AI-generated code silently degrades the codebase (the slop-slope), humans must stay in the review loop forever. If it doesn't, the loop can close: machines write, machines review, humans approve the intent. The answer decides whether AI coding agents are tools or liabilities.
 
-I tested this on 27 merged PRs from 9 open-source repos: [gemini-cli](https://github.com/google-gemini/gemini-cli), [cli/cli](https://github.com/cli/cli), [cel-go](https://github.com/google/cel-go), [google-cloud-go](https://github.com/googleapis/google-cloud-go), [go-github](https://github.com/google/go-github), [adk-go](https://github.com/google/adk-go), [go-containerregistry](https://github.com/google/go-containerregistry), [gapic-generator-go](https://github.com/googleapis/gapic-generator-go), and [ruff](https://github.com/astral-sh/ruff).
+I tested this on 27 merged PRs from 9 repos:
+
+| Repo | Language | Stars | Trials |
+|------|----------|-------|--------|
+| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | 9 |
+| [cli/cli](https://github.com/cli/cli) | Go | 40k | 2 |
+| [cel-go](https://github.com/google/cel-go) | Go | 3k | 3 |
+| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | 2 |
+| [go-github](https://github.com/google/go-github) | Go | 11k | 3 |
+| [adk-go](https://github.com/google/adk-go) | Go | 8k | 2 |
+| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | 2 |
+| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | 2 |
+| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | 2 |
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
 
@@ -19,7 +31,7 @@ With an iterative review loop: 91%. The same code, same spec, same models — bu
 
 ## The setup
 
-Each trial takes a merged PR and rewinds to the commit where tests first passed — before human reviewers pushed for improvements. The pipeline refactors that pre-review code and asks: would a reviewer approve this?
+Each trial takes a merged PR and rewinds to the commit where tests first passed, before human reviewers pushed for improvements. The pipeline refactors that pre-review code and asks: would a reviewer approve this?
 
 The pipeline:
 
@@ -72,9 +84,9 @@ The cap should be 5, not 10. Rounds 1-3 catch real issues; rounds 4-10 oscillate
 
 ## The slop-slope diagnosis
 
-The slop-slope isn't "the agent doesn't know what to do." The spec step works. The agent identifies real refactoring opportunities — duplicate code, over-abstraction, inconsistent patterns — and applies them. Tests pass. Complexity doesn't increase.
+The spec step works. The agent identifies real refactoring opportunities (duplicate code, over-abstraction, inconsistent patterns) and applies them. Tests pass. Complexity doesn't increase.
 
-The slop-slope is "the agent does the right thing badly and nobody catches it." It extracts a helper but misses the second call site. It centralizes logic but breaks an idiom the codebase relies on. It removes duplication but introduces a subtle type mismatch that tests don't cover.
+The slop-slope is subtler: the agent does the right thing badly and nobody catches it. It extracts a helper but misses the second call site. It centralizes logic but breaks an idiom the codebase relies on. It removes duplication but introduces a subtle type mismatch that tests don't cover.
 
 Without review, these slip through at a 57% rate. With review, they get caught and fixed — 91% approval after iteration. The review loop is the anti-slop mechanism. Not a better prompt. Not a smarter model. A loop.
 
@@ -92,9 +104,9 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 This experiment measured the last mile: can machines execute the mechanics at human quality?
 
-The Phase 7 forced-choice result says yes. In a blind A/B between human-authored and forge-authored refactoring, the reviewer picked forge 57% of the time — coin flip. The LLM produces no more slop than the human. Then the iterative review loop catches the slop from either author and polishes to merge-ready at 91%.
+The Phase 7 forced-choice result says yes. In a blind A/B between human-authored and forge-authored refactoring, the reviewer picked forge 57% of the time. Coin flip. The iterative review loop then catches the slop from either author and polishes to merge-ready at 91%.
 
-Vibelogging produces clear intent. Prework separates semantics from mechanics. Forge executes the mechanics at human parity. Iterative review catches the slop from either author. The human writes prose. The machine writes code. The review loop is the quality gate for both.
+Vibelogging produces clear intent. Prework separates semantics from mechanics. Forge executes the mechanics at human parity. The review loop is the quality gate for both. The human writes prose. The machine handles the rest.
 
 ## The ingredients
 
