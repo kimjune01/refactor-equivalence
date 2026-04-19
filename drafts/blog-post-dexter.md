@@ -13,15 +13,15 @@ I tested this on 27 merged PRs from 9 repos:
 
 | Repo | Language | Stars | Avg PR size (lines) | Trials |
 |------|----------|-------|------------|--------|
-| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~7,800 lines | 9 |
-| [go-github](https://github.com/google/go-github) | Go | 11k | ~4,500 lines | 3 |
-| [cel-go](https://github.com/google/cel-go) | Go | 3k | ~3,300 lines | 3 |
-| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | ~2,400 lines | 2 |
-| [adk-go](https://github.com/google/adk-go) | Go | 8k | ~1,400 lines | 2 |
-| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | ~1,100 lines | 2 |
-| [cli/cli](https://github.com/cli/cli) | Go | 40k | ~1,000 lines | 2 |
-| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~800 lines | 2 |
-| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | ~700 lines | 2 |
+| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~7,800 | 9 |
+| [go-github](https://github.com/google/go-github) | Go | 11k | ~4,500 | 3 |
+| [cel-go](https://github.com/google/cel-go) | Go | 3k | ~3,300 | 3 |
+| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | ~2,400 | 2 |
+| [adk-go](https://github.com/google/adk-go) | Go | 8k | ~1,400 | 2 |
+| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | ~1,100 | 2 |
+| [cli/cli](https://github.com/cli/cli) | Go | 40k | ~1,000 | 2 |
+| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~800 | 2 |
+| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | ~700 | 2 |
 
 These are large PRs. The smallest averages 700 lines of post-exclusion source changes; the largest, 7,800. If forge handles these, smaller PRs are implied.
 
