@@ -63,18 +63,18 @@ TypeScript: 67% approval. The 2 remaining impasses are infrastructure — CLI ag
 
 ## The accidental finding
 
-I messed up the first run. The prereg specifies iterative convergence — run the review loop until the reviewer approves or gives up. I skipped it and ran single-round. Got 43%. The user caught me: "you weren't supposed to take shortcuts."
+I messed up the first run. The prereg specifies iterative convergence — run the review loop until the reviewer approves or gives up. I skipped it and ran one-shot. Got 43%. The user caught me: "you weren't supposed to take shortcuts."
 
 So I re-ran with iteration on the same refactored code. Same spec, same implementation, just the review loop added on top:
 
 | Condition | What ran | Approval |
 |-----------|---------|----------|
-| Single-round | Spec → implement → 1 review | 9/21 = 43% |
+| One-shot | Spec → implement → 1 review | 9/21 = 43% |
 | Iterative (same code) | + hunt-code loop N≤10 + reviewer compliance | 21/23 = 91% |
 
 Same code, same spec, loop added, 48pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
 
-What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over single-round spec + iterative review. The value is in catching and fixing problems after implementation — the same way human code review works. You don't write a perfect spec. You iterate until a reviewer says ship it.
+What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over one-shot spec + iterative review. The value is in catching and fixing problems after implementation — the same way human code review works. You don't write a perfect spec. You iterate until a reviewer says ship it.
 
 ## What the adversarial loop actually does
 
