@@ -99,4 +99,4 @@ Complexity measurement (mean cognitive across scoped functions) showed zero chan
 
 ---
 
-*Experiment repo: [refactor-equivalence](https://github.com/kimjune01/refactor-equivalence). Full methodology in PREREG_V2.md. Every decision logged in the work log. The screwups are in there too.*
+*Experiment repo: [refactor-equivalence](https://github.com/kimjune01/refactor-equivalence) — [results](https://github.com/kimjune01/refactor-equivalence/blob/master/RESULTS.md), [prereg](https://github.com/kimjune01/refactor-equivalence/blob/master/PREREG_V2.md), [work log](https://github.com/kimjune01/refactor-equivalence/blob/master/worklog/WORK_LOG.md). Example forge diffs on gemini-cli: [PR #2](https://github.com/kimjune01/gemini-cli-claude/pull/2), [#3](https://github.com/kimjune01/gemini-cli-claude/pull/3), [#4](https://github.com/kimjune01/gemini-cli-claude/pull/4), [#5](https://github.com/kimjune01/gemini-cli-claude/pull/5). The screwups are in there too.*
