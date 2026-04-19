@@ -130,7 +130,7 @@ The cheapest way to guarantee your LLM-generated code isn't slop: iterate before
 
 ### Review the issue/problem description first.
 
-In our experiment this was free; every trial used a merged PR whose problem description had already survived public review. In private repos, problem descriptions are often skipped altogether. The 91% assumes a clear [goal predicate](https://june.kim/goal-transmission). Without one, iteration converges toward the wrong target.
+In our experiment this was free; every trial used a merged PR whose problem description had already survived public review. In private repos, problem descriptions are often skipped; "fix the thing" with a Jira link. [Tasks are a lossy format](https://june.kim/goal-transmission). The forge pipeline needs the goal, not the ticket. The 91% assumes the goal was transmitted. Without it, iteration converges toward the wrong target.
 
 ### Don't ship the first thing that passes tests.
 
