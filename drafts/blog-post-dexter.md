@@ -130,11 +130,15 @@ The cheapest way to guarantee your LLM-generated code isn't slop: iterate before
 
 ### Don't ship the first thing that passes tests.
 
-One-shot LLM output is a coin flip (43%). It passes tests, it doesn't regress complexity, and it still isn't merge-ready half the time. That's the slop-slope.
+One-shot LLM output is a coin flip (43%). Run [`/bug-hunt`](https://github.com/kimjune01/june.kim/blob/main/skills/bug-hunt/skill.md) for mechanical slop, [`/volley`](https://june.kim/volley) for taste. Together: 91%.
 
-The fix is cheap: run an adversarial review loop before you ship. `/bug-hunt` alone catches the mechanical slop (missing call sites, type mismatches, broken invariants). Add `/volley` for taste (module structure, naming, idiom compliance). Together they get you to 91%.
+### Use two SOTA models, not one.
 
-You don't need to change your models, your prompts, or your workflow. You just need to stop treating the first passing output as final. Iterate. The loop is the product.
+A single model can't catch its own blind spots. Use Claude and Codex: one implements, the other hunts. Cross-model iteration is what breaks the self-congratulation loop.
+
+### Let the compiler review for you.
+
+On Rust and Go, the compiler catches what LLM reviewers hallucinate about. Feed build errors back to the implementer and let it fix them mechanically. Convergence in 2 rounds, zero false positives.
 
 ## Caveats
 
