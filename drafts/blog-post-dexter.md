@@ -1,6 +1,6 @@
 ---
 variant: post
-title: "Does Iteration Mitigate Against Slop-Slope?"
+title: "Does LLM Iteration Mitigate Against Slop-Slope?"
 tags: experiment, methodology
 ---
 
