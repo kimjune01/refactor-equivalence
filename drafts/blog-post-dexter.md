@@ -138,7 +138,7 @@ A single model can't catch its own blind spots. Use Claude and Codex: one implem
 
 ### Let the compiler review for you.
 
-On Rust and Go, the compiler catches what LLM reviewers hallucinate about. Feed build errors back to the implementer and let it fix them mechanically. Convergence in 2 rounds, zero false positives.
+On Rust and Go, the compiler catches what LLM reviewers hallucinate about. In our trials, Gemini's adversarial review had a ~40% false-positive rate (flagging issues that didn't exist). The compiler has 0%. Feed build errors back to the implementer and let it fix them mechanically. Convergence in 2 rounds.
 
 ## Caveats
 
