@@ -126,6 +126,8 @@ Skip any one and the rate drops. Skip the loops entirely and you're at 43%. Toge
 
 ## Recommendation
 
+The cheapest way to guarantee your LLM-generated code isn't slop: iterate before you ship.
+
 ### Don't ship the first thing that passes tests.
 
 One-shot LLM output is a coin flip (43%). It passes tests, it doesn't regress complexity, and it still isn't merge-ready half the time. That's the slop-slope.
