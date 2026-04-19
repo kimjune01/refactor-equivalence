@@ -7,7 +7,7 @@ tags: experiment, methodology
 
 *Caveat up front: the reviewer in this experiment is an LLM (Gemini 3.1 Pro), not a human. Human validation on a subset is prepared but pending. Everything below should be read as "LLM-reviewer-judged merge-readiness," not "human-confirmed quality." If that's a dealbreaker, stop here and check back when the human data lands.*
 
-I ran an autonomous refactoring pipeline on 27 merged PRs from 9 open-source repos. The question: if you let an LLM refactor code that already passes tests, does it make things better or worse?
+I ran an autonomous refactoring pipeline on 27 merged PRs from 9 open-source repos: [gemini-cli](https://github.com/google-gemini/gemini-cli), [cli/cli](https://github.com/cli/cli), [cel-go](https://github.com/google/cel-go), [google-cloud-go](https://github.com/googleapis/google-cloud-go), [go-github](https://github.com/google/go-github), [adk-go](https://github.com/google/adk-go), [go-containerregistry](https://github.com/google/go-containerregistry), [gapic-generator-go](https://github.com/googleapis/gapic-generator-go), and [ruff](https://github.com/astral-sh/ruff). The question: if you let an LLM refactor code that already passes tests, does it make things better or worse?
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
 
