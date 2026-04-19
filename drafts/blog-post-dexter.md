@@ -11,17 +11,19 @@ If AI-generated code silently degrades the codebase (the slop-slope), humans mus
 
 I tested this on 27 merged PRs from 9 repos:
 
-| Repo | Language | Stars | Trials |
-|------|----------|-------|--------|
-| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | 9 |
-| [cli/cli](https://github.com/cli/cli) | Go | 40k | 2 |
-| [cel-go](https://github.com/google/cel-go) | Go | 3k | 3 |
-| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | 2 |
-| [go-github](https://github.com/google/go-github) | Go | 11k | 3 |
-| [adk-go](https://github.com/google/adk-go) | Go | 8k | 2 |
-| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | 2 |
-| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | 2 |
-| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | 2 |
+| Repo | Language | Stars | Avg PR size | Trials |
+|------|----------|-------|------------|--------|
+| [gemini-cli](https://github.com/google-gemini/gemini-cli) | TypeScript | 101k | ~7,800 lines | 9 |
+| [go-github](https://github.com/google/go-github) | Go | 11k | ~4,500 lines | 3 |
+| [cel-go](https://github.com/google/cel-go) | Go | 3k | ~3,300 lines | 3 |
+| [google-cloud-go](https://github.com/googleapis/google-cloud-go) | Go | 4k | ~2,400 lines | 2 |
+| [adk-go](https://github.com/google/adk-go) | Go | 8k | ~1,400 lines | 2 |
+| [gapic-generator-go](https://github.com/googleapis/gapic-generator-go) | Go | — | ~1,100 lines | 2 |
+| [cli/cli](https://github.com/cli/cli) | Go | 40k | ~1,000 lines | 2 |
+| [go-containerregistry](https://github.com/google/go-containerregistry) | Go | 4k | ~800 lines | 2 |
+| [ruff](https://github.com/astral-sh/ruff) | Rust | 35k | ~700 lines | 2 |
+
+These are large PRs. The smallest averages 700 lines of post-exclusion source changes; the largest, 7,800. If forge handles these, smaller PRs are implied.
 
 Without a review loop: coin flip. 43% of the time a reviewer would approve the output. The rest is slop — code that passes tests, doesn't regress complexity, and still isn't good enough to ship. That's the slop-slope in action. The agent does work that looks productive and isn't.
 
