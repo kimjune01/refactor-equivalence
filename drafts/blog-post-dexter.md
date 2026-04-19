@@ -97,7 +97,7 @@ If you're using Claude Code, the two loops are available as skills:
 
 - **[/bug-hunt](https://june.kim/bug-hunt)** — adversarial iteration. Hunts for bugs, fixes them, re-hunts until convergence. Build+test gates every round. This is the adversarial loop that catches mechanical slop: missing call sites, type mismatches, broken idioms. On Rust repos, the compiler does this job better than any LLM reviewer — zero false positives, exact fixes, convergence in 2 rounds.
 
-Both together is [/forge](https://june.kim/forge) — the full pipeline this experiment measured.
+Both together is `/forge` — the full pipeline this experiment measured.
 
 The single most important thing you can do to avoid slop-slope: **don't ship the first thing that passes tests.** Run `/bug-hunt` at minimum. The adversarial loop alone moves you from coin-flip to viable. Adding `/volley` gets you the rest of the way.
 
