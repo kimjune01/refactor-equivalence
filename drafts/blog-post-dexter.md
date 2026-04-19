@@ -82,8 +82,6 @@ It doesn't converge. On 8 of 12 iterative trials, the adversarial reviewer (Code
 
 But the independent reviewer (Gemini) approved 7 of those 8 cap-hit trials anyway. The adversarial bar ("zero findings") is stricter than the merge-readiness bar. Hunt-code is kneading dough. You never "finish" kneading. You just do it enough that the structure is sound. In practice, I let it rip until no obvious bugs are found.
 
-The cap should be 5, not 10. Rounds 1-3 catch real issues; rounds 4-10 oscillate without improving the reviewer's verdict (7/8 cap-hit trials were approved despite unresolved findings).
-
 ## The slop-slope diagnosis
 
 The spec step works. The agent identifies real refactoring opportunities (duplicate code, over-abstraction, inconsistent patterns) and applies them. Tests pass. Complexity doesn't increase.
