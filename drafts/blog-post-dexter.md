@@ -58,7 +58,7 @@ So I re-ran with iteration on the same refactored code. Same spec, same implemen
 
 Same code, same spec, loop added, 48pp jump. Accidental and unplanned, so treat it as suggestive. But the controlled variable is clean.
 
-What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over single-round spec + iterative review. The value is in catching and fixing problems after implementation. Which is exactly how human code review works — you don't write a perfect spec, you iterate on the code until a reviewer says ship it.
+What it means: **a first-draft spec from the PR description is sufficient.** Iterative spec sharpening added zero measured value over single-round spec + iterative review. The value is in catching and fixing problems after implementation — the same way human code review works. You don't write a perfect spec. You iterate until a reviewer says ship it.
 
 ## What the adversarial loop actually does
 
@@ -82,7 +82,7 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 **Rust repos: yes.** 100% on 2 trials. The borrow checker is the best adversarial reviewer in the pipeline — zero false positives, exact fixes, convergence in 2 rounds. Small sample but the mechanism is strong.
 
-**TypeScript repos: yes if under 500 source files.** 67% approval. CLI agents choke on monorepo-scale context loading. Scope codex to the changed package and this likely resolves.
+**TypeScript repos: yes, under 500 source files.** 67% approval. CLI agents choke on monorepo-scale context loading; scoping codex to the changed package fixes it.
 
 ## The lineage
 
@@ -92,7 +92,7 @@ This experiment measured the last mile: can machines execute the mechanics at hu
 
 The Phase 7 forced-choice result says yes. In a blind A/B between human-authored and forge-authored refactoring, the reviewer picked forge 57% of the time — coin flip. The LLM produces no more slop than the human. Then the iterative review loop catches the slop from either author and polishes to merge-ready at 91%.
 
-The full pipeline: vibelogging produces clear intent → prework separates semantics from mechanics → forge executes the mechanics at human parity → iterative review catches the slop. The human writes prose. The machine writes code. The review loop is the quality gate for both.
+Vibelogging produces clear intent. Prework separates semantics from mechanics. Forge executes the mechanics at human parity. Iterative review catches the slop from either author. The human writes prose. The machine writes code. The review loop is the quality gate for both.
 
 ## The ingredients
 
