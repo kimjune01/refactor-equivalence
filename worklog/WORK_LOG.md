@@ -916,3 +916,13 @@ TS impasses: 24476 (compliance broke tests — genuine), 24763 (codex scoped too
 21/23 active trials approved = **91%.** 4 hard no-ops = 15%.
 
 Single-round → iterative attribution: 43% → 91% = **48 percentage points from iteration.**
+
+### 19:15 — Phase 7a complete: C_llm preferred 11/19 = 57%
+
+Blind forced choice (C_test vs C_llm): Gemini picked C_llm on 11 of 19 trials (57%). Inside parity envelope [40-60%]. Weak directional signal toward forge — not clearing the 65% improvement threshold.
+
+This means: forge output is roughly as good as the human first draft in a head-to-head comparison. Not worse (which would be slop-slope), not clearly better (which would be the improvement claim). Parity.
+
+Combined with the 91% iterative approval rate: forge produces code that's AS GOOD AS the human first draft AND gets polished to merge-ready through iteration. The iteration is the value-add, not the initial refactoring quality.
+
+Phase 7b (C_llm vs C_final) still needs to run properly — first attempt had script issues.

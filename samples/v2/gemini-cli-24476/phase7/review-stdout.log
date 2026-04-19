@@ -1,0 +1,416 @@
+YOLO mode is enabled. All tool calls will be automatically approved.
+YOLO mode is enabled. All tool calls will be automatically approved.
+Error stating path google/gemini-cli" -- --coverage.enabled=false
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace @google/gemini-cli-core --workspace @google/gemini-cli-a2a-server --workspace gemini-cli-vscode-ide-companion --workspace @google/gemini-cli-test-utils --if-present -- --coverage.enabled=false
++            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+             npm run test:scripts
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+           }
+         shell: 'pwsh'
+ 
+diff --git a/packages/cli/src/nonInteractiveCli.ts b/packages/cli/src/nonInteractiveCli.ts
+index 26daaf66a1..4f9d817204 100644
+--- a/packages/cli/src/nonInteractiveCli.ts
++++ b/packages/cli/src/nonInteractiveCli.ts
+@@ -46,7 +46,6 @@ import {
+   handleMaxTurnsExceededError,
+ } from './utils/errors.js';
+ import { TextOutput } from './ui/utils/textOutput.js';
+-import { runNonInteractive as runNonInteractiveAgentSession } from './nonInteractiveCliAgentSession.js';
+ 
+ interface RunNonInteractiveParams {
+   config: Config;
+@@ -56,16 +55,13 @@ interface RunNonInteractiveParams {
+   resumedSessionData?: ResumedSessionData;
+ }
+ 
+-export async function runNonInteractive(
+-  params: RunNonInteractiveParams,
+-): Promise<void> {
+-  const useAgentSession = params.config.getAgentSessionNoninteractiveEnabled();
+-  if (useAgentSession) {
+-    return runNonInteractiveAgentSession(params);
+-  }
+-
+-  const { config, settings, input, prompt_id, resumedSessionData } = params;
+-
++export async function runNonInteractive({
++  config,
++  settings,
++  input,
++  prompt_id,
++  resumedSessionData,
++}: RunNonInteractiveParams): Promise<void> {
+   return promptIdContext.run(prompt_id, async () => {
+     const consolePatcher = new ConsolePatcher({
+       stderr: true,
+diff --git a/packages/cli/src/nonInteractiveCliAgentSession.ts b/packages/cli/src/nonInteractiveCliAgentSession.ts
+deleted file mode 100644
+index 78fc18be4e..0000000000
+--- a/packages/cli/src/nonInteractiveCliAgentSession.ts
++++ /dev/null
+@@ -1,621 +0,0 @@
+-/**
+- * @license
+- * Copyright 2025 Google LLC
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-import type {
+-  Config,
+-  ResumedSessionData,
+-  UserFeedbackPayload,
+-  AgentEvent,
+-  ContentPart,
+-} from '@google/gemini-cli-core';
+-import { isSlashCommand } from './ui/utils/commandUtils.js';
+-import type { LoadedSettings } from './config/settings.js';
+-import {
+-  convertSessionToClientHistory,
+-  FatalError,
+-  FatalAuthenticationError,
+-  FatalInputError,
+-  FatalSandboxError,
+-  FatalConfigError,
+-  FatalTurnLimitedError,
+-  FatalToolExecutionError,
+-  FatalCancellationError,
+-  promptIdContext,
+-  OutputFormat,
+-  JsonFormatter,
+-  StreamJsonFormatter,
+-  JsonStreamEventType,
+-  uiTelemetryService,
+-  coreEvents,
+-  CoreEvent,
+-  createWorkingStdio,
+-  Scheduler,
+-  ROOT_SCHEDULER_ID,
+-  LegacyAgentSession,
+-  ToolErrorType,
+-  geminiPartsToContentParts,
+-} from '@google/gemini-cli-core';
+-
+-import type { Part } from '@google/genai';
+-import readline from 'node:readline';
+-import stripAnsi from 'strip-ansi';
+-
+-import { handleSlashCommand } from './nonInteractiveCliCommands.js';
+-import { ConsolePatcher } from './ui/utils/ConsolePatcher.js';
+-import { handleAtCommand } from './ui/hooks/atCommandProcessor.js';
+-import { handleError, handleToolError } from './utils/errors.js';
+-import { TextOutput } from './ui/utils/textOutput.js';
+-
+-interface RunNonInteractiveParams {
+-  config: Config;
+-  settings: LoadedSettings;
+-  input: string;
+-  prompt_id: string;
+-  resumedSessionData?: ResumedSessionData;
+-}
+-
+-export async function runNonInteractive({
+-  config,
+-  settings,
+-  input,
+-  prompt_id,
+-  resumedSessionData,
+-}: RunNonInteractiveParams): Promise<void> {
+-  return promptIdContext.run(prompt_id, async () => {
+-    const consolePatcher = new ConsolePatcher({
+-      stderr: true,
+-      interactive: false,
+-      debugMode: config.getDebugMode(),
+-      onNewMessage: (msg) => {
+-        coreEvents.emitConsoleLog(msg.type, msg.content);
+-      },
+-    });
+-
+-    if (process.env['GEMINI_CLI_ACTIVITY_LOG_TARGET']) {
+-      const { setupInitialActivityLogger } = await import(
+-        './utils/devtoolsService.js'
+-      );
+-      await setupInitialActivityLogger(config);
+-    }
+-
+-    const { stdout: workingStdout } = createWorkingStdio();
+-    const textOutput = new TextOutput(workingStdout);
+-
+-    const handleUserFeedback = (payload: UserFeedbackPayload) => {
+-      const prefix = payload.severity.toUpperCase();
+-      process.stderr.write(`[${prefix}] ${payload.message}n`);
+-      if (payload.error && config.getDebugMode()) {
+-        const errorToLog =
+-          payload.error instanceof Error
+-            ? payload.error.stack || payload.error.message
+-            : String(payload.error);
+-        process.stderr.write(`${errorToLog}n`);
+-      }
+-    };
+-
+-    const startTime = Date.now();
+-    const streamFormatter =
+-      config.getOutputFormat() === OutputFormat.STREAM_JSON
+-        ? new StreamJsonFormatter()
+-        : null;
+-
+-    const abortController = new AbortController();
+-
+-    // Track cancellation state
+-    let isAborting = false;
+-    let cancelMessageTimer: NodeJS.Timeout | null = null;
+-
+-    // Setup stdin listener for Ctrl+C detection
+```
+
+### Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24476/.github/workflows/ci.yml /tmp/refactor-eq-workdir/bb-merged-24476/.github/workflows/ci.yml
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24476/.github/workflows/ci.yml	2026-04-02 13:26:11
++++ /tmp/refactor-eq-workdir/bb-merged-24476/.github/workflows/ci.yml	2026-04-17 00:35:45
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
+-          if ("$: ENAMETOOLONG: name too long, stat '/Users/junekim/Documents/refactor-equivalence/google/gemini-cli" -- --coverage.enabled=false
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace @google/gemini-cli-core --workspace @google/gemini-cli-a2a-server --workspace gemini-cli-vscode-ide-companion --workspace @google/gemini-cli-test-utils --if-present -- --coverage.enabled=false
++            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+             npm run test:scripts
++            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+           }
+         shell: 'pwsh'
+ 
+diff --git a/packages/cli/src/nonInteractiveCli.ts b/packages/cli/src/nonInteractiveCli.ts
+index 26daaf66a1..4f9d817204 100644
+--- a/packages/cli/src/nonInteractiveCli.ts
++++ b/packages/cli/src/nonInteractiveCli.ts
+@@ -46,7 +46,6 @@ import {
+   handleMaxTurnsExceededError,
+ } from './utils/errors.js';
+ import { TextOutput } from './ui/utils/textOutput.js';
+-import { runNonInteractive as runNonInteractiveAgentSession } from './nonInteractiveCliAgentSession.js';
+ 
+ interface RunNonInteractiveParams {
+   config: Config;
+@@ -56,16 +55,13 @@ interface RunNonInteractiveParams {
+   resumedSessionData?: ResumedSessionData;
+ }
+ 
+-export async function runNonInteractive(
+-  params: RunNonInteractiveParams,
+-): Promise<void> {
+-  const useAgentSession = params.config.getAgentSessionNoninteractiveEnabled();
+-  if (useAgentSession) {
+-    return runNonInteractiveAgentSession(params);
+-  }
+-
+-  const { config, settings, input, prompt_id, resumedSessionData } = params;
+-
++export async function runNonInteractive({
++  config,
++  settings,
++  input,
++  prompt_id,
++  resumedSessionData,
++}: RunNonInteractiveParams): Promise<void> {
+   return promptIdContext.run(prompt_id, async () => {
+     const consolePatcher = new ConsolePatcher({
+       stderr: true,
+diff --git a/packages/cli/src/nonInteractiveCliAgentSession.ts b/packages/cli/src/nonInteractiveCliAgentSession.ts
+deleted file mode 100644
+index 78fc18be4e..0000000000
+--- a/packages/cli/src/nonInteractiveCliAgentSession.ts
++++ /dev/null
+@@ -1,621 +0,0 @@
+-/**
+- * @license
+- * Copyright 2025 Google LLC
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-import type {
+-  Config,
+-  ResumedSessionData,
+-  UserFeedbackPayload,
+-  AgentEvent,
+-  ContentPart,
+-} from '@google/gemini-cli-core';
+-import { isSlashCommand } from './ui/utils/commandUtils.js';
+-import type { LoadedSettings } from './config/settings.js';
+-import {
+-  convertSessionToClientHistory,
+-  FatalError,
+-  FatalAuthenticationError,
+-  FatalInputError,
+-  FatalSandboxError,
+-  FatalConfigError,
+-  FatalTurnLimitedError,
+-  FatalToolExecutionError,
+-  FatalCancellationError,
+-  promptIdContext,
+-  OutputFormat,
+-  JsonFormatter,
+-  StreamJsonFormatter,
+-  JsonStreamEventType,
+-  uiTelemetryService,
+-  coreEvents,
+-  CoreEvent,
+-  createWorkingStdio,
+-  Scheduler,
+-  ROOT_SCHEDULER_ID,
+-  LegacyAgentSession,
+-  ToolErrorType,
+-  geminiPartsToContentParts,
+-} from '@google/gemini-cli-core';
+-
+-import type { Part } from '@google/genai';
+-import readline from 'node:readline';
+-import stripAnsi from 'strip-ansi';
+-
+-import { handleSlashCommand } from './nonInteractiveCliCommands.js';
+-import { ConsolePatcher } from './ui/utils/ConsolePatcher.js';
+-import { handleAtCommand } from './ui/hooks/atCommandProcessor.js';
+-import { handleError, handleToolError } from './utils/errors.js';
+-import { TextOutput } from './ui/utils/textOutput.js';
+-
+-interface RunNonInteractiveParams {
+-  config: Config;
+-  settings: LoadedSettings;
+-  input: string;
+-  prompt_id: string;
+-  resumedSessionData?: ResumedSessionData;
+-}
+-
+-export async function runNonInteractive({
+-  config,
+-  settings,
+-  input,
+-  prompt_id,
+-  resumedSessionData,
+-}: RunNonInteractiveParams): Promise<void> {
+-  return promptIdContext.run(prompt_id, async () => {
+-    const consolePatcher = new ConsolePatcher({
+-      stderr: true,
+-      interactive: false,
+-      debugMode: config.getDebugMode(),
+-      onNewMessage: (msg) => {
+-        coreEvents.emitConsoleLog(msg.type, msg.content);
+-      },
+-    });
+-
+-    if (process.env['GEMINI_CLI_ACTIVITY_LOG_TARGET']) {
+-      const { setupInitialActivityLogger } = await import(
+-        './utils/devtoolsService.js'
+-      );
+-      await setupInitialActivityLogger(config);
+-    }
+-
+-    const { stdout: workingStdout } = createWorkingStdio();
+-    const textOutput = new TextOutput(workingStdout);
+-
+-    const handleUserFeedback = (payload: UserFeedbackPayload) => {
+-      const prefix = payload.severity.toUpperCase();
+-      process.stderr.write(`[${prefix}] ${payload.message}n`);
+-      if (payload.error && config.getDebugMode()) {
+-        const errorToLog =
+-          payload.error instanceof Error
+-            ? payload.error.stack || payload.error.message
+-            : String(payload.error);
+-        process.stderr.write(`${errorToLog}n`);
+-      }
+-    };
+-
+-    const startTime = Date.now();
+-    const streamFormatter =
+-      config.getOutputFormat() === OutputFormat.STREAM_JSON
+-        ? new StreamJsonFormatter()
+-        : null;
+-
+-    const abortController = new AbortController();
+-
+-    / Track cancellation state
+-    let isAborting = false;
+-    let cancelMessageTimer: NodeJS.Timeout | null = null;
+-
+-    / Setup stdin listener for Ctrl+C detection
+```
+
+### Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24476/.github/workflows/ci.yml /tmp/refactor-eq-workdir/bb-merged-24476/.github/workflows/ci.yml
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24476/.github/workflows/ci.yml	2026-04-02 13:26:11
++++ /tmp/refactor-eq-workdir/bb-merged-24476/.github/workflows/ci.yml	2026-04-17 00:35:45
+@@ -428,15 +428,17 @@
+           UV_THREADPOOL_SIZE: '32'
+           NODE_ENV: 'test'
+         run: |
+-          if ("$'
+Error stating path google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+```
+
+Pick A or B. Note semantic concerns for each. Give rationale.
+
+## Phase 2 — Trajectory
+
+The version that was accepted after human review is NOT shown (it may differ from both). Based on your forced choice, classify the version you picked: would it likely be past (simpler than what reviewers accepted), short (improved but not as good), or wrong direction?
+
+## Phase 3 — Blinding
+
+Did you believe either version was AI-generated? Or the final accepted version? Or couldn't tell?
+
+Respond as JSON:
+{"forced_choice": "A" or "B", "rationale": "...", "semantic_concerns_A": ... , "semantic_concerns_B": ..., "trajectory": "past" or "short" or "wrong_direction", "blinding": "identified_ai" or "identified_final" or "could_not_tell": ENAMETOOLONG: name too long, stat '/Users/junekim/Documents/refactor-equivalence/google/gemini-cli" -- --coverage.enabled=false
+           } else {
+             # Explicitly list non-cli packages to ensure they are sharded correctly
+-            npm run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-            npm run test:scripts
+-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
++            Invoke-NpmOrExit run test:ci --workspace "@google/gemini-cli-core" --workspace "@google/gemini-cli-a2a-server" --workspace "gemini-cli-vscode-ide-companion" --workspace "@google/gemini-cli-test-utils" --if-present -- --coverage.enabled=false
++            Invoke-NpmOrExit run test:scripts
+           }
+         shell: 'pwsh'
+ 
+```
+
+Pick A or B. Note semantic concerns for each. Give rationale.
+
+## Phase 2 — Trajectory
+
+The version that was accepted after human review is NOT shown (it may differ from both). Based on your forced choice, classify the version you picked: would it likely be past (simpler than what reviewers accepted), short (improved but not as good), or wrong direction?
+
+## Phase 3 — Blinding
+
+Did you believe either version was AI-generated? Or the final accepted version? Or couldn't tell?
+
+Respond as JSON:
+{"forced_choice": "A" or "B", "rationale": "...", "semantic_concerns_A": ... , "semantic_concerns_B": ..., "trajectory": "past" or "short" or "wrong_direction", "blinding": "identified_ai" or "identified_final" or "could_not_tell"'
+```json
+{
+  "forced_choice": "B",
+  "rationale": "Version A contains a massive, entirely out-of-scope deletion of `packages/cli/src/nonInteractiveCliAgentSession.ts` which is unrelated to fixing Windows CI and cross-platform tests. Version B correctly encapsulates the PowerShell exit code check into a DRY helper function `Invoke-NpmOrExit`, reducing duplication and achieving the PR's goal safely.",
+  "semantic_concerns_A": "Includes an unrelated, destructive change that deletes a core CLI session file and alters non-interactive execution logic, which has nothing to do with the stated PR objectives of fixing Windows CI tests.",
+  "semantic_concerns_B": "Using a PowerShell helper function with `@args` is DRY and works well in `pwsh`, though it adds a slight layer of indirection to the CI script. It effectively resolves the error swallowing issue.",
+  "trajectory": "short",
+  "blinding": "identified_ai"
+}
+```
