@@ -84,13 +84,15 @@ Without review, these slip through at a 57% rate. With review, they get caught a
 
 **TypeScript repos: yes if under 500 source files.** 67% approval. CLI agents choke on monorepo-scale context loading. Scope codex to the changed package and this likely resolves.
 
-## The bigger picture
+## The lineage
 
-The pipeline is a compiler. The methodology that produced this experiment — [/prework](https://june.kim/prework) — is itself an instance of the same pattern: clarify intent through writing, then compile to artifact. Input: natural language intent (PR description). Output: merge-ready code. The spec step derives claims from the intent. The implementation step compiles claims to code. The review loop is the error-correction pass.
+[Vibelogging](https://june.kim/vibelogging) says: write about what you're building, and the writing clarifies the intent. [/prework](https://june.kim/prework) formalizes that: the writing separates WHAT you want (semantics — only humans know this) from HOW to implement it (mechanics — machines can do this).
 
-For Go-heavy refactoring PRs with fast tests, iterative review moved LLM output from parity to likely merge-ready. The bottleneck shifted from "can the machine write correct code" to "did the human write clear intent" — which is the same bottleneck that exists in human-to-human collaboration.
+This experiment measured the last mile: can machines execute the mechanics at human quality?
 
-The review loop doesn't need to be LLMs. It could be a linter, a type checker, a test suite, a human reviewer. The point is: autonomous refactoring without a feedback loop is the slop-slope. Autonomous refactoring with a feedback loop is a workflow.
+The Phase 7 forced-choice result says yes. In a blind A/B between human-authored and forge-authored refactoring, the reviewer picked forge 57% of the time — coin flip. The LLM produces no more slop than the human. Then the iterative review loop catches the slop from either author and polishes to merge-ready at 91%.
+
+The full pipeline: vibelogging produces clear intent → prework separates semantics from mechanics → forge executes the mechanics at human parity → iterative review catches the slop. The human writes prose. The machine writes code. The review loop is the quality gate for both.
 
 ## The ingredients
 
