@@ -1,0 +1,439 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd68-1599-7e11-b12e-ad5577b44006
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #13084 — Add `discussion list` command
+
+## PR body
+
+## Summary
+
+Implements `gh discussion list` — the first user-facing command in the discussion group (PR 2 of 11).
+
+### Features
+
+- **Listing:** `repository.discussions` GraphQL query with state, category, answered, sort, and order filters
+- **Search:** Falls back to `search(type: DISCUSSION)` when `--author`, `--label`, or `--search` are provided (same dual-path pattern as `gh issue list`)
+- **Pagination:** `--after` cursor flag for paginating through results; `next` cursor in JSON output envelope
+- **Category resolution:** Matches `--category` by slug first, then name (case-insensitive). Errors with sorted available slugs on mismatch. Lives in `shared/` for reuse by other commands.
+- **TTY output:** Colored table with ID, TITLE, CATEGORY, LABELS, ANSWERED (✓), UPDATED columns
+- **Non-TTY output:** Tab-separated with STATE as second field
+- **JSON output:** Envelope `{"totalCount": N, "discussions": [...], "next": "<cursor>"}` with `--jq` and `--template` support
+- **Web mode:** `--web` opens discussions in browser, populates search box when filters are present
+- **Preview annotations:** Top-level `discussion` and `list` commands marked as `(preview)`
+
+### Flags
+
+```
+  -A, --author string     Filter by author
+  -c, --category string   Filter by category name or slug
+  -l, --label strings     Filter by label
+  -L, --limit int         Maximum number of discussions to fetch (default 30)
+  -s, --state string      Filter by state: {open|closed|all} (default "open")
+  -S, --search string     Search discussions with query
+      --answered           Filter to answered discussions only
+
+## Version A
+```diff
+diff --git a/pkg/cmd/discussion/client/client.go b/pkg/cmd/discussion/client/client.go
+index b698dc896..a794d13e1 100644
+--- a/pkg/cmd/discussion/client/client.go
++++ b/pkg/cmd/discussion/client/client.go
+@@ -9,8 +9,8 @@ import "github.com/cli/cli/v2/internal/ghrepo"
+ 
+ // DiscussionClient defines operations for interacting with the GitHub Discussions API.
+ type DiscussionClient interface {
+-	List(repo ghrepo.Interface, filters ListFilters, limit int) ([]Discussion, int, error)
+-	Search(repo ghrepo.Interface, filters SearchFilters, limit int) ([]Discussion, int, error)
++	List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error)
++	Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error)
+ 	GetByNumber(repo ghrepo.Interface, number int) (*Discussion, error)
+ 	GetWithComments(repo ghrepo.Interface, number int, commentLimit int, order string) (*Discussion, error)
+ 	ListCategories(repo ghrepo.Interface) ([]DiscussionCategory, error)
+diff --git a/pkg/cmd/discussion/client/client_impl.go b/pkg/cmd/discussion/client/client_impl.go
+index e5db32dd5..ed44e49be 100644
+--- a/pkg/cmd/discussion/client/client_impl.go
++++ b/pkg/cmd/discussion/client/client_impl.go
+@@ -3,9 +3,12 @@ package client
+ import (
+ 	"fmt"
+ 	"net/http"
++	"strings"
++	"time"
+ 
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
++	"github.com/shurcooL/githubv4"
+ )
+ 
+ type discussionClient struct {
+@@ -19,12 +22,340 @@ func NewDiscussionClient(httpClient *http.Client) DiscussionClient {
+ 	}
+ }
+ 
+-func (c *discussionClient) List(_ ghrepo.Interface, _ ListFilters, _ int) ([]Discussion, int, error) {
+-	return nil, 0, fmt.Errorf("not implemented")
++// actorNode is the GraphQL response shape for an Actor union (User or Bot)
++// used in discussionListNode fields like Author and AnswerChosenBy.
++type actorNode struct {
++	TypeName string `graphql:"__typename"`
++	Login    string
++	User     struct {
++		ID   string
++		Name string
++	} `graphql:"... on User"`
++	Bot struct {
++		ID string
++	} `graphql:"... on Bot"`
+ }
+ 
+-func (c *discussionClient) Search(_ ghrepo.Interface, _ SearchFilters, _ int) ([]Discussion, int, error) {
+-	return nil, 0, fmt.Errorf("not implemented")
++// mapActorFromListNode converts an actorNode into the domain DiscussionActor type.
++func mapActorFromListNode(n actorNode) DiscussionActor {
++	a := DiscussionActor{Login: n.Login}
++	switch n.TypeName {
++	case "User":
++		a.ID = n.User.ID
++		a.Name = n.User.Name
++	case "Bot":
++		a.ID = n.Bot.ID
++	}
++	return a
++}
++
++// discussionListNode is the GraphQL response shape for a discussion in
++// list and search results. It covers high-level fields only (no comments, or
++// other detail-level data that commands like view would need).
++type discussionListNode struct {
++	ID          string
++	Number      int
++	Title       string
++	Body        string
++	URL         string `graphql:"url"`
++	Closed      bool
++	StateReason string
++	Author      actorNode
++	Category    struct {
++		ID           string
++		Name         string
++		Slug         string
++		Emoji        string
++		IsAnswerable bool
++	}
++	Labels struct {
++		Nodes []struct {
++			ID    string
++			Name  string
++			Color string
++		}
++	} `graphql:"labels(first: 20)"`
++	IsAnswered     bool
++	AnswerChosenAt time.Time
++	AnswerChosenBy *actorNode
++	ReactionGroups []struct {
++		Content string
++		Users   struct {
++			TotalCount int
++		}
++	} `graphql:"reactionGroups"`
++	CreatedAt time.Time
++	UpdatedAt time.Time
++	ClosedAt  time.Time
++	Locked    bool
++}
++
++// mapDiscussionFromListNode converts a discussionListNode into the domain Discussion type.
++func mapDiscussionFromListNode(n discussionListNode) Discussion {
++	d := Discussion{
++		ID:          n.ID,
++		Number:      n.Number,
++		Title:       n.Title,
++		Body:        n.Body,
++		URL:         n.URL,
++		Closed:      n.Closed,
++		StateReason: n.StateReason,
++		Author:      mapActorFromListNode(n.Author),
++		Category: DiscussionCategory{
++			ID:           n.Category.ID,
++			Name:         n.Category.Name,
++			Slug:         n.Category.Slug,
++			Emoji:        n.Category.Emoji,
++			IsAnswerable: n.Category.IsAnswerable,
++		},
++		Answered:       n.IsAnswered,
++		AnswerChosenAt: n.AnswerChosenAt,
++		CreatedAt:      n.CreatedAt,
++		UpdatedAt:      n.UpdatedAt,
++		ClosedAt:       n.ClosedAt,
++		Locked:         n.Locked,
++	}
++
++	if n.AnswerChosenBy != nil {
++		a := mapActorFromListNode(*n.AnswerChosenBy)
++		d.AnswerChosenBy = &a
++	}
++
++	d.Labels = make([]DiscussionLabel, len(n.Labels.Nodes))
++	for i, l := range n.Labels.Nodes {
++		d.Labels[i] = DiscussionLabel{ID: l.ID, Name: l.Name, Color: l.Color}
++	}
++
++	return d
++}
++
++func (c *discussionClient) List(repo ghrepo.Interface, filters ListFilters, after string, limit int) (*DiscussionListResult, error) {
++	if limit <= 0 {
++		return nil, fmt.Errorf("limit argument must be positive: %v", limit)
++	}
++
++	var query struct {
++		Repository struct {
++			HasDiscussionsEnabled bool
++			Discussions           struct {
++				TotalCount int
++				PageInfo   struct {
++					HasNextPage bool
++					EndCursor   string
++				}
++				Nodes []discussionListNode
++			} `graphql:"discussions(first: $first, after: $after, orderBy: $orderBy, categoryId: $categoryId, states: $states, answered: $answered)"`
++		} `graphql:"repository(owner: $owner, name: $name)"`
++	}
++
++	orderField := githubv4.DiscussionOrderFieldUpdatedAt
++	orderDir := githubv4.OrderDirectionDesc
++	if filters.OrderBy != "" {
++		switch filters.OrderBy {
++		case OrderByCreated:
++			orderField = githubv4.DiscussionOrderFieldCreatedAt
++		case OrderByUpdated:
++			orderField = githubv4.DiscussionOrderFieldUpdatedAt
++		default:
++			return nil, fmt.Errorf("unknown order-by field: %q", filters.OrderBy)
++		}
++	}
++	if filters.Direction != "" {
++		switch filters.Direction {
++		case OrderDirectionAsc:
++			orderDir = githubv4.OrderDirectionAsc
++		case OrderDirectionDesc:
++			orderDir = githubv4.OrderDirectionDesc
++		default:
++			return nil, fmt.Errorf("unknown order direction: %q", filters.Direction)
++		}
++	}
++
++	perPage := limit
++	if perPage > 100 {
++		perPage = 100
++	}
++
++	variables := map[string]interface{}{
++		"owner":      githubv4.String(repo.RepoOwner()),
++		"name":       githubv4.String(repo.RepoName()),
++		"first":      githubv4.Int(perPage),
++		"after":      (*githubv4.String)(nil),
++		"orderBy":    githubv4.DiscussionOrder{Field: orderField, Direction: orderDir},
++		"categoryId": (*githubv4.ID)(nil),
++		"states":     (*[]githubv4.DiscussionState)(nil),
++		"answered":   (*githubv4.Boolean)(nil),
++	}
++
++	if after != "" {
++		variables["after"] = githubv4.String(after)
++	}
++
++	if filters.CategoryID != "" {
++		variables["categoryId"] = githubv4.ID(filters.CategoryID)
++	}
++
++	if filters.State != nil {
++		switch *filters.State {
++		case FilterStateOpen:
++			variables["states"] = &[]githubv4.DiscussionState{githubv4.DiscussionStateOpen}
++		case FilterStateClosed:
++			variables["states"] = &[]githubv4.DiscussionState{githubv4.DiscussionStateClosed}
++		default:
++			return nil, fmt.Errorf("unknown state filter: %q; should be one of %q, %q", *filters.State, FilterStateOpen, FilterStateClosed)
++		}
++	}
++
++	if filters.Answered != nil {
++		variables["answered"] = githubv4.Boolean(*filters.Answered)
++	}
++
++	var result DiscussionListResult
++	remaining := limit
++
++	for {
++		if err := c.gql.Query(repo.RepoHost(), "DiscussionList", &query, variables); err != nil {
++			return nil, err
++		}
++
++		if !query.Repository.HasDiscussionsEnabled {
++			// This would be the same over every iteration, so if we're going to return we will at the first page.
++			return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
++		}
++
++		result.TotalCount = query.Repository.Discussions.TotalCount
++		for _, n := range query.Repository.Discussions.Nodes {
++			result.Discussions = append(result.Discussions, mapDiscussionFromListNode(n))
++		}
++
++		remaining -= len(query.Repository.Discussions.Nodes)
++		if remaining <= 0 || !query.Repository.Discussions.PageInfo.HasNextPage {
++			if query.Repository.Discussions.PageInfo.HasNextPage {
++				result.NextCursor = query.Repository.Discussions.PageInfo.EndCursor
++			}
++			break
++		}
++		variables["after"] = githubv4.String(query.Repository.Discussions.PageInfo.EndCursor)
++	}
++
++	return &result, nil
++}
++
++func (c *discussionClient) Search(repo ghrepo.Interface, filters SearchFilters, after string, limit int) (*DiscussionListResult, error) {
++	if limit <= 0 {
++		return nil, fmt.Errorf("limit argument must be positive: %v", limit)
++	}
++
++	var query struct {
++		Search struct {
++			DiscussionCount int
++			PageInfo        struct {
++				HasNextPage bool
++				EndCursor   string
++			}
++			Nodes []struct {
++				Discussion discussionListNode `graphql:"... on Discussion"`
++			}
++		} `graphql:"search(query: $query, type: DISCUSSION, first: $first, after: $after)"`
++	}
++
++	qualifiers := []string{fmt.Sprintf("repo:%s/%s", repo.RepoOwner(), repo.RepoName())}
++
++	if filters.State != nil {
++		switch *filters.State {
++		case FilterStateOpen:
++			qualifiers = append(qualifiers, "is:open")
++		case FilterStateClosed:
++			qualifiers = append(qualifiers, "is:closed")
++		default:
++			return nil, fmt.Errorf("unknown state filter: %q; should be one of %q, %q", *filters.State, FilterStateOpen, FilterStateClosed)
++		}
++	}
++
++	if filters.Author != "" {
++		qualifiers = append(qualifiers, fmt.Sprintf("author:%q", filters.Author))
++	}
++	for _, l := range filters.Labels {
++		qualifiers = append(qualifiers, fmt.Sprintf("label:%q", l))
++	}
++	if filters.Category != "" {
++		qualifiers = append(qualifiers, fmt.Sprintf("category:%q", filters.Category))
++	}
++	if filters.Answered != nil {
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/client/client_impl.go /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/client/client_impl.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/client/client_impl.go	2026-04-14 04:24:08
++++ /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/client/client_impl.go	2026-04-17 02:47:31
+@@ -237,9 +237,6 @@
+ 	var nextCursor string
+ 	remaining := limit
+ 
+-	// Check hasDiscussionsEnabled on first request only
+-	firstPage := true
+-
+ 	for {
+ 		perPage := remaining
+ 		if perPage > 100 {
+@@ -252,10 +249,9 @@
+ 			return nil, err
+ 		}
+ 
+-		if firstPage && !data.Repository.HasDiscussionsEnabled {
++		if !data.Repository.HasDiscussionsEnabled {
+ 			return nil, fmt.Errorf("the '%s/%s' repository has discussions disabled", repo.RepoOwner(), repo.RepoName())
+ 		}
+-		firstPage = false
+ 
+ 		totalCount = data.Repository.Discussions.TotalCount
+ 		for _, n := range data.Repository.Discussions.Nodes {
+@@ -345,10 +341,10 @@
+ 	}
+ 	qualifiers = append(qualifiers, fmt.Sprintf("sort:%s-%s", orderField, orderDir))
+ 
+-	searchQuery := strings.Join(qualifiers, " ")
+ 	if filters.Keywords != "" {
+-		searchQuery += " " + filters.Keywords
++		qualifiers = append(qualifiers, filters.Keywords)
+ 	}
++	searchQuery := strings.Join(qualifiers, " ")
+ 
+ 	query := fmt.Sprintf(`query DiscussionSearch($query: String!, $first: Int!, $after: String) {
+ 		search(query: $query, type: DISCUSSION, first: $first, after: $after) {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/list/list.go /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/list/list.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/13084/pkg/cmd/discussion/list/list.go	2026-04-14 04:24:08
++++ /tmp/refactor-eq-workdir/bb-merged-13084/pkg/cmd/discussion/list/list.go	2026-04-17 02:47:31
+@@ -274,17 +274,14 @@
+ }
+ 
+ func noResults(repo ghrepo.Interface, state string) error {
+-	stateQualifier := ""
+-	switch state {
+-	case "open":
+-		stateQualifier = " open"
+-	case "closed":
+-		stateQualifier = " closed"
+-	}
+-	return cmdutil.NewNoResultsError(fmt.Sprintf("no%s discussions match your search in %s", stateQualifier, ghrepo.FullName(repo)))
++	return cmdutil.NewNoResultsError(fmt.Sprintf("no%s discussions match your search in %s", stateQualifier(state), ghrepo.FullName(repo)))
+ }
+ 
+ func listHeader(repoName string, count, total int, state string) string {
++	return fmt.Sprintf("Showing %d of %d%s discussions in %s", count, total, stateQualifier(state), repoName)
++}
++
++func stateQualifier(state string) string {
+ 	stateQualifier := ""
+ 	switch state {
+ 	case "open":
+@@ -292,7 +289,7 @@
+ 	case "closed":
+ 		stateQualifier = " closed"
+ 	}
+-	return fmt.Sprintf("Showing %d of %d%s discussions in %s", count, total, stateQualifier, repoName)
++	return stateQualifier
+ }
+ 
+ func printDiscussions(opts *ListOptions, discussions []client.Discussion, totalCount int) {
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"B","rationale":"B fixes a real pagination bug in A: `List` computes `first` once before the loop, so requests with `limit > 100` can overfetch and return more discussions than requested. The `stateQualifier` extraction in B also reduces duplication without changing behavior."}
+tokens used
+4,684
+{"forced_choice":"B","rationale":"B fixes a real pagination bug in A: `List` computes `first` once before the loop, so requests with `limit > 100` can overfetch and return more discussions than requested. The `stateQualifier` extraction in B also reduces duplication without changing behavior."}

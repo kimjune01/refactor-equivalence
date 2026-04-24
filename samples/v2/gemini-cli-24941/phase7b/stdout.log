@@ -1,0 +1,666 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd69-3567-7951-a670-ad123b82a2cc
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #24941 — Generalize evals infra to support more types of evals, organization and queuing of named suites
+
+## PR body
+
+Generalizes the evals infrastructure to:
+- Support grouping of evals into named 'suites' which can be run by name.
+- Support categorization of evals into behavioral (what we have today), hero (small number of larger and more representative evals), and component level (benchmarks for a specific component's effectiveness).
+- Helpers for component level evals.
+
+This is a precursor to having component level evaluation suites, such as one for compression, which measures the effectiveness of that component in isolation.
+
+It also paves the way for having more and varied tests.
+
+Only the behavioral evals tests are run by default. Other suites can be run on demand by feature maintainers or autonomously at PR time via https://github.com/google-gemini/gemini-cli/pull/24877
+
+Here's what the run queue UI looks like:
+
+<img width="710" height="854" alt="image" src="https://github.com/user-attachments/assets/eca0f4bc-1e74-44cb-9382-4ec5aa58eb4d" />
+
+
+## Linked issues
+(none)
+
+## Version A
+```diff
+diff --git a/.github/workflows/chained_e2e.yml b/.github/workflows/chained_e2e.yml
+index fe87fb1d5d..94215e4795 100644
+--- a/.github/workflows/chained_e2e.yml
++++ b/.github/workflows/chained_e2e.yml
+@@ -335,6 +335,8 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: 'gemini-3-pro-preview'
++          # Only run always passes behavioral tests.
++          EVAL_SUITE_TYPE: 'behavioral'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+           VITEST_RETRY: 0
+diff --git a/.github/workflows/evals-nightly.yml b/.github/workflows/evals-nightly.yml
+index 9acc1de050..fbb770ac84 100644
+--- a/.github/workflows/evals-nightly.yml
++++ b/.github/workflows/evals-nightly.yml
+@@ -5,10 +5,18 @@ on:
+     - cron: '0 1 * * *' # Runs at 1 AM every day
+   workflow_dispatch:
+     inputs:
+-      run_all:
+-        description: 'Run all evaluations (including usually passing)'
+-        type: 'boolean'
+-        default: true
++      suite_type:
++        description: 'Suite type to run'
++        type: 'choice'
++        options:
++          - 'behavioral'
++          - 'component-level'
++          - 'hero-scenario'
++        default: 'behavioral'
++      suite_name:
++        description: 'Specific suite name to run'
++        required: false
++        type: 'string'
+       test_name_pattern:
+         description: 'Test name pattern or file name'
+         required: false
+@@ -59,7 +67,9 @@ jobs:
+         env:
+           GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+           GEMINI_MODEL: '${{ matrix.model }}'
+-          RUN_EVALS: "${{ github.event.inputs.run_all != 'false' }}"
++          RUN_EVALS: 'true'
++          EVAL_SUITE_TYPE: "${{ github.event.inputs.suite_type || 'behavioral' }}"
++          EVAL_SUITE_NAME: '${{ github.event.inputs.suite_name }}'
+           TEST_NAME_PATTERN: '${{ github.event.inputs.test_name_pattern }}'
+           # Disable Vitest internal retries to avoid double-retrying;
+           # custom retry logic is handled in evals/test-helper.ts
+diff --git a/evals/answer-vs-act.eval.ts b/evals/answer-vs-act.eval.ts
+index ff87d12564..1d19294363 100644
+--- a/evals/answer-vs-act.eval.ts
++++ b/evals/answer-vs-act.eval.ts
+@@ -19,6 +19,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file, but instead asks for permission.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked to inspect for bugs',
+     prompt: 'Inspect app.ts for bugs',
+     files: FILES,
+@@ -42,6 +44,8 @@ describe('Answer vs. ask eval', () => {
+    * does modify the file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should edit files when asked to fix bug',
+     prompt: 'Fix the bug in app.ts - it should add numbers not subtract',
+     files: FILES,
+@@ -66,6 +70,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file, but instead asks for permission.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit when asking "any bugs"',
+     prompt: 'Any bugs in app.ts?',
+     files: FILES,
+@@ -89,6 +95,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked a general question',
+     prompt: 'How does app.ts work?',
+     files: FILES,
+@@ -112,6 +120,8 @@ describe('Answer vs. ask eval', () => {
+    * automatically modify the file.
+    */
+   evalTest('ALWAYS_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when asked about style',
+     prompt: 'Is app.ts following good style?',
+     files: FILES,
+@@ -135,6 +145,8 @@ describe('Answer vs. ask eval', () => {
+    * the agent does NOT automatically modify the file.
+    */
+   evalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'should not edit files when user notes an issue',
+     prompt: 'The add function subtracts numbers.',
+     files: FILES,
+diff --git a/evals/app-test-helper.ts b/evals/app-test-helper.ts
+index 8ea842aa38..1794573fe1 100644
+--- a/evals/app-test-helper.ts
++++ b/evals/app-test-helper.ts
+@@ -10,10 +10,13 @@ import {
+   runEval,
+   prepareLogDir,
+   symlinkNodeModules,
++  withEvalRetries,
++  prepareWorkspace,
++  type BaseEvalCase,
++  EVAL_MODEL,
+ } from './test-helper.js';
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { DEFAULT_GEMINI_MODEL } from '@google/gemini-cli-core';
+ 
+ /**
+  * Config overrides for evals, with tool-restriction fields explicitly
+@@ -29,15 +32,13 @@ interface EvalConfigOverrides {
+   allowedTools?: never;
+   /** Restricting tools via mainAgentTools in evals is forbidden. */
+   mainAgentTools?: never;
++
+   [key: string]: unknown;
+ }
+ 
+-export interface AppEvalCase {
+-  name: string;
++export interface AppEvalCase extends BaseEvalCase {
+   configOverrides?: EvalConfigOverrides;
+   prompt: string;
+-  timeout?: number;
+-  files?: Record<string, string>;
+   setup?: (rig: AppRig) => Promise<void>;
+   assert: (rig: AppRig, output: string) => Promise<void>;
+ }
+@@ -48,56 +49,55 @@ export interface AppEvalCase {
+  */
+ export function appEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+   const fn = async () => {
+-    const rig = new AppRig({
+-      configOverrides: {
+-        model: DEFAULT_GEMINI_MODEL,
+-        ...evalCase.configOverrides,
+-      },
+-    });
++    await withEvalRetries(evalCase.name, async () => {
++      const rig = new AppRig({
++        configOverrides: {
++          model: EVAL_MODEL,
++          ...evalCase.configOverrides,
++        },
++      });
+ 
+-    const { logDir, sanitizedName } = await prepareLogDir(evalCase.name);
+-    const logFile = path.join(logDir, `${sanitizedName}.log`);
++      const { logDir, sanitizedName } = await prepareLogDir(evalCase.name);
++      const logFile = path.join(logDir, `${sanitizedName}.log`);
+ 
+-    try {
+-      await rig.initialize();
++      try {
++        await rig.initialize();
+ 
+-      const testDir = rig.getTestDir();
+-      symlinkNodeModules(testDir);
++        const testDir = rig.getTestDir();
++        symlinkNodeModules(testDir);
+ 
+-      // Setup initial files
+-      if (evalCase.files) {
+-        for (const [filePath, content] of Object.entries(evalCase.files)) {
+-          const fullPath = path.join(testDir, filePath);
+-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+-          fs.writeFileSync(fullPath, content);
++        // Setup initial files
++        if (evalCase.files) {
++          // Note: AppRig does not use a separate homeDir, so we use testDir twice
++          await prepareWorkspace(testDir, testDir, evalCase.files);
+         }
+-      }
+ 
+-      // Run custom setup if provided (e.g. for breakpoints)
+-      if (evalCase.setup) {
+-        await evalCase.setup(rig);
+-      }
++        // Run custom setup if provided (e.g. for breakpoints)
++        if (evalCase.setup) {
++          await evalCase.setup(rig);
++        }
+ 
+-      // Render the app!
+-      await rig.render();
++        // Render the app!
++        await rig.render();
+ 
+-      // Wait for initial ready state
+-      await rig.waitForIdle();
++        // Wait for initial ready state
++        await rig.waitForIdle();
+ 
+-      // Send the initial prompt
+-      await rig.sendMessage(evalCase.prompt);
++        // Send the initial prompt
++        await rig.sendMessage(evalCase.prompt);
+ 
+-      // Run assertion. Interaction-heavy tests can do their own waiting/steering here.
+-      const output = rig.getStaticOutput();
+-      await evalCase.assert(rig, output);
+-    } finally {
+-      const output = rig.getStaticOutput();
+-      if (output) {
+-        await fs.promises.writeFile(logFile, output);
++        // Run assertion. Interaction-heavy tests can do their own waiting/steering here.
++        const output = rig.getStaticOutput();
++        await evalCase.assert(rig, output);
++      } finally {
++        const output = rig.getStaticOutput();
++        if (output) {
++          await fs.promises.writeFile(logFile, output);
++        }
++        await rig.unmount();
+       }
+-      await rig.unmount();
+-    }
++    });
+   };
+ 
+-  runEval(policy, evalCase.name, fn, (evalCase.timeout ?? 60000) + 10000);
++  runEval(policy, evalCase, fn, (evalCase.timeout ?? 60000) + 10000);
+ }
+diff --git a/evals/ask_user.eval.ts b/evals/ask_user.eval.ts
+index 6495cb3f22..60d89f7b5b 100644
+--- a/evals/ask_user.eval.ts
++++ b/evals/ask_user.eval.ts
+@@ -5,17 +5,21 @@
+  */
+ 
+ import { describe, expect } from 'vitest';
+-import { appEvalTest, AppEvalCase } from './app-test-helper.js';
+-import { EvalPolicy } from './test-helper.js';
++import { ApprovalMode, isRecord } from '@google/gemini-cli-core';
++import { appEvalTest, type AppEvalCase } from './app-test-helper.js';
++import { type EvalPolicy } from './test-helper.js';
+ 
+ function askUserEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
++  const existingGeneral = evalCase.configOverrides?.['general'];
++  const generalBase = isRecord(existingGeneral) ? existingGeneral : {};
++
+   return appEvalTest(policy, {
+     ...evalCase,
+     configOverrides: {
+       ...evalCase.configOverrides,
++      approvalMode: ApprovalMode.DEFAULT,
+       general: {
+-        ...evalCase.configOverrides?.general,
+-        approvalMode: 'default',
++        ...generalBase,
+         enableAutoUpdate: false,
+         enableAutoUpdateNotification: false,
+       },
+@@ -28,6 +32,8 @@ function askUserEvalTest(policy: EvalPolicy, evalCase: AppEvalCase) {
+ 
+ describe('ask_user', () => {
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool to present multiple choice options',
+     prompt: `Use the ask_user tool to ask me what my favorite color is. Provide 3 options: red, green, or blue.`,
+     setup: async (rig) => {
+@@ -43,6 +49,8 @@ describe('ask_user', () => {
+   });
+ 
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool to clarify ambiguous requirements',
+     files: {
+       'package.json': JSON.stringify({ name: 'my-app', version: '1.0.0' }),
+@@ -61,6 +69,8 @@ describe('ask_user', () => {
+   });
+ 
+   askUserEvalTest('USUALLY_PASSES', {
++    suiteName: 'default',
++    suiteType: 'behavioral',
+     name: 'Agent uses AskUser tool before performing significant ambiguous rework',
+     files: {
+       'packages/core/src/index.ts': '// index\nexport const version = "1.0.0";',
+@@ -82,8 +92,8 @@ describe('ask_user', () => {
+       ]);
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/app-test-helper.ts /tmp/refactor-eq-workdir/bb-merged-24941/evals/app-test-helper.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/app-test-helper.ts	2026-04-08 11:04:30
++++ /tmp/refactor-eq-workdir/bb-merged-24941/evals/app-test-helper.ts	2026-04-17 00:56:46
+@@ -12,7 +12,7 @@
+   symlinkNodeModules,
+   withEvalRetries,
+   prepareWorkspace,
+-  BaseEvalCase,
++  type BaseEvalCase,
+   EVAL_MODEL,
+ } from './test-helper.js';
+ import fs from 'node:fs';
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/component-test-helper.ts /tmp/refactor-eq-workdir/bb-merged-24941/evals/component-test-helper.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24941/evals/component-test-helper.ts	2026-04-08 11:04:30
++++ /tmp/refactor-eq-workdir/bb-merged-24941/evals/component-test-helper.ts	2026-04-17 00:56:45
+@@ -17,7 +17,7 @@
+ import os from 'node:os';
+ import { randomUUID } from 'node:crypto';
+ import {
+-  Config,
++  type Config,
+   type ConfigParameters,
+   AuthType,
+   ApprovalMode,
+@@ -91,6 +91,8 @@
+ 
+     // Refresh auth using USE_GEMINI to initialize the real BaseLlmClient
+     await this.config.refreshAuth(AuthType.USE_GEMINI);
++
++    return this.config;
+   }
+ 
+   async cleanup() {
+@@ -99,7 +101,7 @@
+ }
+ 
+ /**
+- * A helper for running behavioral evaluations directly against backend components.
++ * A helper for running component-level evaluations directly against backend components.
+  * It provides a fully initialized Config with real API access, bypassing the UI.
+  */
+ export function componentEvalTest(
+@@ -115,17 +117,17 @@
+       await prepareLogDir(evalCase.name);
+ 
+       try {
+-        await rig.initialize();
++        const config = await rig.initialize();
+ 
+         if (evalCase.files) {
+           await prepareWorkspace(rig.testDir, rig.testDir, evalCase.files);
+         }
+ 
+         if (evalCase.setup) {
+-          await evalCase.setup(rig.config!);
++          await evalCase.setup(config);
+         }
+ 
+-        await evalCase.assert(rig.config!);
++        await evalCase.assert(config);
+       } finally {
+         await rig.cleanup();
+       }
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+Reviewing the eval helper changes against the current code to check for behavioral regressions and type/API consistency before choosing between the two versions.
+exec
+/bin/zsh -lc "sed -n '1,260p' evals/component-test-helper.ts" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '1,240p' evals/app-test-helper.ts" in /Users/junekim/Documents/refactor-equivalence exited 1 in 0ms:
+sed: evals/component-test-helper.ts: No such file or directory
+ exited 1 in 0ms:
+sed: evals/app-test-helper.ts: No such file or directory
+exec
+/bin/zsh -lc "sed -n '1,220p' evals/ask_user.eval.ts" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '1,320p' evals/test-helper.ts" in /Users/junekim/Documents/refactor-equivalence exited 1 in 0ms:
+sed: evals/ask_user.eval.ts: No such file or directory
+ exited 1 in 0ms:
+sed: evals/test-helper.ts: No such file or directory
+codex
+The workspace layout differs from the paths in the diff, so I’m locating the relevant repo subtree and then checking the helper signatures in place.
+exec
+/bin/zsh -lc 'rg --files | head -200' in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+CLAUDE.md
+BOOTSTRAP_V2.md
+PREREG_V2.md
+PILOT_DECISIONS.md
+improvements.md
+test.txt
+test2.go
+README.md
+PREREG_V2_audit.md
+RESULTS.md
+CLAUDE_RETROSPECTIVE.md
+WORKLOG.md
+PREREG.md
+drafts/gemini-cli-outreach.md
+drafts/blog-post-dexter.md
+test.js
+RESULTS_SINGLE_ROUND_INVALID.md
+test.go
+v3_questions.md
+test.txt.bak
+exec
+/bin/zsh -lc "pwd && rg --files | rg '("'^|/)evals/(app-test-helper|component-test-helper|test-helper|ask_user'"\\.eval)\\.ts"'$'"'" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+/Users/junekim/Documents/refactor-equivalence
+samples/v2-single-round/gemini-cli-24489/c_llm/files/evals/test-helper.ts
+samples/v2-single-round/gemini-cli-24489/c_llm/files/evals/app-test-helper.ts
+samples/v2-single-round/gemini-cli-24489/c_llm/files/evals/ask_user.eval.ts
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/app-test-helper.ts
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts
+exec
+/bin/zsh -lc "sed -n '1,340p' samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '1,240p' samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/app-test-helper.ts" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '1,220p' samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/ask_user.eval.ts" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '1,260p' samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts" in /Users/junekim/Documents/refactor-equivalence exited 1 in 0ms:
+sed: samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/ask_user.eval.ts: No such file or directory
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { AppRig } from '../packages/cli/src/test-utils/AppRig.js';
+import {
+  type EvalPolicy,
+  runEval,
+  prepareLogDir,
+  symlinkNodeModules,
+  withEvalRetries,
+  prepareWorkspace,
+  type BaseEvalCase,
+  EVAL_MODEL,
+} from './test-helper.js';
+import fs from 'node:fs';
+import path from 'node:path';
+
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  type EvalPolicy,
+  runEval,
+  prepareLogDir,
+  withEvalRetries,
+  prepareWorkspace,
+  type BaseEvalCase,
+} from './test-helper.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import {
+  type Config,
+ succeeded in 0ms:
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { execSync } from 'node:child_process';
+import { TestRig } from '@google/gemini-cli-test-utils';
+import {
+  createUnauthorizedToolError,
+  parseAgentMarkdown,
+  Storage,
+  getProjectHash,
+  SESSION_FILE_PREFIX,
+  PREVIEW_GEMINI_FLASH_MODEL,
+  getErrorMessage,
+codex
+I have the relevant helper implementations now. The main question is whether either version fixes a real integration issue or leaves a latent regression in the new suite plumbing.
+exec
+/bin/zsh -lc "sed -n '340,520p' samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+}
+
+/**
+ * Wraps a test function with the appropriate Vitest 'it' or 'it.skip' based on policy.
+ */
+export function runEval(
+  policy: EvalPolicy,
+  name: string,
+  fn: () => Promise<void>,
+  timeout?: number,
+) {
+  if (policy === 'USUALLY_PASSES' && !process.env['RUN_EVALS']) {
+    it.skip(name, fn);
+  } else {
+    it(name, fn, timeout);
+  }
+}
+
+export async function prepareLogDir(name: string) {
+  const logDir = path.resolve(process.cwd(), 'evals/logs');
+exec
+/bin/zsh -lc "rg -n \"interface BaseEvalCase|type BaseEvalCase|function runEval\\(|suiteType|suiteName|EVAL_SUITE_TYPE|EVAL_SUITE_NAME\" samples/v2-single-round/gemini-cli-24941/c_llm/files/evals samples/v2-single-round/gemini-cli-24941/c_llm/files/.github/workflows" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts:345:export function runEval(
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts:393:export interface BaseEvalCase {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/app-test-helper.ts:15:  type BaseEvalCase,
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:13:  type BaseEvalCase,
+exec
+/bin/zsh -lc "rg -n \"componentEvalTest\\(|new ComponentRig\\(|initialize\\(\" samples/v2-single-round/gemini-cli-24941/c_llm/files -g'*.ts'" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/test-helper.ts:138:          await storage.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:67:  async initialize() {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:90:    await this.config.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:107:export function componentEvalTest(
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:113:      const rig = new ComponentRig({
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/component-test-helper.ts:120:        const config = await rig.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/evals/app-test-helper.ts:63:        await rig.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1351:  async initialize(): Promise<void> {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1356:    this.initPromise = this._initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1361:  private async _initialize(): Promise<void> {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1362:    await this.storage.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1393:    await this.agentRegistry.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1449:      await this.hookSystem.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:1457:    await this._geminiClient.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/config.ts:3261:      await this.gitService.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/cli/src/commands/skills/list.ts:29:  await config.initialize();
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/agents/registry.ts:55:  async initialize(): Promise<void> {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/core/src/config/projectRegistry.ts:39:  async initialize(): Promise<void> {
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/cli/src/acp/acpClient.ts:135:  async initialize(
+samples/v2-single-round/gemini-cli-24941/c_llm/files/packages/cli/src/acp/acpClient.ts:174:    await this.context.config.initialize();
+exec
+/bin/zsh -lc "rg -n \"24941|component-test-helper|suiteType|suiteName|initialize\\(\\)\" samples -g'*.md' -g'*.json' -g'*.patch'" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+samples/dev/24489/diff-A.patch:7:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:8:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:16:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:17:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:27:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:28:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:36:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:37:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:45:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:46:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:54:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:55:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:65:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:66:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:74:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:75:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:93:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:94:-    suiteType: 'behavioral',
+samples/dev/24489/diff-A.patch:102:-    suiteName: 'default',
+samples/dev/24489/diff-A.patch:103:-    suiteType: 'behavioral',
+exec
+/bin/zsh -lc "find samples -path '*24941*' -maxdepth 5 | sed -n '1,120p'" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+samples/v2/gemini-cli-24941
+samples/v2/gemini-cli-24941/find_c_test.json
+samples/v2/gemini-cli-24941/phase7b
+samples/v2/gemini-cli-24941/phase7b/assignment.json
+samples/v2/gemini-cli-24941/phase7
+samples/v2/gemini-cli-24941/phase7/review-assignment.json
+samples/v2/gemini-cli-24941/phase7/review-phase1.json
+samples/v2/gemini-cli-24941/phase7/review-stdout.log
+samples/v2/gemini-cli-24941/goal
+samples/v2/gemini-cli-24941/goal/pr-metadata.json
+samples/v2/gemini-cli-24941/goal/GOAL.md
+samples/v2-single-round/gemini-cli-24941
+samples/v2-single-round/gemini-cli-24941/gates
+samples/v2-single-round/gemini-cli-24941/gates/hunt-code-round-1.md
+samples/v2-single-round/gemini-cli-24941/gates/merged-npm-ci.log
+samples/v2-single-round/gemini-cli-24941/gates/hunt-code-round-1-stdout.log
+samples/v2-single-round/gemini-cli-24941/gates/complexity-gate.json
+samples/v2-single-round/gemini-cli-24941/gates/build-log.txt
+samples/v2-single-round/gemini-cli-24941/gates/test-log.txt
+samples/v2-single-round/gemini-cli-24941/no-op-class.txt
+exec
+/bin/zsh -lc "sed -n '1,220p' samples/v2-single-round/gemini-cli-24941/reviewer-loop/round-1-comments.md" in /Users/junekim/Documents/refactor-equivalenceexec
+/bin/zsh -lc "sed -n '60,110p' samples/v2-single-round/gemini-cli-24941/gates/hunt-code-round-1.md" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+No comments.
+ succeeded in 0ms:
+            npm run test:scripts
+          }
+```
+
+**Fix**: Restore explicit `$LASTEXITCODE` checks after each native command, or set PowerShell native-command error handling so a failing `npm` command stops the step.
+
+## Finding F4 — Accepted component-helper cleanup claims were not applied
+**Severity**: warning
+**File**: evals/component-test-helper.ts:20
+**What**: Sharpened claims C1-C3 are still unapplied. `Config` is still imported as a value, `ComponentRig.initialize()` still returns nothing, `componentEvalTest` still uses `rig.config!`, and the JSDoc still says "behavioral evaluations" instead of component-level evaluations.
+
+Current evidence:
+
+```ts
+  Config,
+```
+
+```ts
+  async initialize() {
+```
+exec
+/bin/zsh -lc "sed -n '1,220p' samples/v2-single-round/gemini-cli-24941/blind-blind/merge-decisions.json" in /Users/junekim/Documents/refactor-equivalence succeeded in 0ms:
+{
+  "winner": "opus",
+  "opus_churn": 63,
+  "codex_churn": 72,
+  "rule": "smaller-sum-of-churn, tie→alpha"
+}
+codex
+{"forced_choice":"B","rationale":"B is the safer merge: it cleans up the component eval helper so `initialize()` returns the initialized config and removes the `rig.config!` non-null assertions, which makes the new component-level path more coherent and less brittle. A adds the core suite plumbing, but it appears to leave those component-helper integration cleanups unapplied."}
+tokens used
+26,422
+{"forced_choice":"B","rationale":"B is the safer merge: it cleans up the component eval helper so `initialize()` returns the initialized config and removes the `rig.config!` non-null assertions, which makes the new component-level path more coherent and less brittle. A adds the core suite plumbing, but it appears to leave those component-helper integration cleanups unapplied."}

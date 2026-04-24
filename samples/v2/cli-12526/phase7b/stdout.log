@@ -1,0 +1,644 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd67-ed04-7d32-be95-2b2bd84e9486
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #12526 — `gh pr edit`: new interactive prompt for assignee selection, performance and accessibility improvements
+
+## PR body
+
+## Description
+
+Implements multiselect with search for `gh pr edit` assignees, addressing performance and accessibility issues in large organizations. Part of larger work to improve the reviewer and assignee experience in `gh`.
+
+## Key changes
+
+- **New `MultiSelectWithSearch` prompter**: Adds a search sentinel option to multiselect lists, allowing dynamic fetching of assignees via API search rather than loading all org members upfront
+- **`SuggestedAssignableActors` API**: New GraphQL query to fetch suggested actors for an assignable (Issue/PR) node with optional search filtering
+- **`gh pr edit` assignee flow**: Wires up the new prompter for interactive assignee selection when `ActorIsAssignable` feature is detected
+- **Prompter interface expansion**: Both `surveyPrompter` and `accessiblePrompter` implement the new method, with full test coverage
+- **Preview command**: Adds `multi-select-with-search` to `gh preview prompter` for testing
+
+## Notes for reviewers
+
+- This PR only covers assignees for `gh pr edit`; reviewers will follow in a subsequent PR
+
+## Linked issues
+(none)
+
+## Version A
+```diff
+diff --git a/api/queries_pr.go b/api/queries_pr.go
+index de98c661f..c806d6bb7 100644
+--- a/api/queries_pr.go
++++ b/api/queries_pr.go
+@@ -701,6 +701,98 @@ func RemovePullRequestReviews(client *Client, repo ghrepo.Interface, prNumber in
+ 	return client.REST(repo.RepoHost(), "DELETE", path, buf, nil)
+ }
+ 
++// SuggestedAssignableActors fetches up to 10 suggested actors for a specific assignable
++// (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
++// Returns the actors, the total count of available assignees in the repo, and an error.
++func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, int, error) {
++	type responseData struct {
++		Repository struct {
++			AssignableUsers struct {
++				TotalCount int
++			}
++		} `graphql:"repository(owner: $owner, name: $name)"`
++		Node struct {
++			Issue struct {
++				SuggestedActors struct {
++					Nodes []struct {
++						TypeName string `graphql:"__typename"`
++						User     struct {
++							ID    string
++							Login string
++							Name  string
++						} `graphql:"... on User"`
++						Bot struct {
++							ID    string
++							Login string
++						} `graphql:"... on Bot"`
++					}
++				} `graphql:"suggestedActors(first: 10, query: $query)"`
++			} `graphql:"... on Issue"`
++			PullRequest struct {
++				SuggestedActors struct {
++					Nodes []struct {
++						TypeName string `graphql:"__typename"`
++						User     struct {
++							ID    string
++							Login string
++							Name  string
++						} `graphql:"... on User"`
++						Bot struct {
++							ID    string
++							Login string
++						} `graphql:"... on Bot"`
++					}
++				} `graphql:"suggestedActors(first: 10, query: $query)"`
++			} `graphql:"... on PullRequest"`
++		} `graphql:"node(id: $id)"`
++	}
++
++	variables := map[string]interface{}{
++		"id":    githubv4.ID(assignableID),
++		"query": githubv4.String(query),
++		"owner": githubv4.String(repo.RepoOwner()),
++		"name":  githubv4.String(repo.RepoName()),
++	}
++
++	var result responseData
++	if err := client.Query(repo.RepoHost(), "SuggestedAssignableActors", &result, variables); err != nil {
++		return nil, 0, err
++	}
++
++	availableAssigneesCount := result.Repository.AssignableUsers.TotalCount
++
++	var nodes []struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++
++	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
++		nodes = result.Node.PullRequest.SuggestedActors.Nodes
++	} else if result.Node.Issue.SuggestedActors.Nodes != nil {
++		nodes = result.Node.Issue.SuggestedActors.Nodes
++	}
++
++	actors := make([]AssignableActor, 0, len(nodes))
++
++	for _, n := range nodes {
++		if n.TypeName == "User" && n.User.Login != "" {
++			actors = append(actors, AssignableUser{id: n.User.ID, login: n.User.Login, name: n.User.Name})
++		} else if n.TypeName == "Bot" && n.Bot.Login != "" {
++			actors = append(actors, AssignableBot{id: n.Bot.ID, login: n.Bot.Login})
++		}
++	}
++
++	return actors, availableAssigneesCount, nil
++}
++
+ func UpdatePullRequestBranch(client *Client, repo ghrepo.Interface, params githubv4.UpdatePullRequestBranchInput) error {
+ 	var mutation struct {
+ 		UpdatePullRequestBranch struct {
+diff --git a/internal/prompter/prompter.go b/internal/prompter/prompter.go
+index c2233fd92..2bf49eb58 100644
+--- a/internal/prompter/prompter.go
++++ b/internal/prompter/prompter.go
+@@ -21,6 +21,15 @@ type Prompter interface {
+ 	Select(prompt string, defaultValue string, options []string) (int, error)
+ 	// MultiSelect prompts the user to select one or more options from a list of options.
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
++	// MultiSelectWithSearch is MultiSelect with an added search option to the list,
++	// prompting the user for text input to filter the options via the searchFunc.
++	// Items selected in the search are persisted in the list after subsequent searches.
++	// Items passed in persistentOptions are always shown in the list, even when not selected.
++	// Unlike MultiSelect, MultiselectWithSearch returns the selected option strings,
++	// not their indices, since the list of options is dynamic.
++	// The searchFunc has the signature: func(query string) MultiSelectSearchResult.
++	// In the returned MultiSelectSearchResult, Keys are the values eventually returned by MultiSelectWithSearch and Labels are what is shown to the user in the prompt.
++	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error)
+ 	// Input prompts the user to enter a string value.
+ 	Input(prompt string, defaultValue string) (string, error)
+ 	// Password prompts the user to enter a password.
+@@ -320,6 +329,10 @@ func (p *accessiblePrompter) MarkdownEditor(prompt, defaultValue string, blankAl
+ 	return text, nil
+ }
+ 
++func (p *accessiblePrompter) MultiSelectWithSearch(prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
++	return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
++}
++
+ type surveyPrompter struct {
+ 	prompter  *ghPrompter.Prompter
+ 	stdin     ghPrompter.FileReader
+@@ -336,6 +349,160 @@ func (p *surveyPrompter) MultiSelect(prompt string, defaultValues, options []str
+ 	return p.prompter.MultiSelect(prompt, defaultValues, options)
+ }
+ 
++func (p *surveyPrompter) MultiSelectWithSearch(prompt string, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
++	return multiSelectWithSearch(p, prompt, searchPrompt, defaultValues, persistentValues, searchFunc)
++}
++
++type MultiSelectSearchResult struct {
++	Keys        []string
++	Labels      []string
++	MoreResults int
++	Err         error
++}
++
++func multiSelectWithSearch(p Prompter, prompt, searchPrompt string, defaultValues, persistentValues []string, searchFunc func(string) MultiSelectSearchResult) ([]string, error) {
++	selectedOptions := defaultValues
++
++	// The optionKeyLabels map is used to uniquely identify optionKeyLabels
++	// and provide optional display labels.
++	optionKeyLabels := make(map[string]string)
++	for _, k := range selectedOptions {
++		optionKeyLabels[k] = k
++	}
++
++	searchResult := searchFunc("")
++	if searchResult.Err != nil {
++		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
++	}
++	searchResultKeys := searchResult.Keys
++	searchResultLabels := searchResult.Labels
++	moreResults := searchResult.MoreResults
++
++	for i, k := range searchResultKeys {
++		optionKeyLabels[k] = searchResultLabels[i]
++	}
++
++	for {
++		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
++		optionKeys := make([]string, 0, 1+len(selectedOptions)+len(searchResultKeys)+len(persistentValues))
++		optionLabels := make([]string, 0, len(optionKeys))
++
++		// 1. Search sentinel.
++		optionKeys = append(optionKeys, "")
++		if moreResults > 0 {
++			optionLabels = append(optionLabels, fmt.Sprintf("Search (%d more)", moreResults))
++		} else {
++			optionLabels = append(optionLabels, "Search")
++		}
++
++		// 2. Selections
++		for _, k := range selectedOptions {
++			l := optionKeyLabels[k]
++
++			if l == "" {
++				l = k
++			}
++
++			optionKeys = append(optionKeys, k)
++			optionLabels = append(optionLabels, l)
++		}
++
++		// 3. Search results
++		for _, k := range searchResultKeys {
++			// It's already selected or persistent, if we add here we'll have duplicates.
++			if slices.Contains(selectedOptions, k) || slices.Contains(persistentValues, k) {
++				continue
++			}
++
++			l := optionKeyLabels[k]
++			if l == "" {
++				l = k
++			}
++			optionKeys = append(optionKeys, k)
++			optionLabels = append(optionLabels, l)
++		}
++
++		// 4. Persistent options
++		for _, k := range persistentValues {
++			if slices.Contains(selectedOptions, k) {
++				continue
++			}
++
++			l := optionKeyLabels[k]
++			if l == "" {
++				l = k
++			}
++
++			optionKeys = append(optionKeys, k)
++			optionLabels = append(optionLabels, l)
++		}
++
++		selectedOptionLabels := make([]string, len(selectedOptions))
++		for i, k := range selectedOptions {
++			l := optionKeyLabels[k]
++			if l == "" {
++				l = k
++			}
++			selectedOptionLabels[i] = l
++		}
++
++		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
++		if err != nil {
++			return nil, err
++		}
++
++		pickedSearch := false
++		var newSelectedOptions []string
++		for _, idx := range selectedIdxs {
++			if idx == 0 { // Search sentinel selected
++				pickedSearch = true
++				continue
++			}
++
++			if idx < 0 || idx >= len(optionKeys) {
++				continue
++			}
++
++			key := optionKeys[idx]
++			if key == "" {
++				continue
++			}
++
++			newSelectedOptions = append(newSelectedOptions, key)
++		}
++
++		selectedOptions = newSelectedOptions
++		for _, k := range selectedOptions {
++			if _, ok := optionKeyLabels[k]; !ok {
++				optionKeyLabels[k] = k
++			}
++		}
++
++		if pickedSearch {
++			query, err := p.Input(searchPrompt, "")
++			if err != nil {
++				return nil, err
++			}
++
++			searchResult := searchFunc(query)
++			if searchResult.Err != nil {
++				return nil, searchResult.Err
++			}
++			searchResultKeys = searchResult.Keys
++			searchResultLabels = searchResult.Labels
++			moreResults = searchResult.MoreResults
++
++			for i, k := range searchResultKeys {
++				optionKeyLabels[k] = searchResultLabels[i]
++			}
++
++			continue
++		}
++
++		return selectedOptions, nil
++	}
++}
++
+ func (p *surveyPrompter) Input(prompt, defaultValue string) (string, error) {
+ 	return p.prompter.Input(prompt, defaultValue)
+ }
+diff --git a/internal/prompter/prompter_mock.go b/internal/prompter/prompter_mock.go
+index b15f8bf96..fd6492df8 100644
+--- a/internal/prompter/prompter_mock.go
++++ b/internal/prompter/prompter_mock.go
+@@ -38,6 +38,9 @@ var _ Prompter = &PrompterMock{}
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go /tmp/refactor-eq-workdir/bb-merged-12526/api/queries_pr.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/api/queries_pr.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/api/queries_pr.go	2026-04-17 02:29:27
+@@ -705,6 +705,21 @@
+ // (Issue or PullRequest) node ID. `assignableID` is the GraphQL node ID for the Issue/PR.
+ // If query is empty, the query variable is passed as null to omit filtering.
+ func SuggestedAssignableActors(client *Client, repo ghrepo.Interface, assignableID string, query string) ([]AssignableActor, error) {
++	type suggestedActorNode struct {
++		TypeName string `graphql:"__typename"`
++		User     struct {
++			ID    string
++			Login string
++			Name  string
++		} `graphql:"... on User"`
++		Bot struct {
++			ID    string
++			Login string
++		} `graphql:"... on Bot"`
++	}
++	type suggestedActorsConnection struct {
++		Nodes []suggestedActorNode
++	}
+ 	type responseData struct {
+ 		Viewer struct {
+ 			ID    string
+@@ -713,36 +728,10 @@
+ 		} `graphql:"viewer"`
+ 		Node struct {
+ 			Issue struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on Issue"`
+ 			PullRequest struct {
+-				SuggestedActors struct {
+-					Nodes []struct {
+-					    TypeName string `graphql:"__typename"`
+-						User struct {
+-							ID       string
+-							Login    string
+-							Name     string							
+-						} `graphql:"... on User"`
+-						Bot struct {
+-							ID       string
+-							Login    string
+-						} `graphql:"... on Bot"`
+-					}
+-				} `graphql:"suggestedActors(first: 10, query: $query)"`
++				SuggestedActors suggestedActorsConnection `graphql:"suggestedActors(first: 10, query: $query)"`
+ 			} `graphql:"... on PullRequest"`
+ 		} `graphql:"node(id: $id)"`
+ 	}
+@@ -761,18 +750,7 @@
+ 		return nil, err
+ 	}
+ 
+-	var nodes []struct {
+-		TypeName string `graphql:"__typename"`
+-		User struct {
+-			ID       string
+-			Login    string
+-			Name     string
+-		} `graphql:"... on User"`
+-		Bot struct {
+-			ID       string
+-			Login    string
+-		} `graphql:"... on Bot"`
+-	}
++	var nodes []suggestedActorNode
+ 
+ 	if result.Node.PullRequest.SuggestedActors.Nodes != nil {
+ 		nodes = result.Node.PullRequest.SuggestedActors.Nodes
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go /tmp/refactor-eq-workdir/bb-merged-12526/internal/prompter/prompter.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/internal/prompter/prompter.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/internal/prompter/prompter.go	2026-04-17 02:29:27
+@@ -370,18 +370,31 @@
+ 		optionKeyLabels[k] = k
+ 	}
+ 
++	labelFor := func(key string) string {
++		label := optionKeyLabels[key]
++		if label == "" {
++			return key
++		}
++		return label
++	}
++
++	var searchResultKeys []string
++	var moreResults int
++	applySearchResult := func(searchResult MultiSelectSearchResult) {
++		searchResultKeys = searchResult.Keys
++		moreResults = searchResult.MoreResults
++
++		for i, k := range searchResultKeys {
++			optionKeyLabels[k] = searchResult.Labels[i]
++		}
++	}
++
+ 	searchResult := searchFunc("")
+ 	if searchResult.Err != nil {
+ 		return nil, fmt.Errorf("failed to search: %w", searchResult.Err)
+ 	}
+-	searchResultKeys := searchResult.Keys
+-	searchResultLabels := searchResult.Labels
+-	moreResults := searchResult.MoreResults
++	applySearchResult(searchResult)
+ 
+-	for i, k := range searchResultKeys {
+-		optionKeyLabels[k] = searchResultLabels[i]
+-	}
+-
+ 	for {
+ 		// Build dynamic option list ->  search sentinel, selections, search results, persistent options.
+ 		optionKeys := make([]string, 0, 1+len(selectedOptions)+len(searchResultKeys)+len(persistentValues))
+@@ -397,14 +410,8 @@
+ 
+ 		// 2. Selections
+ 		for _, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 3. Search results
+@@ -414,12 +421,8 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		// 4. Persistent options
+@@ -428,22 +431,13 @@
+ 				continue
+ 			}
+ 
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-
+ 			optionKeys = append(optionKeys, k)
+-			optionLabels = append(optionLabels, l)
++			optionLabels = append(optionLabels, labelFor(k))
+ 		}
+ 
+ 		selectedOptionLabels := make([]string, len(selectedOptions))
+ 		for i, k := range selectedOptions {
+-			l := optionKeyLabels[k]
+-			if l == "" {
+-				l = k
+-			}
+-			selectedOptionLabels[i] = l
++			selectedOptionLabels[i] = labelFor(k)
+ 		}
+ 
+ 		selectedIdxs, err := p.MultiSelect(prompt, selectedOptionLabels, optionLabels)
+@@ -488,13 +482,7 @@
+ 			if searchResult.Err != nil {
+ 				return nil, searchResult.Err
+ 			}
+-			searchResultKeys = searchResult.Keys
+-			searchResultLabels = searchResult.Labels
+-			moreResults = searchResult.MoreResults
+-
+-			for i, k := range searchResultKeys {
+-				optionKeyLabels[k] = searchResultLabels[i]
+-			}
++			applySearchResult(searchResult)
+ 
+ 			continue
+ 		}
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/edit/edit.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/edit/edit.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/edit/edit.go	2026-04-17 02:29:27
+@@ -339,7 +339,7 @@
+ }
+ 
+ func assigneeSearchFunc(apiClient *api.Client, repo ghrepo.Interface, editable *shared.Editable, assignableID string) func(string) prompter.MultiSelectSearchResult {
+-	searchFunc := func(input string) prompter.MultiSelectSearchResult {
++	return func(input string) prompter.MultiSelectSearchResult {
+ 		actors, err := api.SuggestedAssignableActors(
+ 			apiClient,
+ 			repo,
+@@ -381,7 +381,6 @@
+ 			Err:         nil,
+ 		}
+ 	}
+-	return searchFunc
+ }
+ 
+ func updatePullRequest(httpClient *http.Client, repo ghrepo.Interface, id string, number int, editable shared.Editable) error {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/shared/editable.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/editable.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/shared/editable.go	2026-04-17 02:29:27
+@@ -15,7 +15,6 @@
+ 	Body               EditableString
+ 	Base               EditableString
+ 	Reviewers          EditableSlice
+-	ReviewerSearchFunc func(string) ([]string, []string, error)
+ 	Assignees          EditableAssignees
+ 	AssigneeSearchFunc func(string) prompter.MultiSelectSearchResult
+ 	Labels             EditableSlice
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/shared/survey.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/pr/shared/survey.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/pr/shared/survey.go	2026-04-17 02:29:27
+@@ -9,7 +9,6 @@
+ 	"github.com/cli/cli/v2/api"
+ 	"github.com/cli/cli/v2/internal/gh"
+ 	"github.com/cli/cli/v2/internal/ghrepo"
+-	"github.com/cli/cli/v2/internal/prompter"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/cli/cli/v2/pkg/iostreams"
+ 	"github.com/cli/cli/v2/pkg/surveyext"
+@@ -41,7 +40,6 @@
+ 	MarkdownEditor(prompt string, defaultValue string, blankAllowed bool) (string, error)
+ 	Confirm(prompt string, defaultValue bool) (bool, error)
+ 	MultiSelect(prompt string, defaults []string, options []string) ([]int, error)
+-	MultiSelectWithSearch(prompt, searchPrompt string, defaults []string, persistentOptions []string, searchFunc func(string) prompter.MultiSelectSearchResult) ([]string, error)
+ }
+ 
+ func ConfirmIssueSubmission(p Prompt, allowPreview bool, allowMetadata bool) (Action, error) {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/preview/prompter/prompter.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/12526/pkg/cmd/preview/prompter/prompter.go	2026-01-26 12:29:22
++++ /tmp/refactor-eq-workdir/bb-merged-12526/pkg/cmd/preview/prompter/prompter.go	2026-04-17 02:29:27
+@@ -158,30 +158,21 @@
+ 	fmt.Fprintln(io.Out, "Demonstrating Multi Select With Search")
+ 	persistentOptions := []string{"persistent-option-1"}
+ 	searchFunc := func(input string) prompter.MultiSelectSearchResult {
+-		var searchResultKeys []string
+-		var searchResultLabels []string
+-
+ 		if input == "" {
+-			moreResults := 2 // Indicate that there are more results available
+-			searchResultKeys = []string{"initial-result-1", "initial-result-2"}
+-			searchResultLabels = []string{"Initial Result Label 1", "Initial Result Label 2"}
+ 			return prompter.MultiSelectSearchResult{
+-				Keys:        searchResultKeys,
+-				Labels:      searchResultLabels,
+-				MoreResults: moreResults,
++				Keys:        []string{"initial-result-1", "initial-result-2"},
++				Labels:      []string{"Initial Result Label 1", "Initial Result Label 2"},
++				MoreResults: 2,
+ 				Err:         nil,
+ 			}
+ 		}
+ 
+ 		// In a real implementation, this function would perform a search based on the input.
+ 		// Here, we return a static set of options for demonstration purposes.
+-		moreResults := 0
+-		searchResultKeys = []string{"search-result-1", "search-result-2"}
+-		searchResultLabels = []string{"Search Result Label 1", "Search Result Label 2"}
+ 		return prompter.MultiSelectSearchResult{
+-			Keys:        searchResultKeys,
+-			Labels:      searchResultLabels,
+-			MoreResults: moreResults,
++			Keys:        []string{"search-result-1", "search-result-2"},
++			Labels:      []string{"Search Result Label 1", "Search Result Label 2"},
++			MoreResults: 0,
+ 			Err:         nil,
+ 		}
+ 	}
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"B","rationale":"B is the cleaner merge candidate: it factors duplicated `suggestedActors` GraphQL node types and prompt label/search-result handling into small helpers, which reduces repetition and makes the code easier to maintain. It also trims unnecessary surface area and dead fields (`ReviewerSearchFunc`, unused prompt method exposure), so the final shape is tighter without changing behavior."}
+tokens used
+7,751
+{"forced_choice":"B","rationale":"B is the cleaner merge candidate: it factors duplicated `suggestedActors` GraphQL node types and prompt label/search-result handling into small helpers, which reduces repetition and makes the code easier to maintain. It also trims unnecessary surface area and dead fields (`ReviewerSearchFunc`, unused prompt method exposure), so the final shape is tighter without changing behavior."}

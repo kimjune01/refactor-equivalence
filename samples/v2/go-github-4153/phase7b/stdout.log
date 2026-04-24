@@ -1,0 +1,267 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd6a-6a37-7853-a1a7-ba0ba7d8f550
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #4153
+
+This PR refactors the behaviour of `DownloadContents` & `DownloadContentsWithMeta` with the former now being a direct passthrough to the latter as the only difference was the signature. The code has been refactored to use the API directly instead of via an unnecessary layer of indirection.
+
+I've added an OpenAPI update to this PR as it proves that the updated code works against GitHub.
+
+This change is required for #4151.
+
+## Version A
+```diff
+diff --git a/README.md b/README.md
+index 60caa865..9d52476e 100644
+--- a/README.md
++++ b/README.md
+@@ -479,7 +479,7 @@ documentation for details on preview functionality.
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+diff --git a/example/contents/main.go b/example/contents/main.go
+new file mode 100644
+index 00000000..7749f094
+--- /dev/null
++++ b/example/contents/main.go
+@@ -0,0 +1,75 @@
++// Copyright 2026 The go-github AUTHORS. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++// The contents command utilizes go-github as a CLI tool for
++// downloading the contents of a file in a repository.
++// It takes an inputs of the repository owner, repository name, path to the
++// file in the repository, reference (branch, tag or commit SHA), and output
++// path for the downloaded file. It then uses the Repositories.DownloadContents
++// method to download the file and saves it to the specified output path.
++package main
++
++import (
++	"bufio"
++	"context"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/google/go-github/v84/github"
++)
++
++func main() {
++	fmt.Println("This example will download the contents of a file from a GitHub repository.")
++
++	r := bufio.NewReader(os.Stdin)
++
++	fmt.Print("Repository Owner: ")
++	owner, _ := r.ReadString('\n')
++	owner = strings.TrimSpace(owner)
++
++	fmt.Print("Repository Name: ")
++	repo, _ := r.ReadString('\n')
++	repo = strings.TrimSpace(repo)
++
++	fmt.Print("Repository Path: ")
++	repoPath, _ := r.ReadString('\n')
++	repoPath = strings.TrimSpace(repoPath)
++
++	fmt.Print("Reference (branch, tag or commit SHA): ")
++	ref, _ := r.ReadString('\n')
++	ref = strings.TrimSpace(ref)
++
++	fmt.Print("Output Path: ")
++	outputPath, _ := r.ReadString('\n')
++	outputPath = filepath.Clean(strings.TrimSpace(outputPath))
++
++	fmt.Printf("\nDownloading %v/%v/%v at ref %v to %v...\n", owner, repo, repoPath, ref, outputPath)
++
++	client := github.NewClient(nil)
++
++	rc, _, err := client.Repositories.DownloadContents(context.Background(), owner, repo, repoPath, &github.RepositoryContentGetOptions{Ref: ref})
++	if err != nil {
++		fmt.Printf("Error: %v\n", err)
++		os.Exit(1)
++	}
++	defer rc.Close()
++
++	f, err := os.Create(outputPath) //#nosec G703 -- path is validated above
++	if err != nil {
++		fmt.Printf("Error: %v\n", err)
++		os.Exit(1)
++	}
++	defer f.Close()
++
++	if _, err := io.Copy(f, rc); err != nil {
++		fmt.Printf("Error: %v\n", err)
++		os.Exit(1)
++	}
++
++	fmt.Println("Download completed.")
++}
+diff --git a/github/repos_contents.go b/github/repos_contents.go
+index 0c2ac3bf..53313ea2 100644
+--- a/github/repos_contents.go
++++ b/github/repos_contents.go
+@@ -17,7 +17,6 @@ import (
+ 	"io"
+ 	"net/http"
+ 	"net/url"
+-	"path"
+ 	"strings"
+ )
+ 
+@@ -137,40 +136,8 @@ func (s *RepositoriesService) GetReadme(ctx context.Context, owner, repo string,
+ //
+ //meta:operation GET /repos/{owner}/{repo}/contents/{path}
+ func (s *RepositoriesService) DownloadContents(ctx context.Context, owner, repo, filepath string, opts *RepositoryContentGetOptions) (io.ReadCloser, *Response, error) {
+-	dir := path.Dir(filepath)
+-	filename := path.Base(filepath)
+-	fileContent, _, resp, err := s.GetContents(ctx, owner, repo, filepath, opts)
+-	if err == nil && fileContent != nil {
+-		content, err := fileContent.GetContent()
+-		if err == nil && content != "" {
+-			return io.NopCloser(strings.NewReader(content)), resp, nil
+-		}
+-	}
+-
+-	_, dirContents, resp, err := s.GetContents(ctx, owner, repo, dir, opts)
+-	if err != nil {
+-		return nil, resp, err
+-	}
+-
+-	for _, contents := range dirContents {
+-		if contents.GetName() == filename {
+-			if contents.GetDownloadURL() == "" {
+-				return nil, resp, fmt.Errorf("no download link found for %v", filepath)
+-			}
+-			dlReq, err := http.NewRequestWithContext(ctx, "GET", *contents.DownloadURL, nil)
+-			if err != nil {
+-				return nil, resp, err
+-			}
+-			dlResp, err := s.client.client.Do(dlReq)
+-			if err != nil {
+-				return nil, &Response{Response: dlResp}, err
+-			}
+-
+-			return dlResp.Body, &Response{Response: dlResp}, nil
+-		}
+-	}
+-
+-	return nil, resp, fmt.Errorf("no file named %v found in %v", filename, dir)
++	rc, _, resp, err := s.DownloadContentsWithMeta(ctx, owner, repo, filepath, opts)
++	return rc, resp, err
+ }
+ 
+ // DownloadContentsWithMeta is identical to DownloadContents but additionally
+@@ -186,40 +153,36 @@ func (s *RepositoriesService) DownloadContents(ctx context.Context, owner, repo,
+ //
+ //meta:operation GET /repos/{owner}/{repo}/contents/{path}
+ func (s *RepositoriesService) DownloadContentsWithMeta(ctx context.Context, owner, repo, filepath string, opts *RepositoryContentGetOptions) (io.ReadCloser, *RepositoryContent, *Response, error) {
+-	dir := path.Dir(filepath)
+-	filename := path.Base(filepath)
+ 	fileContent, _, resp, err := s.GetContents(ctx, owner, repo, filepath, opts)
+-	if err == nil && fileContent != nil {
+-		content, err := fileContent.GetContent()
+-		if err == nil && content != "" {
+-			return io.NopCloser(strings.NewReader(content)), fileContent, resp, nil
+-		}
++	if err != nil {
++		return nil, nil, resp, err
++	}
++
++	if fileContent == nil {
++		return nil, nil, resp, errors.New("no file content found")
++	}
++
++	content, err := fileContent.GetContent()
++	if err == nil && content != "" {
++		return io.NopCloser(strings.NewReader(content)), fileContent, resp, nil
+ 	}
+ 
+-	_, dirContents, resp, err := s.GetContents(ctx, owner, repo, dir, opts)
++	downloadURL := fileContent.GetDownloadURL()
++	if downloadURL == "" {
++		return nil, fileContent, resp, errors.New("download url is empty")
++	}
++
++	dlReq, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
+ 	if err != nil {
+-		return nil, nil, resp, err
++		return nil, fileContent, resp, err
+ 	}
+ 
+-	for _, contents := range dirContents {
+-		if contents.GetName() == filename {
+-			if contents.GetDownloadURL() == "" {
+-				return nil, contents, resp, fmt.Errorf("no download link found for %v", filepath)
+-			}
+-			dlReq, err := http.NewRequestWithContext(ctx, "GET", *contents.DownloadURL, nil)
+-			if err != nil {
+-				return nil, contents, resp, err
+-			}
+-			dlResp, err := s.client.client.Do(dlReq)
+-			if err != nil {
+-				return nil, contents, &Response{Response: dlResp}, err
+-			}
+-
+-			return dlResp.Body, contents, &Response{Response: dlResp}, nil
+-		}
++	dlResp, err := s.client.client.Do(dlReq)
++	if err != nil {
++		return nil, fileContent, &Response{Response: dlResp}, err
+ 	}
+ 
+-	return nil, nil, resp, fmt.Errorf("no file named %v found in %v", filename, dir)
++	return dlResp.Body, fileContent, &Response{Response: dlResp}, nil
+ }
+ 
+ // GetContents can return either the metadata and content of a single file
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/4153/README.md /tmp/refactor-eq-workdir/bb-merged-4153/README.md
+--- /tmp/refactor-eq-workdir/cleanroom-v2/4153/README.md	2026-04-16 05:40:28
++++ /tmp/refactor-eq-workdir/bb-merged-4153/README.md	2026-04-17 09:25:57
+@@ -479,7 +479,7 @@
+ 
+ ### Calendar Versioning ###
+ 
+-As of 2022-11-28, GitHub [has announced](https://github.blog/2022-11-28-to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
++As of 2022-11-28, GitHub [has announced](https://github.blog/developer-skills/github/to-infinity-and-beyond-enabling-the-future-of-githubs-rest-api-with-api-versioning/)
+ that they are starting to version their v3 API based on "calendar-versioning".
+ 
+ In practice, our goal is to make per-method version overrides (at
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"A","rationale":"A is the only version that actually implements the PR’s stated refactor by making `DownloadContents` a passthrough to `DownloadContentsWithMeta` and removing the extra directory lookup layer. B only changes a README URL, so it does not deliver the behavioral change described in the PR."}
+tokens used
+3,498
+{"forced_choice":"A","rationale":"A is the only version that actually implements the PR’s stated refactor by making `DownloadContents` a passthrough to `DownloadContentsWithMeta` and removing the extra directory lookup layer. B only changes a README URL, so it does not deliver the behavioral change described in the PR."}

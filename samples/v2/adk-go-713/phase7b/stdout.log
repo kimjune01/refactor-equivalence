@@ -1,11 +1,517 @@
-YOLO mode is enabled. All tool calls will be automatically approved.
-YOLO mode is enabled. All tool calls will be automatically approved.
-```json
-{
-  "forced_choice": "B",
-  "rationale": "Version B significantly improves readability and maintainability by extracting magic strings into constants and refactoring the monolithic HTTP handler into smaller, focused helper functions for request parsing and message content extraction."
-}
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd67-5df2-7b53-9613-317f8816fe58
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #713
+
+Implementation of Cloud Events trigger processing.
+
+This implementation should handle the resource exhausted exceptions with jitter to prevent thundering herd (configured per subrouter).
+
+Similar to https://github.com/google/adk-go/pull/704
+
+(see the details in [go/orcas-rfc-522](http://go/orcas-rfc-522))
+
+## Version A
+```diff
+diff --git a/cmd/launcher/full/full.go b/cmd/launcher/full/full.go
+index a6f46d3b..a4904027 100644
+--- a/cmd/launcher/full/full.go
++++ b/cmd/launcher/full/full.go
+@@ -22,11 +22,12 @@ import (
+ 	"google.golang.org/adk/cmd/launcher/web"
+ 	"google.golang.org/adk/cmd/launcher/web/a2a"
+ 	"google.golang.org/adk/cmd/launcher/web/api"
++	"google.golang.org/adk/cmd/launcher/web/triggers/eventarc"
+ 	"google.golang.org/adk/cmd/launcher/web/triggers/pubsub"
+ 	"google.golang.org/adk/cmd/launcher/web/webui"
+ )
+ 
+ // NewLauncher returnes the most versatile universal launcher with all options built-in.
+ func NewLauncher() launcher.Launcher {
+-	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), api.NewLauncher()))
++	return universal.NewLauncher(console.NewLauncher(), web.NewLauncher(webui.NewLauncher(), a2a.NewLauncher(), pubsub.NewLauncher(), eventarc.NewLauncher(), api.NewLauncher()))
+ }
+diff --git a/cmd/launcher/web/triggers/eventarc/eventarc.go b/cmd/launcher/web/triggers/eventarc/eventarc.go
+new file mode 100644
+index 00000000..abc68d23
+--- /dev/null
++++ b/cmd/launcher/web/triggers/eventarc/eventarc.go
+@@ -0,0 +1,136 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++// Package eventarc provides a sublauncher that adds Eventarc trigger capabilities to ADK web server.
++package eventarc
++
++import (
++	"flag"
++	"fmt"
++	"net/http"
++	"strings"
++	"time"
++
++	"github.com/gorilla/mux"
++
++	"google.golang.org/adk/cmd/launcher"
++	"google.golang.org/adk/cmd/launcher/web"
++	"google.golang.org/adk/internal/cli/util"
++	"google.golang.org/adk/server/adkrest/controllers/triggers"
++)
++
++type eventarcConfig struct {
++	pathPrefix        string
++	triggerMaxRetries int
++	triggerBaseDelay  time.Duration
++	triggerMaxDelay   time.Duration
++	triggerMaxRuns    int
++}
++
++type eventarcLauncher struct {
++	flags  *flag.FlagSet
++	config *eventarcConfig
++}
++
++// NewLauncher creates a new eventarc launcher. It extends Web launcher.
++func NewLauncher() web.Sublauncher {
++	config := &eventarcConfig{}
++
++	fs := flag.NewFlagSet("eventarc", flag.ContinueOnError)
++	fs.StringVar(&config.pathPrefix, "path_prefix", "/api", "Path prefix for the Eventarc trigger endpoint. Default is '/api'.")
++	fs.IntVar(&config.triggerMaxRetries, "trigger_max_retries", 3, "Maximum retries for HTTP 429 errors from triggers")
++	fs.DurationVar(&config.triggerBaseDelay, "trigger_base_delay", 1*time.Second, "Base delay for trigger retry exponential backoff")
++	fs.DurationVar(&config.triggerMaxDelay, "trigger_max_delay", 10*time.Second, "Maximum delay for trigger retry exponential backoff")
++	fs.IntVar(&config.triggerMaxRuns, "trigger_max_concurrent_runs", 100, "Maximum concurrent trigger runs")
++
++	return &eventarcLauncher{
++		config: config,
++		flags:  fs,
++	}
++}
++
++// Keyword implements web.Sublauncher. Returns the command-line keyword for eventarc launcher.
++func (e *eventarcLauncher) Keyword() string {
++	return "eventarc"
++}
++
++// Parse parses the command-line arguments for the eventarc launcher.
++func (e *eventarcLauncher) Parse(args []string) ([]string, error) {
++	err := e.flags.Parse(args)
++	if err != nil || !e.flags.Parsed() {
++		return nil, fmt.Errorf("failed to parse eventarc flags: %v", err)
++	}
++	if e.config.triggerMaxRetries <= 0 {
++		return nil, fmt.Errorf("trigger_max_retries must be > 0")
++	}
++	if e.config.triggerBaseDelay < 0 {
++		return nil, fmt.Errorf("trigger_base_delay must be >= 0")
++	}
++	if e.config.triggerMaxDelay <= 0 {
++		return nil, fmt.Errorf("trigger_max_delay must be > 0")
++	}
++	if e.config.triggerMaxRuns <= 0 {
++		return nil, fmt.Errorf("trigger_max_concurrent_runs must be > 0")
++	}
++
++	prefix := e.config.pathPrefix
++	if !strings.HasPrefix(prefix, "/") {
++		prefix = "/" + prefix
++	}
++	e.config.pathPrefix = strings.TrimSuffix(prefix, "/")
++
++	return e.flags.Args(), nil
++}
++
++// CommandLineSyntax returns the command-line syntax for the eventarc launcher.
++func (e *eventarcLauncher) CommandLineSyntax() string {
++	return util.FormatFlagUsage(e.flags)
++}
++
++// SimpleDescription implements web.Sublauncher.
++func (e *eventarcLauncher) SimpleDescription() string {
++	return "starts ADK Eventarc trigger endpoint server"
++}
++
++// SetupSubrouters adds the Eventarc trigger endpoint to the parent router.
++func (e *eventarcLauncher) SetupSubrouters(router *mux.Router, config *launcher.Config) error {
++	triggerConfig := triggers.TriggerConfig{
++		MaxRetries:        e.config.triggerMaxRetries,
++		BaseDelay:         e.config.triggerBaseDelay,
++		MaxDelay:          e.config.triggerMaxDelay,
++		MaxConcurrentRuns: e.config.triggerMaxRuns,
++	}
++
++	controller := triggers.NewEventarcController(
++		config.SessionService,
++		config.AgentLoader,
++		config.MemoryService,
++		config.ArtifactService,
++		config.PluginConfig,
++		triggerConfig,
++	)
++
++	subrouter := router
++	if e.config.pathPrefix != "" && e.config.pathPrefix != "/" {
++		subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
++	}
++
++	subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++	return nil
++}
++
++// UserMessage implements web.Sublauncher.
++func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
++	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++}
+diff --git a/server/adkrest/controllers/triggers/eventarc.go b/server/adkrest/controllers/triggers/eventarc.go
+new file mode 100644
+index 00000000..65f32ecc
+--- /dev/null
++++ b/server/adkrest/controllers/triggers/eventarc.go
+@@ -0,0 +1,137 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package triggers
++
++import (
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++
++	"google.golang.org/adk/agent"
++	"google.golang.org/adk/artifact"
++	"google.golang.org/adk/memory"
++	"google.golang.org/adk/runner"
++	"google.golang.org/adk/server/adkrest/internal/models"
++	"google.golang.org/adk/session"
++)
++
++const eventArcDefaultUserID = "eventarc-caller"
++
++// EventarcController handles the Eventarc trigger endpoints.
++type EventarcController struct {
++	runner    *RetriableRunner
++	semaphore chan struct{}
++}
++
++// NewEventarcController creates a new EventarcController.
++func NewEventarcController(sessionService session.Service, agentLoader agent.Loader, memoryService memory.Service, artifactService artifact.Service, pluginConfig runner.PluginConfig, triggerConfig TriggerConfig) *EventarcController {
++	return &EventarcController{
++		runner: &RetriableRunner{
++			sessionService:  sessionService,
++			agentLoader:     agentLoader,
++			memoryService:   memoryService,
++			artifactService: artifactService,
++			pluginConfig:    pluginConfig,
++			triggerConfig:   triggerConfig,
++		},
++		semaphore: make(chan struct{}, triggerConfig.MaxConcurrentRuns),
++	}
++}
++
++// EventarcTriggerHandler handles the Eventarc trigger endpoint.
++func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
++	var event models.EventarcTriggerRequest
++	contentType := r.Header.Get("Content-Type")
++	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
++	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
++	if contentType == "application/cloudevents+json" {
++		// --- STRUCTURED MODE ---
++		// The entire event is in the body. Decode it.
++		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
++		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++			respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to unmarshal eventarc request: %v", err))
++			return
++		}
++	} else {
++		// --- BINARY MODE ---
++		// Metadata is in the headers.
++		event.ID = r.Header.Get("ce-id")
++		event.Type = r.Header.Get("ce-type")
++		event.Source = r.Header.Get("ce-source")
++		event.SpecVersion = r.Header.Get("ce-specversion")
++		event.Time = r.Header.Get("ce-time")
++
++		// The entire body is the payload.
++		// We just read it as raw bytes into event.Data.
++		bodyBytes, err := io.ReadAll(r.Body)
++		if err != nil {
++			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to read body: %v", err))
++			return
++		}
++		event.Data = bodyBytes
++	}
++
++	var messageContent string
++
++	// Handle Pub/Sub Specifically ---
++	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
++		var pubsub models.PubSubTriggerRequest
++		var err error
++		// Unmarshal the raw bytes into our specific Pub/Sub struct
++		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
++			return
++		}
++		messageContent, err = messageContentFromPubSub(pubsub)
++		if err != nil {
++			respondError(w, http.StatusBadRequest, fmt.Sprintf("failed to retrieve message content: %v", err))
++			return
++		}
++	} else {
++		// Otherwise just marshal the whole event as an input data.
++		// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
++		messageBytes, err := json.Marshal(event)
++		if err != nil {
++			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
++			return
++		}
++		messageContent = string(messageBytes)
++	}
++
++	appName, err := appName(r)
++	if err != nil {
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to retrieve app name: %v", err))
++		return
++	}
++
++	userID := event.Source
++	if userID == "" {
++		userID = eventArcDefaultUserID
++	}
++
++	// Semaphore limits concurrent agent calls based on the TriggerConfig.
++	if c.semaphore != nil {
++		c.semaphore <- struct{}{}
++		defer func() { <-c.semaphore }()
++	}
++
++	if _, err := c.runner.RunAgent(r.Context(), appName, userID, messageContent); err != nil {
++		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to run agent: %v", err))
++		return
++	}
 ```
-tability, and maintainability of the HTTP handler."
-}
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/713/cmd/launcher/web/triggers/eventarc/eventarc.go /tmp/refactor-eq-workdir/bb-merged-713/cmd/launcher/web/triggers/eventarc/eventarc.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/713/cmd/launcher/web/triggers/eventarc/eventarc.go	2026-04-08 07:04:33
++++ /tmp/refactor-eq-workdir/bb-merged-713/cmd/launcher/web/triggers/eventarc/eventarc.go	2026-04-17 09:47:39
+@@ -30,6 +30,8 @@
+ 	"google.golang.org/adk/server/adkrest/controllers/triggers"
+ )
+ 
++const eventarcTriggerEndpoint = "/apps/{app_name}/trigger/eventarc"
++
+ type eventarcConfig struct {
+ 	pathPrefix        string
+ 	triggerMaxRetries int
+@@ -126,11 +128,11 @@
+ 		subrouter = router.PathPrefix(e.config.pathPrefix).Subrouter()
+ 	}
+ 
+-	subrouter.HandleFunc("/apps/{app_name}/trigger/eventarc", controller.EventarcTriggerHandler).Methods(http.MethodPost)
++	subrouter.HandleFunc(eventarcTriggerEndpoint, controller.EventarcTriggerHandler).Methods(http.MethodPost)
+ 	return nil
+ }
+ 
+ // UserMessage implements web.Sublauncher.
+ func (e *eventarcLauncher) UserMessage(webURL string, printer func(v ...any)) {
+-	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s/apps/{app_name}/trigger/eventarc", webURL, e.config.pathPrefix))
++	printer(fmt.Sprintf("       eventarc: Eventarc trigger endpoint is available at %s%s%s", webURL, e.config.pathPrefix, eventarcTriggerEndpoint))
+ }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/713/server/adkrest/controllers/triggers/eventarc.go /tmp/refactor-eq-workdir/bb-merged-713/server/adkrest/controllers/triggers/eventarc.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/713/server/adkrest/controllers/triggers/eventarc.go	2026-04-08 07:04:33
++++ /tmp/refactor-eq-workdir/bb-merged-713/server/adkrest/controllers/triggers/eventarc.go	2026-04-17 09:47:27
+@@ -28,7 +28,11 @@
+ 	"google.golang.org/adk/session"
+ )
+ 
+-const eventArcDefaultUserID = "eventarc-caller"
++const (
++	eventarcDefaultUserID       = "eventarc-caller"
++	cloudEventsContentType      = "application/cloudevents+json"
++	pubsubMessagePublishedType  = "google.cloud.pubsub.topic.v1.messagePublished"
++)
+ 
+ // EventarcController handles the Eventarc trigger endpoints.
+ type EventarcController struct {
+@@ -53,62 +57,16 @@
+ 
+ // EventarcTriggerHandler handles the Eventarc trigger endpoint.
+ func (c *EventarcController) EventarcTriggerHandler(w http.ResponseWriter, r *http.Request) {
+-	var event models.EventarcTriggerRequest
+-	contentType := r.Header.Get("Content-Type")
+-	// The HTTP Content-Type header MUST be set to the media type of an event format for structured mode.
+-	// https://github.com/cloudevents/spec/blob/main/cloudevents/bindings/http-protocol-binding.md#321-http-content-type
+-	if contentType == "application/cloudevents+json" {
+-		// --- STRUCTURED MODE ---
+-		// The entire event is in the body. Decode it.
+-		// The payload (Storage or Pub/Sub) gets safely trapped in event.Data as bytes.
+-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+-			http.Error(w, "Bad Request", http.StatusBadRequest)
+-			return
+-		}
+-	} else {
+-		// --- BINARY MODE ---
+-		// Metadata is in the headers.
+-		event.ID = r.Header.Get("ce-id")
+-		event.Type = r.Header.Get("ce-type")
+-		event.Source = r.Header.Get("ce-source")
+-		event.SpecVersion = r.Header.Get("ce-specversion")
+-		event.Time = r.Header.Get("ce-time")
+-
+-		// The entire body is the payload.
+-		// We just read it as raw bytes into event.Data.
+-		bodyBytes, err := io.ReadAll(r.Body)
+-		if err != nil {
+-			http.Error(w, "Failed to read body", http.StatusInternalServerError)
+-			return
+-		}
+-		event.Data = bodyBytes
++	event, errMsg, errStatus := parseEventarcRequest(r)
++	if errMsg != "" {
++		http.Error(w, errMsg, errStatus)
++		return
+ 	}
+ 
+-	var messageContent string
+-
+-	// Handle Pub/Sub Specifically ---
+-	if event.Type == "google.cloud.pubsub.topic.v1.messagePublished" {
+-		var pubsub models.PubSubTriggerRequest
+-		var err error
+-		// Unmarshal the raw bytes into our specific Pub/Sub struct
+-		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal pubsub data: %v", err))
+-			return
+-		}
+-		messageContent, err = messageContentFromPubSub(pubsub)
+-		if err != nil {
+-			respondError(w, http.StatusBadRequest, err.Error())
+-			return
+-		}
+-		// Otherwise just marshal the whole event as an input data.
+-		// E.g. as https://googleapis.github.io/google-cloudevents/examples/binary/storage/StorageObjectData-simple.json
+-	} else {
+-		messageBytes, err := json.Marshal(event)
+-		if err != nil {
+-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal agent message: %v", err))
+-			return
+-		}
+-		messageContent = string(messageBytes)
++	messageContent, errStatus, err := messageContentFromEventarc(event)
++	if err != nil {
++		respondError(w, errStatus, err.Error())
++		return
+ 	}
+ 
+ 	appName, err := appName(r)
+@@ -119,10 +77,9 @@
+ 
+ 	userID := event.Source
+ 	if userID == "" {
+-		userID = eventArcDefaultUserID
++		userID = eventarcDefaultUserID
+ 	}
+ 
+-	// Semaphore limits concurrent agent calls based on the TriggerConfig.
+ 	if c.semaphore != nil {
+ 		c.semaphore <- struct{}{}
+ 		defer func() { <-c.semaphore }()
+@@ -134,4 +91,46 @@
+ 	}
+ 
+ 	respondSuccess(w)
++}
++
++func parseEventarcRequest(r *http.Request) (models.EventarcTriggerRequest, string, int) {
++	var event models.EventarcTriggerRequest
++	if r.Header.Get("Content-Type") == cloudEventsContentType {
++		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
++			return event, "Bad Request", http.StatusBadRequest
++		}
++	} else {
++		event.ID = r.Header.Get("ce-id")
++		event.Type = r.Header.Get("ce-type")
++		event.Source = r.Header.Get("ce-source")
++		event.SpecVersion = r.Header.Get("ce-specversion")
++		event.Time = r.Header.Get("ce-time")
++
++		bodyBytes, err := io.ReadAll(r.Body)
++		if err != nil {
++			return event, "Failed to read body", http.StatusInternalServerError
++		}
++		event.Data = bodyBytes
++	}
++	return event, "", 0
++}
++
++func messageContentFromEventarc(event models.EventarcTriggerRequest) (string, int, error) {
++	if event.Type == pubsubMessagePublishedType {
++		var pubsub models.PubSubTriggerRequest
++		if err := json.Unmarshal(event.Data, &pubsub); err != nil {
++			return "", http.StatusInternalServerError, fmt.Errorf("failed to unmarshal pubsub data: %v", err)
++		}
++		content, err := messageContentFromPubSub(pubsub)
++		if err != nil {
++			return "", http.StatusBadRequest, err
++		}
++		return content, 0, nil
++	}
++
++	messageBytes, err := json.Marshal(event)
++	if err != nil {
++		return "", http.StatusInternalServerError, fmt.Errorf("failed to marshal agent message: %v", err)
++	}
++	return string(messageBytes), 0, nil
+ }
 ```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"A","rationale":"A is the safer merge: it keeps error handling consistent with the rest of the trigger controller by using `respondError` throughout, while B introduces a behavior change to plain `http.Error` responses and drops useful error detail. B’s cleanup is nicer stylistically, but it changes API behavior for some failure paths without a clear benefit."}
+tokens used
+6,249
+{"forced_choice":"A","rationale":"A is the safer merge: it keeps error handling consistent with the rest of the trigger controller by using `respondError` throughout, while B introduces a behavior change to plain `http.Error` responses and drops useful error detail. B’s cleanup is nicer stylistically, but it changes API behavior for some failure paths without a clear benefit."}

@@ -1,0 +1,399 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd6a-2321-7a33-9370-6f6ece9033ae
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #4145
+
+This PR adds `redundantptr` linter to detect `github.Ptr(x)` calls that can be replaced with simple `&x`.
+
+## Version A
+```diff
+diff --git a/.custom-gcl.yml b/.custom-gcl.yml
+index 4c2c4aae..5e07e9c2 100644
+--- a/.custom-gcl.yml
++++ b/.custom-gcl.yml
+@@ -4,6 +4,8 @@ plugins:
+     path: ./tools/extraneousnew
+   - module: "github.com/google/go-github/v84/tools/fmtpercentv"
+     path: ./tools/fmtpercentv
++  - module: "github.com/google/go-github/v84/tools/redundantptr"
++    path: ./tools/redundantptr
+   - module: "github.com/google/go-github/v84/tools/sliceofpointers"
+     path: ./tools/sliceofpointers
+   - module: "github.com/google/go-github/v84/tools/structfield"
+diff --git a/.golangci.yml b/.golangci.yml
+index 9bc14152..91fb1514 100644
+--- a/.golangci.yml
++++ b/.golangci.yml
+@@ -27,6 +27,7 @@ linters:
+     - nolintlint
+     - paralleltest
+     - perfsprint
++    - redundantptr
+     - revive
+     - sliceofpointers
+     - staticcheck
+@@ -193,6 +194,10 @@ linters:
+         type: module
+         description: Reports usage of %d or %s in format strings.
+         original-url: github.com/google/go-github/v84/tools/fmtpercentv
++      redundantptr:
++        type: module
++        description: Reports github.Ptr(x) calls that can be replaced with &x.
++        original-url: github.com/google/go-github/v84/tools/redundantptr
+       sliceofpointers:
+         type: module
+         description: Reports usage of []*string and slices of structs without pointers.
+diff --git a/example/commitpr/main.go b/example/commitpr/main.go
+index db832e3e..12ad2fc0 100644
+--- a/example/commitpr/main.go
++++ b/example/commitpr/main.go
+@@ -105,7 +105,7 @@ func getTree(ref *github.Reference) (tree *github.Tree, err error) {
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		entries = append(entries, &github.TreeEntry{Path: github.Ptr(file), Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
++		entries = append(entries, &github.TreeEntry{Path: &file, Type: github.Ptr("blob"), Content: github.Ptr(string(content)), Mode: github.Ptr("100644")})
+ 	}
+ 
+ 	tree, _, err = client.Git.CreateTree(ctx, *sourceOwner, *sourceRepo, *ref.Object.SHA, entries)
+diff --git a/github/apps.go b/github/apps.go
+index f08a3b2a..3e38807d 100644
+--- a/github/apps.go
++++ b/github/apps.go
+@@ -431,7 +431,7 @@ func (s *AppsService) CreateInstallationTokenListRepos(ctx context.Context, id i
+ //meta:operation POST /repos/{owner}/{repo}/content_references/{content_reference_id}/attachments
+ func (s *AppsService) CreateAttachment(ctx context.Context, contentReferenceID int64, title, body string) (*Attachment, *Response, error) {
+ 	u := fmt.Sprintf("content_references/%v/attachments", contentReferenceID)
+-	payload := &Attachment{Title: Ptr(title), Body: Ptr(body)}
++	payload := &Attachment{Title: &title, Body: &body}
+ 	req, err := s.client.NewRequest("POST", u, payload)
+ 	if err != nil {
+ 		return nil, nil, err
+diff --git a/github/interactions_orgs.go b/github/interactions_orgs.go
+index 0fb9ca11..70e63413 100644
+--- a/github/interactions_orgs.go
++++ b/github/interactions_orgs.go
+@@ -45,7 +45,7 @@ func (s *InteractionsService) GetRestrictionsForOrg(ctx context.Context, organiz
+ func (s *InteractionsService) UpdateRestrictionsForOrg(ctx context.Context, organization, limit string) (*InteractionRestriction, *Response, error) {
+ 	u := fmt.Sprintf("orgs/%v/interaction-limits", organization)
+ 
+-	interaction := &InteractionRestriction{Limit: Ptr(limit)}
++	interaction := &InteractionRestriction{Limit: &limit}
+ 
+ 	req, err := s.client.NewRequest("PUT", u, interaction)
+ 	if err != nil {
+diff --git a/github/interactions_repos.go b/github/interactions_repos.go
+index 1ee37dae..97f41269 100644
+--- a/github/interactions_repos.go
++++ b/github/interactions_repos.go
+@@ -45,7 +45,7 @@ func (s *InteractionsService) GetRestrictionsForRepo(ctx context.Context, owner,
+ func (s *InteractionsService) UpdateRestrictionsForRepo(ctx context.Context, owner, repo, limit string) (*InteractionRestriction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/interaction-limits", owner, repo)
+ 
+-	interaction := &InteractionRestriction{Limit: Ptr(limit)}
++	interaction := &InteractionRestriction{Limit: &limit}
+ 
+ 	req, err := s.client.NewRequest("PUT", u, interaction)
+ 	if err != nil {
+diff --git a/github/markdown.go b/github/markdown.go
+index 7879ab8a..143f8223 100644
+--- a/github/markdown.go
++++ b/github/markdown.go
+@@ -44,13 +44,13 @@ type markdownRenderRequest struct {
+ //
+ //meta:operation POST /markdown
+ func (s *MarkdownService) Render(ctx context.Context, text string, opts *MarkdownOptions) (string, *Response, error) {
+-	request := &markdownRenderRequest{Text: Ptr(text)}
++	request := &markdownRenderRequest{Text: &text}
+ 	if opts != nil {
+ 		if opts.Mode != "" {
+-			request.Mode = Ptr(opts.Mode)
++			request.Mode = &opts.Mode
+ 		}
+ 		if opts.Context != "" {
+-			request.Context = Ptr(opts.Context)
++			request.Context = &opts.Context
+ 		}
+ 	}
+ 
+diff --git a/github/migrations.go b/github/migrations.go
+index e68591f6..c052ee7c 100644
+--- a/github/migrations.go
++++ b/github/migrations.go
+@@ -98,9 +98,9 @@ func (s *MigrationService) StartMigration(ctx context.Context, org string, repos
+ 
+ 	body := &startMigration{Repositories: repos}
+ 	if opts != nil {
+-		body.LockRepositories = Ptr(opts.LockRepositories)
+-		body.ExcludeAttachments = Ptr(opts.ExcludeAttachments)
+-		body.ExcludeReleases = Ptr(opts.ExcludeReleases)
++		body.LockRepositories = &opts.LockRepositories
++		body.ExcludeAttachments = &opts.ExcludeAttachments
++		body.ExcludeReleases = &opts.ExcludeReleases
+ 		body.Exclude = append(body.Exclude, opts.Exclude...)
+ 	}
+ 
+diff --git a/github/migrations_user.go b/github/migrations_user.go
+index b17abad8..009fd848 100644
+--- a/github/migrations_user.go
++++ b/github/migrations_user.go
+@@ -75,8 +75,8 @@ func (s *MigrationService) StartUserMigration(ctx context.Context, repos []strin
+ 
+ 	body := &startUserMigration{Repositories: repos}
+ 	if opts != nil {
+-		body.LockRepositories = Ptr(opts.LockRepositories)
+-		body.ExcludeAttachments = Ptr(opts.ExcludeAttachments)
++		body.LockRepositories = &opts.LockRepositories
++		body.ExcludeAttachments = &opts.ExcludeAttachments
+ 	}
+ 
+ 	req, err := s.client.NewRequest("POST", u, body)
+diff --git a/github/reactions.go b/github/reactions.go
+index 9097a5d6..54b70176 100644
+--- a/github/reactions.go
++++ b/github/reactions.go
+@@ -96,7 +96,7 @@ func (s *ReactionsService) ListCommentReactions(ctx context.Context, owner, repo
+ func (s *ReactionsService) CreateCommentReaction(ctx context.Context, owner, repo string, id int64, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/comments/%v/reactions", owner, repo, id)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -174,7 +174,7 @@ func (s *ReactionsService) ListIssueReactions(ctx context.Context, owner, repo s
+ func (s *ReactionsService) CreateIssueReaction(ctx context.Context, owner, repo string, number int, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/issues/%v/reactions", owner, repo, number)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -252,7 +252,7 @@ func (s *ReactionsService) ListIssueCommentReactions(ctx context.Context, owner,
+ func (s *ReactionsService) CreateIssueCommentReaction(ctx context.Context, owner, repo string, id int64, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/issues/comments/%v/reactions", owner, repo, id)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -330,7 +330,7 @@ func (s *ReactionsService) ListPullRequestCommentReactions(ctx context.Context,
+ func (s *ReactionsService) CreatePullRequestCommentReaction(ctx context.Context, owner, repo string, id int64, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/pulls/comments/%v/reactions", owner, repo, id)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -406,7 +406,7 @@ func (s *ReactionsService) ListTeamDiscussionReactions(ctx context.Context, team
+ func (s *ReactionsService) CreateTeamDiscussionReaction(ctx context.Context, teamID int64, discussionNumber int, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("teams/%v/discussions/%v/reactions", teamID, discussionNumber)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -481,7 +481,7 @@ func (s *ReactionsService) ListTeamDiscussionCommentReactions(ctx context.Contex
+ func (s *ReactionsService) CreateTeamDiscussionCommentReaction(ctx context.Context, teamID int64, discussionNumber, commentNumber int, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("teams/%v/discussions/%v/comments/%v/reactions", teamID, discussionNumber, commentNumber)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+@@ -542,7 +542,7 @@ func (s *ReactionsService) deleteReaction(ctx context.Context, url string) (*Res
+ func (s *ReactionsService) CreateReleaseReaction(ctx context.Context, owner, repo string, releaseID int64, content string) (*Reaction, *Response, error) {
+ 	u := fmt.Sprintf("repos/%v/%v/releases/%v/reactions", owner, repo, releaseID)
+ 
+-	body := &Reaction{Content: Ptr(content)}
++	body := &Reaction{Content: &content}
+ 	req, err := s.client.NewRequest("POST", u, body)
+ 	if err != nil {
+ 		return nil, nil, err
+diff --git a/tools/redundantptr/go.mod b/tools/redundantptr/go.mod
+new file mode 100644
+index 00000000..9238745a
+--- /dev/null
++++ b/tools/redundantptr/go.mod
+@@ -0,0 +1,13 @@
++module tools/redundantptr
++
++go 1.25.0
++
++require (
++	github.com/golangci/plugin-module-register v0.1.2
++	golang.org/x/tools v0.43.0
++)
++
++require (
++	golang.org/x/mod v0.34.0 // indirect
++	golang.org/x/sync v0.20.0 // indirect
++)
+diff --git a/tools/redundantptr/redundantptr.go b/tools/redundantptr/redundantptr.go
+new file mode 100644
+index 00000000..951e06bf
+--- /dev/null
++++ b/tools/redundantptr/redundantptr.go
+@@ -0,0 +1,239 @@
++// Copyright 2026 The go-github AUTHORS. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++// Package redundantptr is a custom linter to find redundant github.Ptr calls.
++package redundantptr
++
++import (
++	"bytes"
++	"go/ast"
++	"go/format"
++	"go/token"
++
++	"github.com/golangci/plugin-module-register/register"
++	"golang.org/x/tools/go/analysis"
++	"golang.org/x/tools/go/ast/astutil"
++)
++
++func init() {
++	register.Plugin("redundantptr", New)
++}
++
++// RedundantPtrPlugin is a custom linter plugin for golangci-lint.
++type RedundantPtrPlugin struct{}
++
++// New returns an analysis.Analyzer to use with golangci-lint.
++func New(_ any) (register.LinterPlugin, error) {
++	return &RedundantPtrPlugin{}, nil
++}
++
++// BuildAnalyzers builds the analyzers for the RedundantPtrPlugin.
++func (p *RedundantPtrPlugin) BuildAnalyzers() ([]*analysis.Analyzer, error) {
++	return []*analysis.Analyzer{
++		{
++			Name: "redundantptr",
++			Doc:  "Reports github.Ptr(x) calls that can be replaced with &x.",
++			Run:  run,
++		},
++	}, nil
++}
++
++// GetLoadMode returns the load mode for the RedundantPtrPlugin.
++func (p *RedundantPtrPlugin) GetLoadMode() string {
++	return register.LoadModeSyntax
++}
++
++func run(pass *analysis.Pass) (any, error) {
++	for _, file := range pass.Files {
++		ast.Inspect(file, func(n ast.Node) bool {
++			switch fn := n.(type) {
++			case *ast.FuncDecl:
++				if fn.Body != nil {
++					analyzeFunction(pass, fn, fn.Body)
++				}
++			case *ast.FuncLit:
++				analyzeFunction(pass, fn, fn.Body)
++			}
++			return true
++		})
++	}
++
++	return nil, nil
++}
++
++func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
++	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/4145/tools/redundantptr/redundantptr.go /tmp/refactor-eq-workdir/bb-merged-4145/tools/redundantptr/redundantptr.go
+--- /tmp/refactor-eq-workdir/cleanroom-v2/4145/tools/redundantptr/redundantptr.go	2026-04-09 14:46:49
++++ /tmp/refactor-eq-workdir/bb-merged-4145/tools/redundantptr/redundantptr.go	2026-04-17 11:30:37
+@@ -14,7 +14,6 @@
+ 
+ 	"github.com/golangci/plugin-module-register/register"
+ 	"golang.org/x/tools/go/analysis"
+-	"golang.org/x/tools/go/ast/astutil"
+ )
+ 
+ func init() {
+@@ -50,7 +49,7 @@
+ 		ast.Inspect(file, func(n ast.Node) bool {
+ 			switch fn := n.(type) {
+ 			case *ast.FuncDecl:
+-				if fn.Body != nil {
++				if fn.Body != nil && !shouldIgnoreDeprecatedPtrWrapper(fn) {
+ 					analyzeFunction(pass, fn, fn.Body)
+ 				}
+ 			case *ast.FuncLit:
+@@ -64,14 +63,10 @@
+ }
+ 
+ func analyzeFunction(pass *analysis.Pass, fn ast.Node, body *ast.BlockStmt) {
+-	if shouldIgnoreDeprecatedPtrWrapper(fn) {
+-		return
+-	}
+-
+ 	locals := collectLocals(fn, body)
+ 
+-	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+-		call, ok := cursor.Node().(*ast.CallExpr)
++	ast.Inspect(body, func(n ast.Node) bool {
++		call, ok := n.(*ast.CallExpr)
+ 		if !ok {
+ 			return true
+ 		}
+@@ -100,7 +95,7 @@
+ 			},
+ 		})
+ 		return true
+-	}, nil)
++	})
+ }
+ 
+ func redundantPtrCall(pass *analysis.Pass, call *ast.CallExpr) (rootName, argText string) {
+@@ -220,12 +215,7 @@
+ 	}
+ }
+ 
+-func shouldIgnoreDeprecatedPtrWrapper(fn ast.Node) bool {
+-	decl, ok := fn.(*ast.FuncDecl)
+-	if !ok {
+-		return false
+-	}
+-
++func shouldIgnoreDeprecatedPtrWrapper(decl *ast.FuncDecl) bool {
+ 	if decl.Recv != nil || decl.Name == nil {
+ 		return false
+ 	}
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"B","rationale":"B is the one I’d approve: it removes an unnecessary `astutil` dependency and narrows `shouldIgnoreDeprecatedPtrWrapper` to the only valid caller type, which makes the analyzer simpler without changing behavior. The moved guard also keeps the deprecated-wrapper skip logic explicit at the `FuncDecl` call site."}
+tokens used
+5,467
+{"forced_choice":"B","rationale":"B is the one I’d approve: it removes an unnecessary `astutil` dependency and narrows `shouldIgnoreDeprecatedPtrWrapper` to the only valid caller type, which makes the analyzer simpler without changing behavior. The moved guard also keeps the deprecated-wrapper skip logic explicit at the `FuncDecl` call site."}

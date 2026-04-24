@@ -1,0 +1,606 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd68-9a71-7e22-ac33-a54022d50b76
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #24460 — fix(core): enhance sandbox usability and fix build error
+
+## PR body
+
+## Summary
+
+Enhance sandbox usability by introducing proactive permissions and improved denial detection. This PR addresses issues where users might be blocked by sandbox restrictions without clear feedback or easy ways to grant permissions.
+
+## Details
+
+- Refactored `SandboxManager` and `ShellTool` to support proactive permission checks.
+- Improved the feedback mechanism when a command is denied by the sandbox.
+- Updated `shell.test.ts` to reflect the changes in `SandboxManager` access via `Config`.
+- Fixed a build error in `shell.test.ts` where `sandboxManager` was incorrectly assigned.
+
+## Related Issues
+
+N/A
+
+## How to Validate
+
+1. Run `npm test -w @google/gemini-cli-core -- src/tools/shell.test.ts` to ensure shell tool tests pass.
+2. Run a command that is normally denied by the sandbox and verify the improved denial message.
+3. Verify that proactive permissions are working as expected.
+
+## Pre-Merge Checklist
+
+- [ ] Updated relevant documentation and README (if needed)
+- [x] Added/updated tests (if needed)
+- [ ] Noted breaking changes (if any)
+
+## Version A
+```diff
+diff --git a/packages/core/src/policy/policies/sandbox-default.toml b/packages/core/src/policy/policies/sandbox-default.toml
+index 933d85cf9e..796902f0b4 100644
+--- a/packages/core/src/policy/policies/sandbox-default.toml
++++ b/packages/core/src/policy/policies/sandbox-default.toml
+@@ -6,7 +6,7 @@ allowOverrides = false
+ 
+ [modes.default]
+ network = false
+-readonly = true
++readonly = false
+ approvedTools = ['cat', 'ls', 'grep', 'head', 'tail', 'less', 'Get-Content', 'dir', 'type', 'findstr', 'Get-ChildItem', 'echo']
+ allowOverrides = true
+ 
+diff --git a/packages/core/src/policy/policy-engine.ts b/packages/core/src/policy/policy-engine.ts
+index c901116eb7..f2376df914 100644
+--- a/packages/core/src/policy/policy-engine.ts
++++ b/packages/core/src/policy/policy-engine.ts
+@@ -13,6 +13,7 @@ import {
+   extractStringFromParseEntry,
+ } from '../utils/shell-utils.js';
+ import { parse as shellParse } from 'shell-quote';
++import { isSubpath } from '../utils/paths.js';
+ import {
+   PolicyDecision,
+   type PolicyEngineConfig,
+@@ -28,6 +29,7 @@ import { debugLogger } from '../utils/debugLogger.js';
+ import type { CheckerRunner } from '../safety/checker-runner.js';
+ import { SafetyCheckDecision } from '../safety/protocol.js';
+ import { getToolAliases } from '../tools/tool-names.js';
++import { PARAM_ADDITIONAL_PERMISSIONS } from '../tools/definitions/base-declarations.js';
+ import {
+   MCP_TOOL_PREFIX,
+   isMcpToolAnnotation,
+@@ -38,6 +40,7 @@ import {
+ import {
+   type SandboxManager,
+   NoopSandboxManager,
++  type SandboxPermissions,
+ } from '../services/sandboxManager.js';
+ 
+ function isWildcardPattern(name: string): boolean {
+@@ -647,6 +650,36 @@ export class PolicyEngine {
+       }
+     }
+ 
++    if (decision === PolicyDecision.ALLOW) {
++      const args = toolCall.args;
++      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
++      const additionalPermissions = args?.[PARAM_ADDITIONAL_PERMISSIONS] as
++        | SandboxPermissions
++        | undefined;
++
++      const fsPerms = additionalPermissions?.fileSystem;
++      if (fsPerms) {
++        const workspace = this.sandboxManager.getWorkspace();
++        const readPaths = Array.isArray(fsPerms.read) ? fsPerms.read : [];
++        const writePaths = Array.isArray(fsPerms.write) ? fsPerms.write : [];
++        const allPaths = [...readPaths, ...writePaths];
++
++        for (const p of allPaths) {
++          if (
++            typeof p === 'string' &&
++            !isSubpath(workspace, p) &&
++            workspace !== p
++          ) {
++            debugLogger.debug(
++              `[PolicyEngine.check] Additional permission path '${p}' is outside workspace '${workspace}'. Downgrading to ASK_USER.`,
++            );
++            decision = PolicyDecision.ASK_USER;
++            break;
++          }
++        }
++      }
++    }
++
+     // Safety checks
+     if (decision !== PolicyDecision.DENY && this.checkerRunner) {
+       for (const checkerRule of this.checkers) {
+diff --git a/packages/core/src/policy/sandboxPolicyManager.ts b/packages/core/src/policy/sandboxPolicyManager.ts
+index 5b00150b41..c8a4d2f8df 100644
+--- a/packages/core/src/policy/sandboxPolicyManager.ts
++++ b/packages/core/src/policy/sandboxPolicyManager.ts
+@@ -19,6 +19,7 @@ export const SandboxModeConfigSchema = z.object({
+   readonly: z.boolean(),
+   approvedTools: z.array(z.string()),
+   allowOverrides: z.boolean().optional(),
++  yolo: z.boolean().optional(),
+ });
+ 
+ export const PersistentCommandConfigSchema = z.object({
+@@ -66,7 +67,7 @@ export class SandboxPolicyManager {
+               },
+               default: {
+                 network: false,
+-                readonly: true,
++                readonly: false,
+                 approvedTools: [],
+                 allowOverrides: true,
+               },
+@@ -132,8 +133,17 @@ export class SandboxPolicyManager {
+   }
+ 
+   getModeConfig(
+-    mode: 'plan' | 'accepting_edits' | 'default' | string,
++    mode: 'plan' | 'accepting_edits' | 'default' | 'yolo' | string,
+   ): SandboxModeConfig {
++    if (mode === 'yolo') {
++      return {
++        network: true,
++        readonly: false,
++        approvedTools: [],
++        allowOverrides: true,
++        yolo: true,
++      };
++    }
+     if (mode === 'plan') return this.config.modes.plan;
+     if (mode === 'accepting_edits' || mode === 'autoEdit')
+       return this.config.modes.accepting_edits;
+diff --git a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+index 1ebae20216..d91ab1a836 100644
+--- a/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
++++ b/packages/core/src/sandbox/linux/LinuxSandboxManager.ts
+@@ -144,6 +144,10 @@ export class LinuxSandboxManager implements SandboxManager {
+     return parsePosixSandboxDenials(result);
+   }
+ 
++  getWorkspace(): string {
++    return this.options.workspace;
++  }
++
+   private getMaskFilePath(): string {
+     if (
+       LinuxSandboxManager.maskFilePath &&
+@@ -193,9 +197,11 @@ export class LinuxSandboxManager implements SandboxManager {
+           this.options.modeConfig?.approvedTools,
+         )
+       : false;
+-    const workspaceWrite = !isReadonlyMode || isApproved;
++    const isYolo = this.options.modeConfig?.yolo ?? false;
++    const workspaceWrite = !isReadonlyMode || isApproved || isYolo;
++
+     const networkAccess =
+-      this.options.modeConfig?.network || req.policy?.networkAccess || false;
++      this.options.modeConfig?.network || req.policy?.networkAccess || isYolo;
+ 
+     const persistentPermissions = allowOverrides
+       ? this.options.policyManager?.getCommandPermissions(commandName)
+diff --git a/packages/core/src/sandbox/macos/MacOsSandboxManager.ts b/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+index 51a2651c47..497bf30c31 100644
+--- a/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
++++ b/packages/core/src/sandbox/macos/MacOsSandboxManager.ts
+@@ -55,6 +55,10 @@ export class MacOsSandboxManager implements SandboxManager {
+     return parsePosixSandboxDenials(result);
+   }
+ 
++  getWorkspace(): string {
++    return this.options.workspace;
++  }
++
+   async prepareCommand(req: SandboxRequest): Promise<SandboxedCommand> {
+     await initializeShellParsers();
+     const sanitizationConfig = getSecureSanitizationConfig(
+@@ -90,9 +94,11 @@ export class MacOsSandboxManager implements SandboxManager {
+         )
+       : false;
+ 
+-    const workspaceWrite = !isReadonlyMode || isApproved;
++    const isYolo = this.options.modeConfig?.yolo ?? false;
++    const workspaceWrite = !isReadonlyMode || isApproved || isYolo;
++
+     const defaultNetwork =
+-      this.options.modeConfig?.network || req.policy?.networkAccess || false;
++      this.options.modeConfig?.network || req.policy?.networkAccess || isYolo;
+ 
+     const { allowed: allowedPaths, forbidden: forbiddenPaths } =
+       await resolveSandboxPaths(this.options, req);
+@@ -103,7 +109,6 @@ export class MacOsSandboxManager implements SandboxManager {
+       ? this.options.policyManager?.getCommandPermissions(commandName)
+       : undefined;
+ 
+-    // Merge all permissions
+     const mergedAdditional: SandboxPermissions = {
+       fileSystem: {
+         read: [
+diff --git a/packages/core/src/sandbox/macos/baseProfile.ts b/packages/core/src/sandbox/macos/baseProfile.ts
+index f4bd331889..b014e53723 100644
+--- a/packages/core/src/sandbox/macos/baseProfile.ts
++++ b/packages/core/src/sandbox/macos/baseProfile.ts
+@@ -23,6 +23,15 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ (allow signal (target same-sandbox))
+ (allow process-info*)
+ 
++; Map system frameworks + dylibs for loader.
++(allow file-map-executable
++  (subpath "/System/Library/Frameworks")
++  (subpath "/System/Library/PrivateFrameworks")
++  (subpath "/usr/lib")
++  (subpath "/bin")
++  (subpath "/usr/bin")
++)
++
+ (allow file-write-data
+   (require-all
+     (path "/dev/null")
+@@ -86,16 +95,22 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ 
+ (allow mach-lookup
+   (global-name "com.apple.sysmond")
++  (global-name "com.apple.system.opendirectoryd.libinfo")
++  (global-name "com.apple.system.opendirectoryd.membership")
++  (global-name "com.apple.system.logger")
++  (global-name "com.apple.system.notification_center")
++  (global-name "com.apple.logd")
++  (global-name "com.apple.secinitd")
++  (global-name "com.apple.trustd.agent")
++  (global-name "com.apple.trustd")
++  (global-name "com.apple.analyticsd")
++  (global-name "com.apple.analyticsd.messagetracer")
+ )
+ \n; IOKit
+ (allow iokit-open
+   (iokit-registry-entry-class "RootDomainUserClient")
+ )
+ 
+-(allow mach-lookup
+-  (global-name "com.apple.system.opendirectoryd.libinfo")
+-)
+-
+ ; Needed for python multiprocessing on MacOS for the SemLock
+ (allow ipc-posix-sem)
+ 
+@@ -132,10 +147,19 @@ export const BASE_SEATBELT_PROFILE = `(version 1)
+ (allow file-read* file-write*
+   (literal "/dev/null")
+   (literal "/dev/zero")
++  (literal "/dev/tty")
++  (subpath "/dev/fd")
+   (subpath "/tmp")
+   (subpath "/private/tmp")
+ )
+ 
++(allow file-read-metadata
++  (literal "/")
++  (subpath "/var")
++  (subpath "/private/var")
++  (subpath "/dev")
++)
++
+ `;
+ 
+ /**
+diff --git a/packages/core/src/sandbox/utils/proactivePermissions.ts b/packages/core/src/sandbox/utils/proactivePermissions.ts
+new file mode 100644
+index 0000000000..a5e11e2c3c
+--- /dev/null
++++ b/packages/core/src/sandbox/utils/proactivePermissions.ts
+@@ -0,0 +1,189 @@
++/**
++ * @license
++ * Copyright 2026 Google LLC
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++import os from 'node:os';
++import path from 'node:path';
++import fs from 'node:fs';
++import { type SandboxPermissions } from '../../services/sandboxManager.js';
++
++const NETWORK_RELIANT_TOOLS = new Set([
++  'npm',
++  'npx',
++  'yarn',
++  'pnpm',
++  'bun',
++  'git',
++  'ssh',
++  'scp',
++  'sftp',
++  'curl',
++  'wget',
++]);
++
++const NODE_ECOSYSTEM_TOOLS = new Set(['npm', 'npx', 'yarn', 'pnpm', 'bun']);
++
++const NETWORK_HEAVY_SUBCOMMANDS = new Set([
++  'install',
++  'i',
++  'ci',
++  'update',
++  'up',
++  'publish',
++  'add',
++  'remove',
++  'outdated',
++  'audit',
++]);
++
++/**
++ * Returns true if the command or subcommand is known to be network-reliant.
++ */
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/IMPLEMENT_SUMMARY.md /tmp/refactor-eq-workdir/bb-merged-24460/IMPLEMENT_SUMMARY.md
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/IMPLEMENT_SUMMARY.md	1969-12-31 16:00:00
++++ /tmp/refactor-eq-workdir/bb-merged-24460/IMPLEMENT_SUMMARY.md	2026-04-16 10:52:16
+@@ -0,0 +1,21 @@
++## Applied Claims
++
++### C1 — Remove duplicate proactive permission comment
++**File**: `packages/core/src/sandbox/utils/proactivePermissions.ts`
++Deleted the duplicated JSDoc block preceding `getProactiveToolSuggestions`.
++
++### C2 — Drop redundant workspace equality check
++**File**: `packages/core/src/policy/policy-engine.ts`
++Removed `&& workspace !== p` from the additional-permission workspace guard since `isSubpath` already covers equality.
++
++### C3 — Gate proactive suggestions after command need is known
++**File**: `packages/core/src/tools/shell.ts`
++Moved `isNetworkReliantCommand` check before `getProactiveToolSuggestions` call, so suggestions are only fetched inside the `needsNetwork` branch.
++
++### C4 — Avoid passing empty sandbox permissions during normal shell execution
++**File**: `packages/core/src/tools/shell.ts`
++Replaced the unconditional `additionalPermissions` object with an IIFE that returns `undefined` when no network, read, or write permissions are present.
++
++### C5 — Iterate denial text sources once
++**File**: `packages/core/src/sandbox/utils/sandboxDenialUtils.ts`
++Consolidated `output`/`errorOutput` into a filtered `sources` array and iterated each regex (including the fallback heuristic) over each source with `lastIndex` reset, removing the duplicated conditional branches.
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/SHARPENED_SPEC.md /tmp/refactor-eq-workdir/bb-merged-24460/SHARPENED_SPEC.md
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/SHARPENED_SPEC.md	1969-12-31 16:00:00
++++ /tmp/refactor-eq-workdir/bb-merged-24460/SHARPENED_SPEC.md	2026-04-16 10:50:51
+@@ -0,0 +1,39 @@
++## Accepted Claims
++
++### C1 — Remove duplicate proactive permission comment
++**File**: packages/core/src/sandbox/utils/proactivePermissions.ts:74
++**Change**: Delete one of the two identical JSDoc blocks immediately preceding `getProactiveToolSuggestions`.
++**Goal link**: This clarifies the proactive permission helper introduced for sandbox usability.
++**Justification**: Removing the duplicated comment preserves behavior while eliminating accidental copy-paste noise around the core new helper.
++
++### C2 — Drop redundant workspace equality check
++**File**: packages/core/src/policy/policy-engine.ts:667
++**Change**: In the additional-permission workspace guard, replace the condition `!isSubpath(workspace, p) && workspace !== p` with `!isSubpath(workspace, p)`.
++**Goal link**: This clarifies the goal of requiring explicit confirmation for additional permission paths outside the workspace.
++**Justification**: `isSubpath(workspace, p)` already returns true when the two paths are equal, so the extra equality check adds no behavior and makes the boundary rule harder to read.
++
++### C3 — Gate proactive suggestions after command need is known
++**File**: packages/core/src/tools/shell.ts:257
++**Change**: In `ShellToolInvocation.shouldConfirmExecute`, parse the command and call `isNetworkReliantCommand(rootCommand, subCommand)` before awaiting `getProactiveToolSuggestions(rootCommand)`, and only fetch suggestions inside the `needsNetwork` branch.
++**Goal link**: This keeps proactive permission checks focused on commands that actually need expanded sandbox access.
++**Justification**: The current order probes home/cache paths for commands such as `npm test` that will not use the result, so moving the suggestion lookup behind the existing need check removes unnecessary work without changing confirmation outcomes.
++
++### C4 — Avoid passing empty sandbox permissions during normal shell execution
++**File**: packages/core/src/tools/shell.ts:529
++**Change**: Build a local merged `SandboxPermissions | undefined` from explicit `additional_permissions` and `proactivePermissionsConfirmed`, and pass `undefined` to `ShellExecutionService.execute` when neither source contains network, read, or write permissions.
++**Goal link**: This makes the shell execution path express the difference between ordinary sandboxed execution and execution with expanded permissions.
++**Justification**: An unconditional `{ fileSystem: { read: [], write: [] } }` object is accidental structure that downstream code treats the same as no permissions, so omitting it when empty preserves behavior while simplifying the data flow.
++
++### C5 — Iterate denial text sources once
++**File**: packages/core/src/sandbox/utils/sandboxDenialUtils.ts:71
++**Change**: In `parsePosixSandboxDenials`, create a `const sources = [output, errorOutput].filter((s): s is string => !!s)` and run each path-extraction regex over each source, resetting `lastIndex` before each source.
++**Goal link**: This clarifies the improved sandbox denial detection by making stdout and error-message parsing follow one path.
++**Justification**: The current loop duplicates the same regex execution for `output` and `errorOutput`, and consolidating it preserves extracted paths while reducing branching inside the parser.
++
++## Rejected
++
++- Remove the `yolo` property from `SandboxModeConfig` and the platform managers: although `getModeConfig('yolo')` currently sets `network: true` and `readonly: false`, deleting the flag could change behavior for any caller that passes a `modeConfig` with `yolo: true` directly.
++- Narrow `isNetworkReliantCommand('git')` to only remote-oriented git subcommands: this may be a product improvement, but it changes observable proactive confirmation behavior and is not a behavior-preserving refactor.
++- Move `ShellToolInvocation.simplifyPaths` to a shared sandbox utility file: this would add a new exported helper for a single current call site and broaden the public surface without a goal-driven need.
++- Change `sandbox-default.toml` default `readonly = false` back to `true`: this would directly alter the sandbox usability behavior chosen by the artifact rather than refactoring its expression.
++- Add or update tests for the accepted claims: test files are outside the requested edit scope, and the claims are intended to be validated by the existing C_test suite.
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/package.json /tmp/refactor-eq-workdir/bb-merged-24460/package.json
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/package.json	2026-04-01 16:07:18
++++ /tmp/refactor-eq-workdir/bb-merged-24460/package.json	2026-04-16 10:53:07
+@@ -59,7 +59,7 @@
+     "format": "prettier --experimental-cli --write .",
+     "typecheck": "npm run typecheck --workspaces --if-present",
+     "preflight": "npm run clean && npm ci && npm run format && npm run build && npm run lint:ci && npm run typecheck && npm run test:ci",
+-    "prepare": "husky && npm run bundle",
++    "prepare": "echo skipping prepare",
+     "prepare:package": "node scripts/prepare-package.js",
+     "release:version": "node scripts/version.js",
+     "telemetry": "node scripts/telemetry.js",
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/policy/policy-engine.ts /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/policy/policy-engine.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/policy/policy-engine.ts	2026-04-01 16:07:18
++++ /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/policy/policy-engine.ts	2026-04-16 10:51:19
+@@ -667,8 +667,7 @@
+         for (const p of allPaths) {
+           if (
+             typeof p === 'string' &&
+-            !isSubpath(workspace, p) &&
+-            workspace !== p
++            !isSubpath(workspace, p)
+           ) {
+             debugLogger.debug(
+               `[PolicyEngine.check] Additional permission path '${p}' is outside workspace '${workspace}'. Downgrading to ASK_USER.`,
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/sandbox/utils/proactivePermissions.ts /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/sandbox/utils/proactivePermissions.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/sandbox/utils/proactivePermissions.ts	2026-04-01 16:07:18
++++ /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/sandbox/utils/proactivePermissions.ts	2026-04-16 10:51:17
+@@ -75,10 +75,6 @@
+  * Returns suggested additional permissions for network-reliant tools
+  * based on common configuration and cache directories.
+  */
+-/**
+- * Returns suggested additional permissions for network-reliant tools
+- * based on common configuration and cache directories.
+- */
+ export async function getProactiveToolSuggestions(
+   commandName: string,
+ ): Promise<SandboxPermissions | undefined> {
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/sandbox/utils/sandboxDenialUtils.ts /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/sandbox/utils/sandboxDenialUtils.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/sandbox/utils/sandboxDenialUtils.ts	2026-04-01 16:07:18
++++ /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/sandbox/utils/sandboxDenialUtils.ts	2026-04-16 10:51:58
+@@ -68,14 +68,15 @@
+     /EACCES:\s*permission denied,\s*\w+\s*['"]?((?:\/|~)[\w.\-/:~]+)['"]?/gi,
+   ];
+ 
++  const sources = [output, errorOutput].filter(
++    (s): s is string => !!s,
++  );
++
+   for (const regex of regexes) {
+-    let match;
+-    while ((match = regex.exec(output)) !== null) {
+-      filePaths.add(match[1]);
+-    }
+-    if (errorOutput) {
+-      regex.lastIndex = 0; // Reset for next use
+-      while ((match = regex.exec(errorOutput)) !== null) {
++    for (const source of sources) {
++      regex.lastIndex = 0;
++      let match;
++      while ((match = regex.exec(source)) !== null) {
+         filePaths.add(match[1]);
+       }
+     }
+@@ -85,15 +86,10 @@
+   if (isFileDenial && filePaths.size === 0) {
+     const fallbackRegex =
+       /(?:^|[\s"'[\]])(\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)+)(?:$|[\s"'[\]:])/gi;
+-    let m;
+-    while ((m = fallbackRegex.exec(output)) !== null) {
+-      const p = m[1];
+-      if (p && !p.startsWith('/bin/') && !p.startsWith('/usr/bin/')) {
+-        filePaths.add(p);
+-      }
+-    }
+-    if (errorOutput) {
+-      while ((m = fallbackRegex.exec(errorOutput)) !== null) {
++    for (const source of sources) {
++      fallbackRegex.lastIndex = 0;
++      let m;
++      while ((m = fallbackRegex.exec(source)) !== null) {
+         const p = m[1];
+         if (p && !p.startsWith('/bin/') && !p.startsWith('/usr/bin/')) {
+           filePaths.add(p);
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/tools/shell.ts /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/tools/shell.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24460/packages/core/src/tools/shell.ts	2026-04-01 16:07:18
++++ /tmp/refactor-eq-workdir/bb-merged-24460/packages/core/src/tools/shell.ts	2026-04-16 10:51:43
+@@ -255,20 +255,19 @@
+     const rootCommand = rootCommands[0];
+ 
+     if (rootCommand) {
+-      const proactive = await getProactiveToolSuggestions(rootCommand);
+-      if (proactive) {
+-        const approved =
+-          this.context.config.sandboxPolicyManager.getCommandPermissions(
+-            rootCommand,
+-          );
+-        const missingNetwork = !!proactive.network && !approved?.network;
++      // Detect commands or sub-commands that definitely need network
++      const parsed = parseCommandDetails(command);
++      const subCommand = parsed?.details[0]?.args?.[0];
++      const needsNetwork = isNetworkReliantCommand(rootCommand, subCommand);
+ 
+-        // Detect commands or sub-commands that definitely need network
+-        const parsed = parseCommandDetails(command);
+-        const subCommand = parsed?.details[0]?.args?.[0];
+-        const needsNetwork = isNetworkReliantCommand(rootCommand, subCommand);
+-
+-        if (needsNetwork) {
++      if (needsNetwork) {
++        const proactive = await getProactiveToolSuggestions(rootCommand);
++        if (proactive) {
++          const approved =
++            this.context.config.sandboxPolicyManager.getCommandPermissions(
++              rootCommand,
++            );
++          const missingNetwork = !!proactive.network && !approved?.network;
+           // Add write permission to the current directory if we are in readonly mode
+           const mode = this.context.config.getApprovalMode();
+           const isReadonlyMode =
+@@ -526,25 +525,32 @@
+               shellExecutionConfig?.sanitizationConfig ??
+               this.context.config.sanitizationConfig,
+             sandboxManager: this.context.config.sandboxManager,
+-            additionalPermissions: {
+-              network:
++            additionalPermissions: (() => {
++              const network =
+                 this.params[PARAM_ADDITIONAL_PERMISSIONS]?.network ||
+-                this.proactivePermissionsConfirmed?.network,
+-              fileSystem: {
+-                read: [
+-                  ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
+-                    ?.read || []),
+-                  ...(this.proactivePermissionsConfirmed?.fileSystem?.read ||
+-                    []),
+-                ],
+-                write: [
+-                  ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
+-                    ?.write || []),
+-                  ...(this.proactivePermissionsConfirmed?.fileSystem?.write ||
+-                    []),
+-                ],
+-              },
+-            },
++                this.proactivePermissionsConfirmed?.network;
++              const read = [
++                ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
++                  ?.read || []),
++                ...(this.proactivePermissionsConfirmed?.fileSystem?.read || []),
++              ];
++              const write = [
++                ...(this.params[PARAM_ADDITIONAL_PERMISSIONS]?.fileSystem
++                  ?.write || []),
++                ...(this.proactivePermissionsConfirmed?.fileSystem?.write ||
++                  []),
++              ];
++              if (!network && read.length === 0 && write.length === 0) {
++                return undefined;
++              }
++              return {
++                network,
++                fileSystem:
++                  read.length > 0 || write.length > 0
++                    ? { read, write }
++                    : undefined,
++              };
++            })(),
+             backgroundCompletionBehavior:
+               this.context.config.getShellBackgroundCompletionBehavior(),
+           },
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"A","rationale":"B includes an unrelated and risky change to `package.json` (`prepare` replaced with `echo skipping prepare`), which alters repository behavior outside the PR scope. Its other edits are mostly cleanup/refactor on top of the feature work, so A is the cleaner implementation to approve for this change."}
+tokens used
+12,082
+{"forced_choice":"A","rationale":"B includes an unrelated and risky change to `package.json` (`prepare` replaced with `echo skipping prepare`), which alters repository behavior outside the PR scope. Its other edits are mostly cleanup/refactor on top of the feature work, so A is the cleaner implementation to approve for this change."}

@@ -1,0 +1,666 @@
+OpenAI Codex v0.114.0 (research preview)
+--------
+workdir: /Users/junekim/Documents/refactor-equivalence
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbd68-eab7-7b42-a40d-1beed294757a
+--------
+user
+You are reviewing a pull request. Two implementations of the same change. Both pass tests. Pick the one you'd approve for merge.
+
+## PR Context
+
+# PR #24763 — fix(core): ensure robust sandbox cleanup in all process execution paths
+
+## PR body
+
+## Summary
+Fix memory leaks and resource exhaustion in sandboxed process execution. This PR adds missing sandbox cleanup calls and wraps all process execution logic in robust `try...finally` blocks to ensure sidecar processes and temporary files are reliably terminated across all success, error, and early-abort paths.
+
+## Details
+The original implementation missed calling `prepared.cleanup?.()` in several execution paths, leading to resource leaks. Additionally, standard event handlers were insufficient to guarantee cleanup during synchronous throws or aborted generators.
+
+Changes included in this PR:
+1. **Added Missing Cleanups:** Ensure `cleanup` is invoked in previously unhandled success and error paths.
+2. **Refactored to `try...finally`:** Upgraded all sandbox process execution methods to use `try...finally` blocks for guaranteed execution, regardless of how the process terminates.
+
+Affected areas:
+- `SandboxedFileSystemService`: `read_file` and `write_file` paths.
+- `GrepTool`: Success and error paths.
+- `ToolRegistry`: Success and error paths for both tool discovery and invocation.
+- `shell-utils`: `spawnAsync` and `execStreaming` paths.
+- `ShellExecutionService`: `childProcessFallback` and `executeWithPty` paths.
+
+## Related Issues
+Mentioned in https://github.com/google-gemini/gemini-cli/pull/24480 review.
+
+## How to Validate
+Run the core tests that use the sandbox and shell execution:
+`npm test -w @google/gemini-cli-core -- src/utils/sandboxUtils.test.ts src/services/sandboxedFileSystemService.test.ts src/tools/grep.test.ts src/tools/tool-registry.test.ts src/services/shellExecutionService.test.ts`
+
+## Pre-Merge Checklist
+- [ ] Updated relevant documentation and README (if needed)
+
+## Version A
+```diff
+diff --git a/packages/core/src/services/sandboxedFileSystemService.ts b/packages/core/src/services/sandboxedFileSystemService.ts
+index 03907657f3..d5e6dd4b4a 100644
+--- a/packages/core/src/services/sandboxedFileSystemService.ts
++++ b/packages/core/src/services/sandboxedFileSystemService.ts
+@@ -59,52 +59,56 @@ export class SandboxedFileSystemService implements FileSystemService {
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
+-
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
+-
+-      let output = '';
+-      let error = '';
+-
+-      child.stdout?.on('data', (data) => {
+-        output += data.toString();
+-      });
+-
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
+-
+-      child.on('close', (code) => {
+-        if (code === 0) {
+-          resolve(output);
+-        } else {
+-          const isEnoent =
+-            error.toLowerCase().includes('no such file or directory') ||
+-            error.toLowerCase().includes('enoent') ||
+-            error.toLowerCase().includes('could not find file') ||
+-            error.toLowerCase().includes('could not find a part of the path');
+-          const err = new Error(
+-            `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
+-          );
+-          if (isEnoent) {
+-            Object.assign(err, { code: 'ENOENT' });
++    try {
++      return await new Promise((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
++
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
++
++        let output = '';
++        let error = '';
++
++        child.stdout?.on('data', (data) => {
++          output += data.toString();
++        });
++
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
++
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve(output);
++          } else {
++            const isEnoent =
++              error.toLowerCase().includes('no such file or directory') ||
++              error.toLowerCase().includes('enoent') ||
++              error.toLowerCase().includes('could not find file') ||
++              error.toLowerCase().includes('could not find a part of the path');
++            const err = new Error(
++              `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++            );
++            if (isEnoent) {
++              Object.assign(err, { code: 'ENOENT' });
++            }
++            reject(err);
+           }
+-          reject(err);
+-        }
+-      });
++        });
+ 
+-      child.on('error', (err) => {
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
++        child.on('error', (err) => {
++          reject(
++            new Error(
++              `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
++            ),
++          );
++        });
+       });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ 
+   async writeTextFile(filePath: string, content: string): Promise<void> {
+@@ -124,53 +128,57 @@ export class SandboxedFileSystemService implements FileSystemService {
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
++    try {
++      return await new Promise((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
+ 
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
+ 
+-      child.stdin?.on('error', (err) => {
+-        // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
+-        if (isNodeError(err) && err.code === 'EPIPE') {
+-          return;
+-        }
+-        debugLogger.error(
+-          `Sandbox Error: stdin error for '${filePath}': ${
+-            err instanceof Error ? err.message : String(err)
+-          }`,
+-        );
+-      });
+-
+-      child.stdin?.write(content);
+-      child.stdin?.end();
+-
+-      let error = '';
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
++        child.stdin?.on('error', (err) => {
++          // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
++          if (isNodeError(err) && err.code === 'EPIPE') {
++            return;
++          }
++          debugLogger.error(
++            `Sandbox Error: stdin error for '${filePath}': ${
++              err instanceof Error ? err.message : String(err)
++            }`,
++          );
++        });
++
++        child.stdin?.write(content);
++        child.stdin?.end();
++
++        let error = '';
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
++
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve();
++          } else {
++            reject(
++              new Error(
++                `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              ),
++            );
++          }
++        });
+ 
+-      child.on('close', (code) => {
+-        if (code === 0) {
+-          resolve();
+-        } else {
++        child.on('error', (err) => {
+           reject(
+             new Error(
+-              `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+             ),
+           );
+-        }
++        });
+       });
+-
+-      child.on('error', (err) => {
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
+-      });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ }
+diff --git a/packages/core/src/services/shellExecutionService.ts b/packages/core/src/services/shellExecutionService.ts
+index dfbb3a5033..46b894426f 100644
+--- a/packages/core/src/services/shellExecutionService.ts
++++ b/packages/core/src/services/shellExecutionService.ts
+@@ -510,21 +510,24 @@ export class ShellExecutionService {
+     shellExecutionConfig: ShellExecutionConfig,
+     isInteractive: boolean,
+   ): Promise<ShellExecutionHandle> {
++    let cmdCleanup: (() => void) | undefined;
+     try {
+       const isWindows = os.platform() === 'win32';
+ 
+-      const {
+-        program: finalExecutable,
+-        args: finalArgs,
+-        env: finalEnv,
+-        cwd: finalCwd,
+-        cleanup: cmdCleanup,
+-      } = await this.prepareExecution(
++      const prepared = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         isInteractive,
+       );
++      cmdCleanup = prepared.cleanup;
++
++      const {
++        program: finalExecutable,
++        args: finalArgs,
++        env: finalEnv,
++        cwd: finalCwd,
++      } = prepared;
+ 
+       const child = cpSpawn(finalExecutable, finalArgs, {
+         cwd: finalCwd,
+@@ -811,6 +814,7 @@ export class ShellExecutionService {
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
+       return {
+         pid: undefined,
+         result: Promise.resolve({
+@@ -826,7 +830,6 @@ export class ShellExecutionService {
+       };
+     }
+   }
+-
+   private static async executeWithPty(
+     commandToExecute: string,
+     cwd: string,
+@@ -840,23 +843,26 @@ export class ShellExecutionService {
+       throw new Error('PTY implementation not found');
+     }
+     let spawnedPty: IPty | undefined;
++    let cmdCleanup: (() => void) | undefined;
+ 
+     try {
+       const cols = shellExecutionConfig.terminalWidth ?? 80;
+       const rows = shellExecutionConfig.terminalHeight ?? 30;
+ 
+-      const {
+-        program: finalExecutable,
+-        args: finalArgs,
+-        env: finalEnv,
+-        cwd: finalCwd,
+-        cleanup: cmdCleanup,
+-      } = await this.prepareExecution(
++      const prepared = await this.prepareExecution(
+         commandToExecute,
+         cwd,
+         shellExecutionConfig,
+         true,
+       );
++      cmdCleanup = prepared.cleanup;
++
++      const {
++        program: finalExecutable,
++        args: finalArgs,
++        env: finalEnv,
++        cwd: finalCwd,
++      } = prepared;
+ 
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+       const ptyProcess = ptyInfo.module.spawn(finalExecutable, finalArgs, {
+@@ -1237,6 +1243,7 @@ export class ShellExecutionService {
+     } catch (e) {
+       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+       const error = e as Error;
++      cmdCleanup?.();
+ 
+       if (spawnedPty) {
+         try {
+@@ -1270,7 +1277,6 @@ export class ShellExecutionService {
+       }
+     }
+   }
+```
+
+## Version B
+```diff
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/services/sandboxedFileSystemService.ts /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/services/sandboxedFileSystemService.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/services/sandboxedFileSystemService.ts	2026-04-17 02:00:27
+@@ -59,54 +59,56 @@
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
++    try {
++      return await new Promise((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
+ 
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
+ 
+-      let output = '';
+-      let error = '';
++        let output = '';
++        let error = '';
+ 
+-      child.stdout?.on('data', (data) => {
+-        output += data.toString();
+-      });
++        child.stdout?.on('data', (data) => {
++          output += data.toString();
++        });
+ 
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
+ 
+-      child.on('close', (code) => {
+-        prepared.cleanup?.();
+-        if (code === 0) {
+-          resolve(output);
+-        } else {
+-          const isEnoent =
+-            error.toLowerCase().includes('no such file or directory') ||
+-            error.toLowerCase().includes('enoent') ||
+-            error.toLowerCase().includes('could not find file') ||
+-            error.toLowerCase().includes('could not find a part of the path');
+-          const err = new Error(
+-            `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
+-          );
+-          if (isEnoent) {
+-            Object.assign(err, { code: 'ENOENT' });
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve(output);
++          } else {
++            const isEnoent =
++              error.toLowerCase().includes('no such file or directory') ||
++              error.toLowerCase().includes('enoent') ||
++              error.toLowerCase().includes('could not find file') ||
++              error.toLowerCase().includes('could not find a part of the path');
++            const err = new Error(
++              `Sandbox Error: read_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++            );
++            if (isEnoent) {
++              Object.assign(err, { code: 'ENOENT' });
++            }
++            reject(err);
+           }
+-          reject(err);
+-        }
+-      });
++        });
+ 
+-      child.on('error', (err) => {
+-        prepared.cleanup?.();
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
++        child.on('error', (err) => {
++          reject(
++            new Error(
++              `Sandbox Error: Failed to spawn read_file for '${filePath}': ${err.message}`,
++            ),
++          );
++        });
+       });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ 
+   async writeTextFile(filePath: string, content: string): Promise<void> {
+@@ -126,55 +128,57 @@
+       },
+     });
+ 
+-    return new Promise((resolve, reject) => {
+-      // Direct spawn is necessary here for streaming large file contents.
++    try {
++      await new Promise<void>((resolve, reject) => {
++        // Direct spawn is necessary here for streaming large file contents.
+ 
+-      const child = spawn(prepared.program, prepared.args, {
+-        cwd: this.cwd,
+-        env: prepared.env,
+-      });
++        const child = spawn(prepared.program, prepared.args, {
++          cwd: this.cwd,
++          env: prepared.env,
++        });
+ 
+-      child.stdin?.on('error', (err) => {
+-        // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
+-        if (isNodeError(err) && err.code === 'EPIPE') {
+-          return;
+-        }
+-        debugLogger.error(
+-          `Sandbox Error: stdin error for '${filePath}': ${
+-            err instanceof Error ? err.message : String(err)
+-          }`,
+-        );
+-      });
++        child.stdin?.on('error', (err) => {
++          // Silently ignore EPIPE errors on stdin, they will be caught by the process error/close listeners
++          if (isNodeError(err) && err.code === 'EPIPE') {
++            return;
++          }
++          debugLogger.error(
++            `Sandbox Error: stdin error for '${filePath}': ${
++              err instanceof Error ? err.message : String(err)
++            }`,
++          );
++        });
+ 
+-      child.stdin?.write(content);
+-      child.stdin?.end();
++        child.stdin?.write(content);
++        child.stdin?.end();
+ 
+-      let error = '';
+-      child.stderr?.on('data', (data) => {
+-        error += data.toString();
+-      });
++        let error = '';
++        child.stderr?.on('data', (data) => {
++          error += data.toString();
++        });
+ 
+-      child.on('close', (code) => {
+-        prepared.cleanup?.();
+-        if (code === 0) {
+-          resolve();
+-        } else {
++        child.on('close', (code) => {
++          if (code === 0) {
++            resolve();
++          } else {
++            reject(
++              new Error(
++                `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              ),
++            );
++          }
++        });
++
++        child.on('error', (err) => {
+           reject(
+             new Error(
+-              `Sandbox Error: write_file failed for '${filePath}'. Exit code ${code}. ${error ? 'Details: ' + error : ''}`,
++              `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+             ),
+           );
+-        }
++        });
+       });
+-
+-      child.on('error', (err) => {
+-        prepared.cleanup?.();
+-        reject(
+-          new Error(
+-            `Sandbox Error: Failed to spawn write_file for '${filePath}': ${err.message}`,
+-          ),
+-        );
+-      });
+-    });
++    } finally {
++      prepared.cleanup?.();
++    }
+   }
+ }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/grep.ts /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/grep.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/grep.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/grep.ts	2026-04-17 02:00:33
+@@ -348,25 +348,27 @@
+         }
+       }
+ 
+-      return await new Promise((resolve) => {
+-        const child = spawn(finalCommand, finalArgs, {
+-          stdio: 'ignore',
+-          shell: true,
+-          env: finalEnv,
++      try {
++        return await new Promise((resolve) => {
++          const child = spawn(finalCommand, finalArgs, {
++            stdio: 'ignore',
++            shell: true,
++            env: finalEnv,
++          });
++          child.on('close', (code) => {
++            resolve(code === 0);
++          });
++          child.on('error', (err) => {
++            debugLogger.debug(
++              `[GrepTool] Failed to start process for '${command}':`,
++              err.message,
++            );
++            resolve(false);
++          });
+         });
+-        child.on('close', (code) => {
+-          cleanup?.();
+-          resolve(code === 0);
+-        });
+-        child.on('error', (err) => {
+-          cleanup?.();
+-          debugLogger.debug(
+-            `[GrepTool] Failed to start process for '${command}':`,
+-            err.message,
+-          );
+-          resolve(false);
+-        });
+-      });
++      } finally {
++        cleanup?.();
++      }
+     } catch {
+       return false;
+     }
+diff -urN --ex /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/tool-registry.ts /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts
+--- /tmp/refactor-eq-workdir/cleanroom-v2/24763/packages/core/src/tools/tool-registry.ts	2026-04-06 10:48:02
++++ /tmp/refactor-eq-workdir/bb-merged-24763/packages/core/src/tools/tool-registry.ts	2026-04-17 02:01:03
+@@ -81,82 +81,84 @@
+       cleanupFunc = prepared.cleanup;
+     }
+ 
+-    const child = spawn(finalCommand, finalArgs, {
+-      env: finalEnv,
+-    });
+-    child.stdin.write(JSON.stringify(this.params));
+-    child.stdin.end();
++    try {
++      const child = spawn(finalCommand, finalArgs, {
++        env: finalEnv,
++      });
++      child.stdin.write(JSON.stringify(this.params));
++      child.stdin.end();
+ 
+-    let stdout = '';
+-    let stderr = '';
+-    let error: Error | null = null;
+-    let code: number | null = null;
+-    let signal: NodeJS.Signals | null = null;
++      let stdout = '';
++      let stderr = '';
++      let error: Error | null = null;
++      let code: number | null = null;
++      let signal: NodeJS.Signals | null = null;
+ 
+-    await new Promise<void>((resolve) => {
+-      const onStdout = (data: Buffer) => {
+-        stdout += data?.toString();
+-      };
++      await new Promise<void>((resolve) => {
++        const onStdout = (data: Buffer) => {
++          stdout += data?.toString();
++        };
+ 
+-      const onStderr = (data: Buffer) => {
+-        stderr += data?.toString();
+-      };
++        const onStderr = (data: Buffer) => {
++          stderr += data?.toString();
++        };
+ 
+-      const onError = (err: Error) => {
+-        cleanupFunc?.();
+-        error = err;
+-      };
++        const onError = (err: Error) => {
++          error = err;
++        };
+```
+
+Pick A or B. Brief rationale (1-2 sentences).
+
+Respond ONLY as JSON, no other text:
+{"forced_choice": "A" or "B", "rationale": "..."}
+
+mcp startup: no servers
+codex
+{"forced_choice":"B","rationale":"B is the one I’d approve because it applies the `try...finally` cleanup pattern consistently across the broader set of affected execution paths, which matches the stated goal of guaranteeing sandbox teardown on success, failure, and early abort. A looks more partial from the diff shown, especially around the additional process-execution call sites called out in the PR context."}
+tokens used
+7,054
+{"forced_choice":"B","rationale":"B is the one I’d approve because it applies the `try...finally` cleanup pattern consistently across the broader set of affected execution paths, which matches the stated goal of guaranteeing sandbox teardown on success, failure, and early abort. A looks more partial from the diff shown, especially around the additional process-execution call sites called out in the PR context."}
